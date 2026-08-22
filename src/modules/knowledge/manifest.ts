@@ -7,6 +7,7 @@ export const knowledgeManifest: ModuleManifest = {
   icon: BrainCircuit,
   accent: "var(--color-orchid)",
   nav: { order: 45 },
+  searchable: true,
   commands: [
     {
       id: "knowledge.open",

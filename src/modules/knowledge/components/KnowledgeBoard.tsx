@@ -1,17 +1,19 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { BrainCircuit, Sparkles } from "lucide-react";
+import { BrainCircuit, Search, Sparkles, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { captureKnowledge } from "../actions";
+import type { KnowledgeDuplicate } from "../dedup";
 import type { KnowledgeItem } from "../schema";
 import { KIND_META, STATUS_META } from "./kindMeta";
 
 function CaptureBox() {
   const [pending, startTransition] = useTransition();
+  const [dup, setDup] = useState<KnowledgeDuplicate | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const noteRef = useRef<HTMLInputElement>(null);
 
@@ -21,8 +23,14 @@ function CaptureBox() {
         e.preventDefault();
         const value = inputRef.current?.value.trim();
         if (!value || pending) return;
+        setDup(null);
         startTransition(async () => {
-          await captureKnowledge(value, noteRef.current?.value);
+          const res = await captureKnowledge(value, noteRef.current?.value);
+          if (res.duplicate) {
+            // Already saved — surface the existing item, keep the input.
+            setDup(res.item);
+            return;
+          }
           if (inputRef.current) inputRef.current.value = "";
           if (noteRef.current) noteRef.current.value = "";
         });
@@ -55,6 +63,25 @@ function CaptureBox() {
           {pending ? "capturing…" : "capture"}
         </button>
       </div>
+      {dup && (
+        <div className="mt-2 flex items-center gap-2 rounded-lg border border-solar/25 bg-solar/8 px-3 py-2 text-xs text-ink-dim">
+          <span className="text-solar">Already captured —</span>
+          <Link
+            href={`/m/knowledge/${dup.id}`}
+            className="truncate font-medium text-ink underline decoration-solar/40 underline-offset-2 hover:decoration-solar"
+          >
+            {dup.title ?? dup.input.slice(0, 80)}
+          </Link>
+          <button
+            type="button"
+            onClick={() => setDup(null)}
+            className="ml-auto shrink-0 rounded p-0.5 text-ink-faint transition hover:text-ink"
+            aria-label="Dismiss"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
     </form>
   );
 }
@@ -125,22 +152,102 @@ function ItemCard({ item, index }: { item: KnowledgeItem; index: number }) {
   );
 }
 
+/** All the text of an item we let the search box match against. */
+function haystack(it: KnowledgeItem): string {
+  return [
+    it.title,
+    it.input,
+    it.note,
+    it.kind,
+    it.insight?.summary,
+    ...(it.insight?.keyIdeas ?? []),
+    ...(it.insight?.tags ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function SearchBox({
+  value,
+  onChange,
+  count,
+  total,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  count: number;
+  total: number;
+}) {
+  return (
+    <div className="mb-4 flex items-center gap-2.5 rounded-xl glass px-3.5 py-2 focus-within:glass-edge">
+      <Search className="size-4 shrink-0 text-ink-faint" />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Search your knowledge — title, summary, tags…"
+        className="h-6 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
+      />
+      {value && (
+        <>
+          <span className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+            {count}/{total}
+          </span>
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="shrink-0 rounded p-0.5 text-ink-faint transition hover:text-ink"
+            aria-label="Clear search"
+          >
+            <X className="size-3.5" />
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function KnowledgeBoard({ items }: { items: KnowledgeItem[] }) {
   useLiveEvents(["knowledge_changed"]);
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    const terms = q.split(/\s+/);
+    return items.filter((it) => {
+      const hay = haystack(it);
+      return terms.every((t) => hay.includes(t));
+    });
+  }, [items, query]);
 
   return (
     <div>
       <CaptureBox />
+      {items.length > 0 && (
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          count={filtered.length}
+          total={items.length}
+        />
+      )}
       {items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-white/6 py-16 text-center">
           <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint">
             nothing captured yet — paste something interesting above
           </p>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-white/6 py-16 text-center">
+          <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint">
+            no matches for “{query.trim()}”
+          </p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <AnimatePresence mode="popLayout">
-            {items.map((item, i) => (
+            {filtered.map((item, i) => (
               <ItemCard key={item.id} item={item} index={i} />
             ))}
           </AnimatePresence>

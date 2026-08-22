@@ -4,7 +4,8 @@ import { desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
 import { detectKind } from "./detect";
-import { knowledgeItems } from "./schema";
+import { findDuplicateKnowledge, type KnowledgeDuplicate } from "./dedup";
+import { knowledgeItems, type KnowledgeItem } from "./schema";
 
 export async function listKnowledge() {
   return db
@@ -13,10 +14,22 @@ export async function listKnowledge() {
     .orderBy(desc(knowledgeItems.createdAt));
 }
 
-export async function captureKnowledge(input: string, note?: string) {
+export type CaptureResult =
+  | { duplicate: true; item: KnowledgeDuplicate }
+  | { duplicate: false; item: KnowledgeItem };
+
+export async function captureKnowledge(
+  input: string,
+  note?: string,
+): Promise<CaptureResult> {
   const trimmed = input.trim();
   if (!trimmed) throw new Error("nothing to capture");
   const { kind, url } = detectKind(trimmed);
+
+  // Don't capture the same link/snippet twice — point back at the existing one.
+  const existing = await findDuplicateKnowledge({ input: trimmed, url });
+  if (existing) return { duplicate: true, item: existing };
+
   const [row] = await db
     .insert(knowledgeItems)
     .values({
@@ -31,7 +44,7 @@ export async function captureKnowledge(input: string, note?: string) {
   await sql.notify("knowledge_ingest", row.id);
   revalidatePath("/");
   revalidatePath("/m/knowledge");
-  return row;
+  return { duplicate: false, item: row };
 }
 
 export async function retryKnowledge(id: string) {

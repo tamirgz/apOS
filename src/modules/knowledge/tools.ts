@@ -4,13 +4,14 @@ import type { AiToolDef } from "@/core/modules/types.server";
 import { sql } from "@/core/db/client";
 import { registerRefs, resolveRef } from "@/core/ai/refs";
 import { detectKind } from "./detect";
+import { findDuplicateKnowledge } from "./dedup";
 import { knowledgeItems, KNOWLEDGE_KINDS } from "./schema";
 
 export const knowledgeTools: AiToolDef[] = [
   {
     name: "knowledge.capture",
     description:
-      "Save something into the user's knowledge base (a URL, repo, quote, or text snippet). It will be fetched and AI-enriched automatically.",
+      "Save something into the user's knowledge base (a URL, repo, quote, or text snippet). It will be fetched and AI-enriched automatically. Skips capture if the same link or snippet is already saved (returns the existing item).",
     input: z.object({
       input: z.string().min(1).describe("The URL or text to save"),
       note: z
@@ -19,15 +20,26 @@ export const knowledgeTools: AiToolDef[] = [
         .describe("Why this is interesting / what to look for"),
     }),
     async execute(input, { db }) {
-      const { kind, url } = detectKind(input.input.trim());
+      const trimmed = input.input.trim();
+      const { kind, url } = detectKind(trimmed);
+
+      // Don't capture the same link/snippet twice.
+      const existing = await findDuplicateKnowledge({ input: trimmed, url });
+      if (existing)
+        return {
+          duplicate: true,
+          existing: {
+            id: existing.id,
+            kind: existing.kind,
+            title: existing.title ?? existing.input.slice(0, 80),
+            status: existing.status,
+          },
+          note: "Already in the knowledge base — not captured again.",
+        };
+
       const [row] = await db
         .insert(knowledgeItems)
-        .values({
-          input: input.input.trim(),
-          kind,
-          url,
-          note: input.note ?? null,
-        })
+        .values({ input: trimmed, kind, url, note: input.note ?? null })
         .returning();
       await sql.notify("knowledge_ingest", row.id);
       return { captured: { id: row.id, kind: row.kind } };

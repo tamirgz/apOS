@@ -1,8 +1,9 @@
 "use server";
 
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, or, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
+import type { CommandSearchHit } from "@/core/search/types";
 import { detectKind } from "./detect";
 import { findDuplicateKnowledge, type KnowledgeDuplicate } from "./dedup";
 import { knowledgeItems, type KnowledgeItem } from "./schema";
@@ -17,6 +18,37 @@ export async function listKnowledge() {
 export type CaptureResult =
   | { duplicate: true; item: KnowledgeDuplicate }
   | { duplicate: false; item: KnowledgeItem };
+
+/** Knowledge results for the context-aware ⌘K bar (title/summary/tags match). */
+export async function searchKnowledgeForCommand(
+  query: string,
+): Promise<CommandSearchHit[]> {
+  const q = `%${query.trim()}%`;
+  if (!query.trim()) return [];
+  const rows = await db
+    .select({
+      id: knowledgeItems.id,
+      title: knowledgeItems.title,
+      input: knowledgeItems.input,
+      insight: knowledgeItems.insight,
+    })
+    .from(knowledgeItems)
+    .where(
+      or(
+        dsql`${knowledgeItems.title} ilike ${q}`,
+        dsql`${knowledgeItems.input} ilike ${q}`,
+        dsql`${knowledgeItems.insight}::text ilike ${q}`,
+      ),
+    )
+    .orderBy(desc(knowledgeItems.createdAt))
+    .limit(8);
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title ?? r.input.slice(0, 80),
+    subtitle: r.insight?.summary ?? undefined,
+    href: `/m/knowledge/${r.id}`,
+  }));
+}
 
 export async function captureKnowledge(
   input: string,

@@ -110,6 +110,12 @@ export function CommandBar() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setOpen((o) => !o);
+      } else if (e.key === "Escape") {
+        // Close on Escape. Handled here on a native window listener (not on the
+        // dialog): cmdk stops React's synthetic event propagation, so a handler
+        // on the dialog never sees Escape, but the native event reaches window.
+        // Unconditional close is a harmless no-op when already closed.
+        setOpen(false);
       }
     };
     const onOpen = () => setOpen(true);

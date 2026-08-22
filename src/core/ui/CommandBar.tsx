@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -16,6 +16,8 @@ import { modules } from "@/modules/registry";
 import { captureToInbox } from "@/modules/inbox/actions";
 import { createTask } from "@/modules/tasks/actions";
 import { createNote } from "@/modules/notes/actions";
+import { searchModule } from "@/core/search/commandSearch";
+import type { CommandSearchHit } from "@/core/search/types";
 import { ChatMessages, useChat } from "./chat";
 import { cn } from "./cn";
 
@@ -102,8 +104,34 @@ export function CommandBar() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"commands" | "chat">("commands");
   const [search, setSearch] = useState("");
+  const [results, setResults] = useState<CommandSearchHit[]>([]);
   const router = useRouter();
+  const pathname = usePathname();
   const chat = useChat();
+
+  // Context-aware search: on a searchable module's page, ⌘K searches that
+  // module's own content. `/m/knowledge` and `/m/knowledge/<id>` → knowledge.
+  const activeModule = useMemo(() => {
+    const id = pathname?.match(/^\/m\/([^/]+)/)?.[1];
+    return id ? modules.find((m) => m.id === id && m.searchable) : undefined;
+  }, [pathname]);
+
+  useEffect(() => {
+    const term = search.trim();
+    if (!open || !activeModule || !term) {
+      setResults([]);
+      return;
+    }
+    const id = activeModule.id;
+    const t = setTimeout(async () => {
+      try {
+        setResults(await searchModule(id, term));
+      } catch {
+        setResults([]);
+      }
+    }, 180);
+    return () => clearTimeout(t);
+  }, [open, activeModule, search]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -257,6 +285,41 @@ export function CommandBar() {
                       chat
                     </span>
                   </Command.Item>
+
+                  {activeModule && results.length > 0 && (
+                    <Command.Group
+                      heading={`In ${activeModule.title}`}
+                      className="mt-1 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-[9px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.25em] [&_[cmdk-group-heading]]:text-ink-faint"
+                    >
+                      {results.map((r) => {
+                        const Icon = activeModule.icon;
+                        return (
+                          <Command.Item
+                            key={r.id}
+                            value={`ctxsearch-${r.id}`}
+                            forceMount
+                            onSelect={() => go(r.href)}
+                            className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink-dim transition data-[selected=true]:bg-white/6 data-[selected=true]:text-ink"
+                          >
+                            <Icon
+                              className="size-4 shrink-0"
+                              style={{ color: activeModule.accent }}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-ink">
+                                {r.title}
+                              </span>
+                              {r.subtitle && (
+                                <span className="block truncate text-xs text-ink-faint">
+                                  {r.subtitle}
+                                </span>
+                              )}
+                            </span>
+                          </Command.Item>
+                        );
+                      })}
+                    </Command.Group>
+                  )}
 
                   <Command.Group
                     heading="Navigate"

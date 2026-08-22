@@ -30,4 +30,10 @@ export interface ModuleManifest {
   nav: { order: number; group?: string; external?: boolean };
   /** ⌘K entries contributed by this module. */
   commands: ModuleCommand[];
+  /**
+   * When true, the ⌘K bar offers context-aware search of this module's content
+   * while you're on its page — dispatched via `searchModule(id, query)`. Wire a
+   * case there for the module before enabling this.
+   */
+  searchable?: boolean;
 }

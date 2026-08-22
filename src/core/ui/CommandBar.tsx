@@ -286,17 +286,24 @@ export function CommandBar() {
                     </span>
                   </Command.Item>
 
+                  {/* Context results are rendered as TOP-LEVEL items, not in a
+                      Command.Group: cmdk hides a whole group when it thinks the
+                      group has no matching items, and because these arrive
+                      asynchronously (after the server call), cmdk had already
+                      marked an empty group hidden and doesn't re-evaluate it. As
+                      top-level items — like Ask AI — each shows on its own, and
+                      folding the query into `value` keeps them past the filter. */}
                   {activeModule && results.length > 0 && (
-                    <Command.Group
-                      heading={`In ${activeModule.title}`}
-                      className="mt-1 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-[9px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.25em] [&_[cmdk-group-heading]]:text-ink-faint"
-                    >
+                    <>
+                      <div className="mt-1 px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.25em] text-ink-faint">
+                        In {activeModule.title}
+                      </div>
                       {results.map((r) => {
                         const Icon = activeModule.icon;
                         return (
                           <Command.Item
                             key={r.id}
-                            value={`ctxsearch-${r.id}`}
+                            value={`${search} ${r.title} ${r.id}`}
                             forceMount
                             onSelect={() => go(r.href)}
                             className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink-dim transition data-[selected=true]:bg-white/6 data-[selected=true]:text-ink"
@@ -318,7 +325,7 @@ export function CommandBar() {
                           </Command.Item>
                         );
                       })}
-                    </Command.Group>
+                    </>
                   )}
 
                   <Command.Group

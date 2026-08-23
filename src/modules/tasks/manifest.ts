@@ -7,6 +7,7 @@ export const tasksManifest: ModuleManifest = {
   icon: CheckSquare,
   accent: "var(--color-ion)",
   nav: { order: 10 },
+  searchable: true,
   commands: [
     {
       id: "tasks.open",

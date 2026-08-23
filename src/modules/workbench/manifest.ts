@@ -7,6 +7,7 @@ export const workbenchManifest: ModuleManifest = {
   icon: Hammer,
   accent: "var(--color-plasma)",
   nav: { order: 15 },
+  searchable: true,
   commands: [
     {
       id: "workbench.open",

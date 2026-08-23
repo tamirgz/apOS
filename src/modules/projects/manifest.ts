@@ -7,6 +7,7 @@ export const projectsManifest: ModuleManifest = {
   icon: FolderKanban,
   accent: "var(--color-solar)",
   nav: { order: 20 },
+  searchable: true,
   commands: [
     {
       id: "projects.open",

@@ -7,6 +7,7 @@ export const notesManifest: ModuleManifest = {
   icon: NotebookPen,
   accent: "var(--color-violet)",
   nav: { order: 30 },
+  searchable: true,
   commands: [
     {
       id: "notes.open",

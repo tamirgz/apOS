@@ -50,6 +50,48 @@ export const THEMES: ThemeDef[] = [
     tagline: "Flat & minimal — solid panels, no glow, quiet and focused.",
     swatch: ["#15171c", "#272c38", "#7c8cf8", "#e0a458"],
   },
+  {
+    id: "ember",
+    attr: "ember",
+    label: "Ember",
+    tagline: "Warm dark — molten copper & amber on espresso, soft ember glow.",
+    swatch: ["#0c0705", "#26160d", "#ff8a3d", "#ffd08a"],
+  },
+  {
+    id: "verdant",
+    attr: "verdant",
+    label: "Verdant",
+    tagline: "Forest dark — emerald & lime on deep moss, calm and organic.",
+    swatch: ["#05100b", "#103024", "#34d399", "#a3e635"],
+  },
+  {
+    id: "onyx",
+    attr: "onyx",
+    label: "Onyx",
+    tagline: "True black — OLED-deep, high contrast, a single ice-blue accent.",
+    swatch: ["#000000", "#16181d", "#7cc4ff", "#e2e8f0"],
+  },
+  {
+    id: "aegis",
+    attr: "aegis",
+    label: "Aegis",
+    tagline: "Holographic HUD — electric cyan & cobalt on deep-space navy.",
+    swatch: ["#030812", "#0f2540", "#38bdf8", "#22d3ee"],
+  },
+  {
+    id: "reactor",
+    attr: "reactor",
+    label: "Reactor",
+    tagline: "Red-alert tactical — crimson & orange on gunmetal.",
+    swatch: ["#08090c", "#1c2027", "#ff3b47", "#ff8a3d"],
+  },
+  {
+    id: "helios",
+    attr: "helios",
+    label: "Helios",
+    tagline: "Command deck — luminous gold & teal on graphite black.",
+    swatch: ["#08080a", "#1c1c22", "#f5c542", "#4fd1c5"],
+  },
 ];
 
 export const THEME_IDS = THEMES.map((t) => t.id);

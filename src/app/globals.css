@@ -392,3 +392,193 @@ body {
     radial-gradient(46% 38% at 74% 82%, rgb(255 95 168 / 0.1), transparent 70%),
     radial-gradient(30% 26% at 32% 88%, rgb(167 139 250 / 0.1), transparent 70%);
 }
+
+/* ── Ember — warm dark: molten copper & amber on espresso, ember glow ────── */
+:root[data-theme="ember"] {
+  --color-void: #0c0705;
+  --color-abyss: #150c06;
+  --color-panel: #1c1109;
+  --color-raise: #26160d;
+  --color-ink: #f4e9df;
+  --color-ink-dim: #bda593;
+  --color-ink-faint: #7c675a;
+  --color-plasma: #ff8a3d;
+  --color-plasma-dim: #c85f22;
+  --color-solar: #ffd08a;
+  --color-ion: #ffb454;
+  --color-flare: #ff6b6b;
+  --color-violet: #e0a06a;
+  --color-orchid: #ffc59e;
+  --color-gold: #ffd43b;
+}
+[data-theme="ember"] .bg-aurora {
+  background:
+    radial-gradient(42% 34% at 18% 22%, rgb(255 138 61 / 0.14), transparent 70%),
+    radial-gradient(38% 30% at 82% 12%, rgb(255 180 84 / 0.1), transparent 70%),
+    radial-gradient(46% 38% at 74% 82%, rgb(255 107 107 / 0.09), transparent 70%),
+    radial-gradient(30% 26% at 32% 88%, rgb(255 208 138 / 0.08), transparent 70%);
+}
+[data-theme="ember"] .bg-grid {
+  background-image:
+    linear-gradient(rgb(255 138 61 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 138 61 / 0.045) 1px, transparent 1px);
+}
+
+/* ── Verdant — forest dark: emerald & lime on deep moss ──────────────────── */
+:root[data-theme="verdant"] {
+  --color-void: #05100b;
+  --color-abyss: #071a12;
+  --color-panel: #0b241a;
+  --color-raise: #103024;
+  --color-ink: #e6f5ec;
+  --color-ink-dim: #9db9a9;
+  --color-ink-faint: #5c7568;
+  --color-plasma: #34d399;
+  --color-plasma-dim: #159267;
+  --color-solar: #a3e635;
+  --color-ion: #22d3ee;
+  --color-flare: #fb7185;
+  --color-violet: #86efac;
+  --color-orchid: #a7f3d0;
+  --color-gold: #d9f99d;
+}
+[data-theme="verdant"] .bg-aurora {
+  background:
+    radial-gradient(42% 34% at 18% 22%, rgb(52 211 153 / 0.14), transparent 70%),
+    radial-gradient(38% 30% at 82% 12%, rgb(163 230 53 / 0.1), transparent 70%),
+    radial-gradient(46% 38% at 74% 82%, rgb(34 211 238 / 0.09), transparent 70%),
+    radial-gradient(30% 26% at 32% 88%, rgb(134 239 172 / 0.08), transparent 70%);
+}
+[data-theme="verdant"] .bg-grid {
+  background-image:
+    linear-gradient(rgb(52 211 153 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(52 211 153 / 0.045) 1px, transparent 1px);
+}
+
+/* ── Onyx — true black: OLED-deep, high contrast, ice-blue accent ────────── */
+:root[data-theme="onyx"] {
+  --color-void: #000000;
+  --color-abyss: #060608;
+  --color-panel: #0d0e11;
+  --color-raise: #16181d;
+  --color-ink: #f2f4f8;
+  --color-ink-dim: #9aa0ad;
+  --color-ink-faint: #565c68;
+  --color-plasma: #7cc4ff;
+  --color-plasma-dim: #3b82f6;
+  --color-solar: #cfe0ff;
+  --color-ion: #a5c8ee;
+  --color-flare: #f472b6;
+  --color-violet: #b0c4de;
+  --color-orchid: #d8e3f0;
+  --color-gold: #e2e8f0;
+}
+[data-theme="onyx"] .glass {
+  border: 1px solid color-mix(in oklab, var(--color-ink) 10%, transparent);
+}
+[data-theme="onyx"] .text-glow {
+  text-shadow: 0 0 12px color-mix(in oklab, var(--color-plasma) 40%, transparent);
+}
+[data-theme="onyx"] .bg-aurora {
+  background:
+    radial-gradient(46% 38% at 22% 18%, rgb(124 196 255 / 0.08), transparent 72%),
+    radial-gradient(38% 32% at 82% 86%, rgb(124 196 255 / 0.05), transparent 72%);
+}
+[data-theme="onyx"] .bg-grid {
+  background-image:
+    linear-gradient(rgb(124 196 255 / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(124 196 255 / 0.035) 1px, transparent 1px);
+}
+
+/* ── Aegis — holographic HUD: electric cyan & cobalt on deep-space navy ──── */
+:root[data-theme="aegis"] {
+  --color-void: #030812;
+  --color-abyss: #05101f;
+  --color-panel: #0a1a2e;
+  --color-raise: #0f2540;
+  --color-ink: #e6f3ff;
+  --color-ink-dim: #8fb0cc;
+  --color-ink-faint: #4d6a86;
+  --color-plasma: #38bdf8;
+  --color-plasma-dim: #0ea5e9;
+  --color-solar: #22d3ee;
+  --color-ion: #60a5fa;
+  --color-flare: #f472b6;
+  --color-violet: #818cf8;
+  --color-orchid: #93c5fd;
+  --color-gold: #7dd3fc;
+}
+[data-theme="aegis"] .bg-aurora {
+  background:
+    radial-gradient(42% 34% at 18% 22%, rgb(56 189 248 / 0.15), transparent 70%),
+    radial-gradient(38% 30% at 82% 12%, rgb(96 165 250 / 0.11), transparent 70%),
+    radial-gradient(46% 38% at 74% 82%, rgb(34 211 238 / 0.1), transparent 70%),
+    radial-gradient(30% 26% at 32% 88%, rgb(129 140 248 / 0.08), transparent 70%);
+}
+[data-theme="aegis"] .bg-grid {
+  background-image:
+    linear-gradient(rgb(56 189 248 / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(56 189 248 / 0.05) 1px, transparent 1px);
+}
+
+/* ── Reactor — red-alert tactical: crimson & orange on gunmetal ──────────── */
+:root[data-theme="reactor"] {
+  --color-void: #08090c;
+  --color-abyss: #0d0f13;
+  --color-panel: #14171c;
+  --color-raise: #1c2027;
+  --color-ink: #f2eef0;
+  --color-ink-dim: #a9a2a6;
+  --color-ink-faint: #5f585c;
+  --color-plasma: #ff3b47;
+  --color-plasma-dim: #d61f2b;
+  --color-solar: #ff8a3d;
+  --color-ion: #ffb454;
+  --color-flare: #ff6b81;
+  --color-violet: #ff7a90;
+  --color-orchid: #ffb0b8;
+  --color-gold: #ffd23f;
+}
+[data-theme="reactor"] .bg-aurora {
+  background:
+    radial-gradient(42% 34% at 18% 22%, rgb(255 59 71 / 0.13), transparent 70%),
+    radial-gradient(38% 30% at 82% 12%, rgb(255 138 61 / 0.1), transparent 70%),
+    radial-gradient(46% 38% at 74% 82%, rgb(255 107 129 / 0.08), transparent 70%),
+    radial-gradient(30% 26% at 32% 88%, rgb(255 180 84 / 0.07), transparent 70%);
+}
+[data-theme="reactor"] .bg-grid {
+  background-image:
+    linear-gradient(rgb(255 59 71 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 59 71 / 0.04) 1px, transparent 1px);
+}
+
+/* ── Helios — command deck: luminous gold & teal on graphite black ───────── */
+:root[data-theme="helios"] {
+  --color-void: #08080a;
+  --color-abyss: #0e0e11;
+  --color-panel: #15151a;
+  --color-raise: #1c1c22;
+  --color-ink: #fbf6e6;
+  --color-ink-dim: #b3ab93;
+  --color-ink-faint: #6b6552;
+  --color-plasma: #f5c542;
+  --color-plasma-dim: #c99a1f;
+  --color-solar: #ffe08a;
+  --color-ion: #4fd1c5;
+  --color-flare: #ff6b81;
+  --color-violet: #ffd98a;
+  --color-orchid: #ffe9b0;
+  --color-gold: #ffd43b;
+}
+[data-theme="helios"] .bg-aurora {
+  background:
+    radial-gradient(42% 34% at 18% 22%, rgb(245 197 66 / 0.13), transparent 70%),
+    radial-gradient(38% 30% at 82% 12%, rgb(255 224 138 / 0.09), transparent 70%),
+    radial-gradient(46% 38% at 74% 82%, rgb(79 209 197 / 0.09), transparent 70%),
+    radial-gradient(30% 26% at 32% 88%, rgb(255 212 59 / 0.07), transparent 70%);
+}
+[data-theme="helios"] .bg-grid {
+  background-image:
+    linear-gradient(rgb(245 197 66 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(245 197 66 / 0.045) 1px, transparent 1px);
+}

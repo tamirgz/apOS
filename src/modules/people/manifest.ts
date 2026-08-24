@@ -6,7 +6,8 @@ export const peopleManifest: ModuleManifest = {
   title: "People",
   icon: Users,
   accent: "var(--color-ion)",
-  nav: { order: 25 }, // right after Projects
+  nav: { order: 25 },
+  searchable: true, // right after Projects
   commands: [
     {
       id: "people.open",

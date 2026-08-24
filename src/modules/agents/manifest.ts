@@ -7,6 +7,7 @@ export const agentsManifest: ModuleManifest = {
   icon: Bot,
   accent: "var(--color-flare)",
   nav: { order: 50 },
+  searchable: true,
   commands: [
     {
       id: "agents.open",

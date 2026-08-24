@@ -7,6 +7,7 @@ export const calendarManifest: ModuleManifest = {
   icon: CalendarDays,
   accent: "var(--color-plasma)",
   nav: { order: 15 },
+  searchable: true,
   commands: [
     {
       id: "calendar.open",

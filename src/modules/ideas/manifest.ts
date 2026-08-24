@@ -7,6 +7,7 @@ export const ideasManifest: ModuleManifest = {
   icon: Lightbulb,
   accent: "var(--color-gold)",
   nav: { order: 40 },
+  searchable: true,
   commands: [
     {
       id: "ideas.open",

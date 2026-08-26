@@ -23,7 +23,9 @@ export const TIMEOUTS: Record<TaskType, number> = {
 export const TYPE_DEFAULT_EXECUTOR: Record<TaskType, string> = {
   research: "claude-headless",
   code: "claude-headless",
-  "code-local": "opencode",
+  // Droid won the local-executor benchmark: equal correctness to opencode/qwen
+  // on the same nvfp4 model, ~2–2.5× faster. opencode/qwen stay selectable.
+  "code-local": "droid",
   docs: "native",
   custom: "claude-headless",
 };

@@ -296,12 +296,42 @@ async function build(fingerprint: string): Promise<AtlasBlob> {
     );
     rows.forEach((r, i) => (clusters[r.id] = assign[i]));
 
+    // Gravitational islands: expand the cluster centroids outward from the map
+    // centre while keeping each cluster's internal shape AND SIZE (no
+    // re-normalise — that would crush the clusters back to points). Gaps open
+    // between the groups — the Obsidian look — and the cross-cluster edges bridge
+    // them.
+    let gcx = 0;
+    let gcy = 0;
+    for (const r of rows) {
+      gcx += positions[r.id][0];
+      gcy += positions[r.id][1];
+    }
+    gcx /= rows.length || 1;
+    gcy /= rows.length || 1;
+    const EXPAND = 1.7; // >1 opens space between islands (1 = packed disc)
+    rows.forEach((r, i) => {
+      const c = cent[assign[i]];
+      const ncx = gcx + (c.x - gcx) * EXPAND;
+      const ncy = gcy + (c.y - gcy) * EXPAND;
+      positions[r.id] = [
+        ncx + (positions[r.id][0] - c.x),
+        ncy + (positions[r.id][1] - c.y),
+      ];
+    });
+
     const raw = cent
-      .map((c, k) => {
+      .map((_c, k) => {
         const members = rows.filter((_, i) => assign[i] === k);
         if (members.length < MIN_REGION) return null;
-        const cx = c.x;
-        const cy = c.y;
+        let mx = 0;
+        let my = 0;
+        for (const r of members) {
+          mx += positions[r.id][0];
+          my += positions[r.id][1];
+        }
+        const cx = mx / members.length;
+        const cy = my / members.length;
         const dists = members.map((r) =>
           Math.hypot(positions[r.id][0] - cx, positions[r.id][1] - cy),
         );
@@ -314,7 +344,7 @@ async function build(fingerprint: string): Promise<AtlasBlob> {
           i: k,
           cx,
           cy,
-          r: Math.max(24, pct(dists, 80)),
+          r: Math.max(16, pct(dists, 80)),
           kind: modeOf(members.map((m) => m.kind)),
           count: members.length,
           titles: near,

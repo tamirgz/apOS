@@ -55,30 +55,53 @@ const clusterColor = (id: number | null | undefined) =>
     : CLUSTER_PALETTE[id % CLUSTER_PALETTE.length];
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// Topic labels for the semantic map (contiguous colour regions carry the rest —
-// node colour defines each territory, no hard outlines).
-function buildAtlasObjects(
-  THREE: any,
-  SpriteText: any,
-  scene: any,
-  regions: OrbitRegion[],
-  color: (id: number) => string,
-) {
-  const objs: any[] = [];
-  for (const r of regions) {
-    const lbl = new SpriteText(r.label);
-    lbl.color = color(r.id);
-    lbl.textHeight = 11;
-    lbl.fontWeight = "700";
-    lbl.backgroundColor = "rgba(6,10,16,0.55)";
-    lbl.padding = 2;
-    lbl.position.set(r.cx, r.cy, 4);
-    scene.add(lbl);
-    objs.push(lbl);
-  }
-  return objs;
+// A d3 force for the live map: pull same-cluster nodes toward their cluster's
+// running centroid (cohesion) and push different-cluster centroids apart
+// (separation). Together with charge repulsion this makes the colour groups
+// settle into Obsidian-style islands instead of one bulk.
+function clusterForce(cohesion = 0.9, separation = 60) {
+  let nodes: any[] = [];
+  const force = (alpha: number) => {
+    const cen = new Map<number, { x: number; y: number; n: number }>();
+    for (const n of nodes) {
+      if (n.cluster == null || n.cluster < 0) continue;
+      const c = cen.get(n.cluster) ?? { x: 0, y: 0, n: 0 };
+      c.x += n.x;
+      c.y += n.y;
+      c.n++;
+      cen.set(n.cluster, c);
+    }
+    for (const c of cen.values()) {
+      c.x /= c.n;
+      c.y /= c.n;
+    }
+    for (const n of nodes) {
+      if (n.cluster == null || n.cluster < 0) continue;
+      const own = cen.get(n.cluster)!;
+      // cohesion toward own centroid
+      n.vx += (own.x - n.x) * cohesion * alpha;
+      n.vy += (own.y - n.y) * cohesion * alpha;
+      // separation from other centroids
+      for (const [cid, c] of cen) {
+        if (cid === n.cluster) continue;
+        const dx = n.x - c.x;
+        const dy = n.y - c.y;
+        const d2 = dx * dx + dy * dy + 1;
+        const f = (separation * separation) / d2;
+        n.vx += (dx / Math.sqrt(d2)) * f * alpha;
+        n.vy += (dy / Math.sqrt(d2)) * f * alpha;
+      }
+    }
+  };
+  (force as any).initialize = (n: any[]) => {
+    nodes = n;
+  };
+  return force;
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// Remove any scene sprites we added (labels now live in the HTML overlay).
 function clearAtlasObjects(scene: any, objs: any[]) {
   for (const o of objs) {
     scene.remove(o);
@@ -417,21 +440,25 @@ export function OrbitGraph({ data }: { data: Graph }) {
     const layoutChanged = lastLayoutMode.current !== mode;
     const visible = allNodes.filter((n) => !hidden.has(n.kind));
 
-    if (semantic) {
-      // Flat 2D embedding map: pin every node onto the z = 0 plane at its
-      // projection coordinate.
+    if (semantic && layoutChanged) {
+      // Entering the LIVE 2D map: seed from the atlas positions (a good start),
+      // but DON'T pin — physics lays it out live (draggable, self-organising).
       for (const n of allNodes) {
+        n.fx = undefined;
+        n.fy = undefined;
+        n.fz = undefined;
         if (n.mx != null) {
-          n.fx = n.mx;
-          n.fy = n.my ?? 0;
-          n.fz = 0;
+          n.x = n.mx;
+          n.y = n.my ?? 0;
         }
+        n.z = 0;
       }
+    } else if (semantic) {
+      // Filter toggle on the live map: let physics keep running (Obsidian-style),
+      // no reseed, no freeze.
     } else if (layoutChanged) {
       // Entering constellation: release the pins and re-seed a small random 3D
-      // position for every node. Coming from the flat 2D map they all sit at
-      // z = 0, and with zero z-variance the symmetric forces can never lift them
-      // off the plane — so the sim would stay flat unless we seed the spread.
+      // position for every node so the symmetric forces have z-variance to work.
       for (const n of allNodes) {
         n.fx = undefined;
         n.fy = undefined;
@@ -442,8 +469,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
       }
     } else {
       // Filter toggle within constellation: FREEZE each node where it currently
-      // sits (graphData() re-warms the sim, which would otherwise push nodes
-      // apart and shrink the whole view every time a kind is toggled).
+      // sits (graphData() re-warms the sim, which would otherwise re-scatter it).
       for (const n of allNodes) {
         if (n.x != null) {
           n.fx = n.x;
@@ -473,28 +499,45 @@ export function OrbitGraph({ data }: { data: Graph }) {
     // Only reshape the camera/controls (and the atlas overlay) on an actual mode
     // switch — never on a filter toggle.
     if (layoutChanged) {
-      // Semantic overlay: soft topic territories + labels. Rebuild on entry,
-      // remove entirely in constellation.
+      // Labels live in the HTML overlay now (they follow the live physics), so
+      // clear any leftover scene sprites.
       const scene = g.scene?.();
-      const libs = libsRef.current;
       if (scene) {
         clearAtlasObjects(scene, atlasObjsRef.current);
-        atlasObjsRef.current =
-          semantic && libs
-            ? buildAtlasObjects(libs.THREE, libs.SpriteText, scene, data.regions, clusterColor)
-            : [];
+        atlasObjsRef.current = [];
       }
       // Toggle hub labels (accessor reads modeRef): on in constellation, off here.
       g.nodeThreeObject(g.nodeThreeObject());
 
       const c = g.controls();
       if (semantic) {
-        // Lock to a flat top-down 2D map: no rotation, left-drag pans.
+        // LIVE 2D graph (Obsidian-style): flatten the sim to a plane, add the
+        // cluster cohesion/separation force so the kNN-linked semantic groups
+        // settle into colour islands. Top-down, no rotation, left-drag pans;
+        // node drag is on by default.
+        try {
+          g.numDimensions(2);
+          g.d3Force("charge")?.strength(-45);
+          g.d3Force("link")?.distance(20);
+          g.d3Force("cluster", clusterForce(0.35, 55));
+        } catch {
+          /* forces not ready */
+        }
         c.autoRotate = false;
         c.enableRotate = false;
         c.mouseButtons.LEFT = 2; // THREE.MOUSE.PAN
-        g.cameraPosition({ x: 0, y: 0, z: 600 }, { x: 0, y: 0, z: 0 }, 0);
+        g.cameraPosition({ x: 0, y: 0, z: 620 }, { x: 0, y: 0, z: 0 }, 0);
+        g.d3ReheatSimulation?.();
       } else {
+        // Back to the live 3D constellation.
+        try {
+          g.numDimensions(3);
+          g.d3Force("cluster", null);
+          g.d3Force("charge")?.strength(-32);
+          g.d3Force("link")?.distance(26);
+        } catch {
+          /* forces not ready */
+        }
         c.autoRotate = true;
         c.enableRotate = true;
         c.mouseButtons.LEFT = 0; // THREE.MOUSE.ROTATE
@@ -502,11 +545,11 @@ export function OrbitGraph({ data }: { data: Graph }) {
       }
       setTimeout(() => {
         try {
-          g.zoomToFit(600, semantic ? 60 : 50);
+          g.zoomToFit(700, semantic ? 70 : 50);
         } catch {
           /* ignore */
         }
-      }, semantic ? 300 : 1200);
+      }, semantic ? 1400 : 1200);
     }
     lastLayoutMode.current = mode;
   }, [allNodes, data.links, data.regions, regionMembers, hidden, ready, mode]);
@@ -520,9 +563,10 @@ export function OrbitGraph({ data }: { data: Graph }) {
     g.nodeThreeObject(g.nodeThreeObject());
   }, [query, semanticIds, activeRegion, activeBridge, ready]);
 
-  // Per-node labels that fade in as you zoom into the map: on the flat 2D view,
-  // when the camera drops below a height threshold, label the most-connected
-  // items currently in view (an HTML overlay, repositioned on pan/zoom).
+  // Labels overlay that FOLLOWS the live physics: cluster/topic labels at each
+  // group's live centroid when zoomed out, per-node labels for the items in view
+  // when zoomed in. Driven by the engine tick (so labels track moving nodes) and
+  // by pan/zoom.
   useEffect(() => {
     const g = graphRef.current;
     const layer = labelLayerRef.current;
@@ -535,42 +579,72 @@ export function OrbitGraph({ data }: { data: Graph }) {
     const render = () => {
       raf = 0;
       const camZ = g.camera()?.position?.z ?? 999;
-      // Only when zoomed in; fade the cap up the closer you get.
-      if (camZ > 360) {
-        layer.innerHTML = "";
-        return;
-      }
-      const cap = camZ < 160 ? 80 : camZ < 260 ? 48 : 26;
       const w = layer.clientWidth;
       const h = layer.clientHeight;
-      const cand: { n: GNode; x: number; y: number }[] = [];
-      for (const n of g.graphData().nodes as GNode[]) {
-        if (n.x == null) continue;
-        const s = g.graph2ScreenCoords(n.x, n.y ?? 0, n.z ?? 0);
-        if (!s || s.x < 0 || s.x > w || s.y < 0 || s.y > h) continue;
-        cand.push({ n, x: s.x, y: s.y });
+      const nodes = g.graphData().nodes as GNode[];
+      let html = "";
+      if (camZ > 300) {
+        // Overview → topic labels at each cluster's live centroid.
+        const cen = new Map<number, { x: number; y: number; n: number }>();
+        for (const n of nodes) {
+          const rid = n.cluster;
+          if (rid == null || rid < 0 || n.x == null) continue;
+          const c = cen.get(rid) ?? { x: 0, y: 0, n: 0 };
+          c.x += n.x;
+          c.y += n.y ?? 0;
+          c.n++;
+          cen.set(rid, c);
+        }
+        for (const [rid, c] of cen) {
+          const s = g.graph2ScreenCoords(c.x / c.n, c.y / c.n, 0);
+          if (!s) continue;
+          html += `<div style="position:absolute;left:${s.x.toFixed(0)}px;top:${s.y.toFixed(
+            0,
+          )}px;transform:translate(-50%,-50%);font:700 12px/1.2 ui-sans-serif,system-ui;color:${clusterColor(
+            rid,
+          )};text-shadow:0 1px 4px #000,0 0 3px #000;white-space:nowrap;padding:1px 6px;background:rgba(6,10,16,.5);border-radius:6px">${esc(
+            regionLabel(rid),
+          )}</div>`;
+        }
+      } else {
+        // Zoomed in → per-node labels for the most-connected items in view.
+        const cap = camZ < 150 ? 90 : camZ < 230 ? 50 : 28;
+        const cand: { n: GNode; x: number; y: number }[] = [];
+        for (const n of nodes) {
+          if (n.x == null) continue;
+          const s = g.graph2ScreenCoords(n.x, n.y ?? 0, 0);
+          if (!s || s.x < 0 || s.x > w || s.y < 0 || s.y > h) continue;
+          cand.push({ n, x: s.x, y: s.y });
+        }
+        cand.sort((a, b) => (b.n.val ?? 0) - (a.n.val ?? 0));
+        html = cand
+          .slice(0, cap)
+          .map(
+            ({ n, x, y }) =>
+              `<div style="position:absolute;left:${x.toFixed(0)}px;top:${y.toFixed(
+                0,
+              )}px;transform:translate(-50%,-150%);font:10px/1.2 ui-sans-serif,system-ui;color:#dce7f3;text-shadow:0 1px 3px #000,0 0 2px #000;white-space:nowrap">${esc(
+                n.title.slice(0, 32),
+              )}</div>`,
+          )
+          .join("");
       }
-      cand.sort((a, b) => (b.n.val ?? 0) - (a.n.val ?? 0));
-      layer.innerHTML = cand
-        .slice(0, cap)
-        .map(
-          ({ n, x, y }) =>
-            `<div style="position:absolute;left:${x.toFixed(0)}px;top:${y.toFixed(
-              0,
-            )}px;transform:translate(-50%,-150%);font:10px/1.2 ui-sans-serif,system-ui;color:#dce7f3;text-shadow:0 1px 3px #000,0 0 2px #000;white-space:nowrap">${esc(
-              n.title.slice(0, 32),
-            )}</div>`,
-        )
-        .join("");
+      layer.innerHTML = html;
     };
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(render);
     };
     const controls = g.controls();
     controls.addEventListener("change", schedule);
+    g.onEngineTick(schedule); // follow the live simulation
     schedule();
     return () => {
       controls.removeEventListener("change", schedule);
+      try {
+        g.onEngineTick(() => {});
+      } catch {
+        /* ignore */
+      }
       if (raf) cancelAnimationFrame(raf);
       layer.innerHTML = "";
     };
@@ -590,33 +664,53 @@ export function OrbitGraph({ data }: { data: Graph }) {
     if (g) g.cameraPosition({ x: cx, y: cy, z }, { x: cx, y: cy, z: 0 }, 800);
   };
 
+  // A cluster's live centroid (from the running physics), for framing.
+  const liveCentroid = (rid: number): { x: number; y: number } | null => {
+    const g = graphRef.current;
+    if (!g) return null;
+    let x = 0;
+    let y = 0;
+    let n = 0;
+    for (const nd of g.graphData().nodes as GNode[]) {
+      if (nd.cluster === rid && nd.x != null) {
+        x += nd.x;
+        y += nd.y ?? 0;
+        n++;
+      }
+    }
+    return n ? { x: x / n, y: y / n } : null;
+  };
+
   // Focus a topic: highlight its members, frame it (switching to the map first).
   const focusTopic = (rid: number) => {
-    const r = data.regions.find((x) => x.id === rid);
     setActiveBridge(null);
     setActiveRegion((cur) => (cur === rid ? null : rid));
-    if (!r) return;
-    const doFrame = () => frameAt(r.cx, r.cy, Math.max(220, r.r * 3));
+    const doFrame = () => {
+      const c = liveCentroid(rid);
+      if (c) frameAt(c.x, c.y, 260);
+    };
     if (mode !== "semantic") {
       setMode("semantic");
-      setTimeout(doFrame, 700);
+      setTimeout(doFrame, 1600);
     } else doFrame();
   };
 
-  // Focus a bridge: light up the cross-links, frame both territories.
+  // Focus a bridge: light up the cross-links, frame both groups.
   const focusBridge = (key: string, a: number, b: number) => {
-    const ra = data.regions.find((x) => x.id === a);
-    const rb = data.regions.find((x) => x.id === b);
     setActiveRegion(null);
     setActiveBridge((cur) => (cur === key ? null : key));
-    if (!ra || !rb) return;
-    const cx = (ra.cx + rb.cx) / 2;
-    const cy = (ra.cy + rb.cy) / 2;
-    const span = Math.hypot(ra.cx - rb.cx, ra.cy - rb.cy) + Math.max(ra.r, rb.r) * 2;
-    const doFrame = () => frameAt(cx, cy, Math.max(260, span * 1.1));
+    const doFrame = () => {
+      const ca = liveCentroid(a);
+      const cb = liveCentroid(b);
+      if (!ca || !cb) return;
+      const cx = (ca.x + cb.x) / 2;
+      const cy = (ca.y + cb.y) / 2;
+      const span = Math.hypot(ca.x - cb.x, ca.y - cb.y);
+      frameAt(cx, cy, Math.max(300, span * 1.4));
+    };
     if (mode !== "semantic") {
       setMode("semantic");
-      setTimeout(doFrame, 700);
+      setTimeout(doFrame, 1600);
     } else doFrame();
   };
 

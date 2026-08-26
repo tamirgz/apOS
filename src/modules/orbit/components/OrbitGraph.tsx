@@ -149,6 +149,8 @@ type GNode = OrbitNode & {
 export function OrbitGraph({ data }: { data: Graph }) {
   const router = useRouter();
   const holderRef = useRef<HTMLDivElement>(null);
+  // Overlay for per-node labels that appear when you zoom into the map.
+  const labelLayerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null);
   // Three.js constructors, stashed from the dynamic import for the data effect.
@@ -508,9 +510,9 @@ export function OrbitGraph({ data }: { data: Graph }) {
     // The long cross-map links are the hairball; position already shows the rest.
     if (semantic) links = links.filter((l) => l.dist < 0.25);
 
-    g.nodeRelSize(semantic ? 2.5 : 4);
-    g.linkWidth(semantic ? 0.35 : 0.8);
-    g.linkOpacity(semantic ? 0.08 : 0.7);
+    g.nodeRelSize(semantic ? 1.8 : 4);
+    g.linkWidth(semantic ? 0.3 : 0.8);
+    g.linkOpacity(semantic ? 0.07 : 0.7);
     g.graphData({ nodes: visible, links });
 
     // Only reshape the camera/controls (and the atlas overlay) on an actual mode
@@ -570,6 +572,62 @@ export function OrbitGraph({ data }: { data: Graph }) {
     g.nodeThreeObject(g.nodeThreeObject());
   }, [query, semanticIds, activeRegion, activeBridge, ready]);
 
+  // Per-node labels that fade in as you zoom into the map: on the flat 2D view,
+  // when the camera drops below a height threshold, label the most-connected
+  // items currently in view (an HTML overlay, repositioned on pan/zoom).
+  useEffect(() => {
+    const g = graphRef.current;
+    const layer = labelLayerRef.current;
+    if (!g || !layer) return;
+    if (mode !== "semantic") {
+      layer.innerHTML = "";
+      return;
+    }
+    let raf = 0;
+    const render = () => {
+      raf = 0;
+      const camZ = g.camera()?.position?.z ?? 999;
+      // Only when zoomed in; fade the cap up the closer you get.
+      if (camZ > 360) {
+        layer.innerHTML = "";
+        return;
+      }
+      const cap = camZ < 160 ? 80 : camZ < 260 ? 48 : 26;
+      const w = layer.clientWidth;
+      const h = layer.clientHeight;
+      const cand: { n: GNode; x: number; y: number }[] = [];
+      for (const n of g.graphData().nodes as GNode[]) {
+        if (n.x == null) continue;
+        const s = g.graph2ScreenCoords(n.x, n.y ?? 0, n.z ?? 0);
+        if (!s || s.x < 0 || s.x > w || s.y < 0 || s.y > h) continue;
+        cand.push({ n, x: s.x, y: s.y });
+      }
+      cand.sort((a, b) => (b.n.val ?? 0) - (a.n.val ?? 0));
+      layer.innerHTML = cand
+        .slice(0, cap)
+        .map(
+          ({ n, x, y }) =>
+            `<div style="position:absolute;left:${x.toFixed(0)}px;top:${y.toFixed(
+              0,
+            )}px;transform:translate(-50%,-150%);font:10px/1.2 ui-sans-serif,system-ui;color:#dce7f3;text-shadow:0 1px 3px #000,0 0 2px #000;white-space:nowrap">${esc(
+              n.title.slice(0, 32),
+            )}</div>`,
+        )
+        .join("");
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(render);
+    };
+    const controls = g.controls();
+    controls.addEventListener("change", schedule);
+    schedule();
+    return () => {
+      controls.removeEventListener("change", schedule);
+      if (raf) cancelAnimationFrame(raf);
+      layer.innerHTML = "";
+    };
+  }, [mode, ready]);
+
   const openNode = (n: GNode) => {
     if (n.href && /^\/m\//.test(n.href)) {
       router.push(n.href);
@@ -626,6 +684,10 @@ export function OrbitGraph({ data }: { data: Graph }) {
   return (
     <div className="relative h-[calc(100vh-8.5rem)] overflow-hidden rounded-2xl glass">
       <div ref={holderRef} className="absolute inset-0" />
+      <div
+        ref={labelLayerRef}
+        className="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
+      />
 
       {/* header + mode + search */}
       <div className="absolute left-4 top-4 z-10 w-64">

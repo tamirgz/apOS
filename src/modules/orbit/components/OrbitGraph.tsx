@@ -50,73 +50,26 @@ const CLUSTER_PALETTE = [
   "#e879f9",
 ];
 const clusterColor = (id: number | null | undefined) =>
-  id == null
+  id == null || id < 0
     ? "#5b6673"
-    : CLUSTER_PALETTE[((id % CLUSTER_PALETTE.length) + CLUSTER_PALETTE.length) % CLUSTER_PALETTE.length];
+    : CLUSTER_PALETTE[id % CLUSTER_PALETTE.length];
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-type XY = { x: number; y: number };
-
-// Convex hull (Andrew's monotone chain) → ordered boundary points.
-function convexHull(pts: XY[]): XY[] {
-  if (pts.length < 3) return pts;
-  const p = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
-  const cross = (o: XY, a: XY, b: XY) =>
-    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  const lower: XY[] = [];
-  for (const q of p) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0)
-      lower.pop();
-    lower.push(q);
-  }
-  const upper: XY[] = [];
-  for (let i = p.length - 1; i >= 0; i--) {
-    const q = p[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0)
-      upper.pop();
-    upper.push(q);
-  }
-  lower.pop();
-  upper.pop();
-  return lower.concat(upper);
-}
-
-// A thin territory OUTLINE — the region's expanded convex hull. Minimal, not glowy.
-function makeOutline(THREE: any, hex: string, hull: XY[], cx: number, cy: number) {
-  const pad = 1.12; // small breathing room around the cloud
-  const pts = hull.map(
-    (h) => new THREE.Vector3(cx + (h.x - cx) * pad, cy + (h.y - cy) * pad, 0),
-  );
-  if (pts.length) pts.push(pts[0]);
-  const geo = new THREE.BufferGeometry().setFromPoints(pts);
-  const mat = new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: 0.28 });
-  return new THREE.Line(geo, mat);
-}
-
-// Thin territory outlines + topic labels for the semantic map.
+// Topic labels for the semantic map (contiguous colour regions carry the rest —
+// node colour defines each territory, no hard outlines).
 function buildAtlasObjects(
   THREE: any,
   SpriteText: any,
   scene: any,
   regions: OrbitRegion[],
-  members: Map<number, GNode[]>,
   color: (id: number) => string,
 ) {
   const objs: any[] = [];
   for (const r of regions) {
-    const pts = (members.get(r.id) ?? [])
-      .filter((n) => n.mx != null)
-      .map((n) => ({ x: n.mx as number, y: n.my ?? 0 }));
-    if (pts.length >= 3) {
-      const outline = makeOutline(THREE, color(r.id), convexHull(pts), r.cx, r.cy);
-      outline.position.z = -1;
-      scene.add(outline);
-      objs.push(outline);
-    }
     const lbl = new SpriteText(r.label);
-    lbl.color = "#eef4fb";
-    lbl.textHeight = 10;
-    lbl.fontWeight = "600";
+    lbl.color = color(r.id);
+    lbl.textHeight = 11;
+    lbl.fontWeight = "700";
     lbl.backgroundColor = "rgba(6,10,16,0.55)";
     lbl.padding = 2;
     lbl.position.set(r.cx, r.cy, 4);
@@ -503,16 +456,15 @@ export function OrbitGraph({ data }: { data: Graph }) {
     // each time so it never mutates our source-of-truth `data.links`.
     const sid = (v: unknown): string =>
       typeof v === "object" && v ? (v as { id: string }).id : (v as string);
-    let links = data.links
+    const links = data.links
       .filter((l) => ids.has(sid(l.source)) && ids.has(sid(l.target)))
       .map((l) => ({ source: sid(l.source), target: sid(l.target), dist: l.dist }));
-    // Semantic map: keep only the CLOSEST links — faint, local connective tissue.
-    // The long cross-map links are the hairball; position already shows the rest.
-    if (semantic) links = links.filter((l) => l.dist < 0.25);
-
+    // The map is a force-directed layout, so related nodes already sit together
+    // and the edges are short — show them as structure (they define the graph),
+    // just lighter than in the 3D view.
     g.nodeRelSize(semantic ? 1.8 : 4);
-    g.linkWidth(semantic ? 0.3 : 0.8);
-    g.linkOpacity(semantic ? 0.07 : 0.7);
+    g.linkWidth(semantic ? 0.4 : 0.8);
+    g.linkOpacity(semantic ? 0.18 : 0.7);
     g.graphData({ nodes: visible, links });
 
     // Only reshape the camera/controls (and the atlas overlay) on an actual mode
@@ -526,14 +478,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
         clearAtlasObjects(scene, atlasObjsRef.current);
         atlasObjsRef.current =
           semantic && libs
-            ? buildAtlasObjects(
-                libs.THREE,
-                libs.SpriteText,
-                scene,
-                data.regions,
-                regionMembers,
-                clusterColor,
-              )
+            ? buildAtlasObjects(libs.THREE, libs.SpriteText, scene, data.regions, clusterColor)
             : [];
       }
       // Toggle hub labels (accessor reads modeRef): on in constellation, off here.

@@ -1,19 +1,21 @@
 /**
  * The semantic ATLAS — the expensive half of the Orbit graph, computed OFF the
- * render path. Projecting every embedding to 2D (UMAP), carving it into topic
- * territories (k-means), and NAMING each territory with a local LLM (qwen) costs
- * tens of seconds and must never run when someone just opens the page. So a
- * background job builds it, persists it to app_settings, and only rebuilds when
- * the corpus fingerprint changes (change-detected, idempotent). The page reads
- * the persisted result instantly.
+ * render path. It lays the whole corpus out as a force-directed knowledge graph
+ * (ForceAtlas2 over the k-NN edges — the layout that actually reveals community
+ * structure and fills space, unlike a UMAP scatter), detects topic communities
+ * (Louvain), and NAMES the big ones with a local LLM (qwen). That costs tens of
+ * seconds, so a background job builds it, persists it to app_settings, and only
+ * rebuilds when the corpus fingerprint changes (idempotent). The page reads the
+ * persisted result instantly.
  *
- * Persisting the PROJECTION (not just the names) is also correctness, not just
- * speed: umap-js is stochastic, so a fresh render-time projection would place
- * points differently from the background naming run and the labelled halos would
- * float over the wrong clusters. One build, one layout, shared by both.
+ * Persisting the LAYOUT (not just the names) is also correctness: ForceAtlas2 is
+ * stochastic, so a fresh render-time layout would place nodes differently from
+ * the naming run and the labelled territories would float over the wrong groups.
+ * One build, one layout, shared by all readers.
  */
+import Graph from "graphology";
+import forceAtlas2 from "graphology-layout-forceatlas2";
 import { sql as dsql } from "drizzle-orm";
-import { UMAP } from "umap-js";
 import { db } from "@/core/db/client";
 import { getSetting, setSetting } from "@/core/app-settings";
 
@@ -36,12 +38,12 @@ export interface OrbitLink {
 interface AtlasBlob {
   fingerprint: string;
   builtAt: string;
-  /** id → [mx, my] on the flat 2D map. */
+  /** id → [mx, my] in the force-directed layout. */
   positions: Record<string, [number, number]>;
-  /** id → cluster index (its k-means group; region ids match). */
+  /** id → region rank (0..N-1) for a top community, else -1. */
   clusters: Record<string, number>;
   regions: OrbitRegion[];
-  /** Compact [source, target, dist] tuples — the k-NN edges, precomputed. */
+  /** Compact [source, target, dist] tuples — the k-NN edges. */
   links: [string, string, number][];
 }
 
@@ -54,109 +56,47 @@ export interface Atlas {
 }
 
 const ATLAS_KEY = "orbit_atlas";
-const ATLAS_LIMIT = 3000; // safety ceiling on nodes we project
-const MAP_SCALE = 280; // half-extent of the semantic map, in scene units
-const K_REGIONS = 10;
-const MIN_REGION = 12;
+const ATLAS_LIMIT = 3000; // safety ceiling on nodes we lay out
+const MAP_SCALE = 300; // half-extent of the map, in scene units
+const TOP_REGIONS = 12; // how many communities to name + outline
+const MIN_REGION = 12; // ignore communities smaller than this
 const NEIGHBORS = 6; // k-NN edges per node
 const MAX_DIST = 0.5; // the app's "genuinely related" cosine-distance gate
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 const NAMER_MODEL = "qwen3:8b";
 
-function parseVec(s: unknown): number[] {
-  if (Array.isArray(s)) return s as number[];
-  try {
-    return JSON.parse(String(s));
-  } catch {
-    return [];
-  }
-}
-
 const pct = (arr: number[], p: number) => {
   const s = [...arr].sort((a, b) => a - b);
   return s[Math.min(s.length - 1, Math.max(0, Math.floor((p / 100) * s.length)))];
 };
 
-/** Raw 2D UMAP. Tighter locality (lower nNeighbors/minDist) gives compact
- *  clusters — the separation step below then pushes them apart. */
-function projectRaw(vectors: number[][]): [number, number][] {
-  const umap = new UMAP({
-    nComponents: 2,
-    nNeighbors: Math.min(15, vectors.length - 1),
-    minDist: 0.35,
-    spread: 1.6,
-    nEpochs: 400,
-  });
-  return umap.fit(vectors).map((c) => [c[0], c[1]] as [number, number]);
-}
+const modeOf = (xs: string[]): string => {
+  const m = new Map<string, number>();
+  for (const v of xs) m.set(v, (m.get(v) ?? 0) + 1);
+  return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+};
 
-/** tanh squash around the median into the scene box — no hard clamp (a clamp
- *  piled outliers onto the box edge as straight rectangles). */
-function normalize(coords: [number, number][]): [number, number][] {
-  const mid = [0, 0];
-  const scale = [1, 1];
-  for (let a = 0; a < 2; a++) {
-    const col = coords.map((c) => c[a]);
-    mid[a] = pct(col, 50);
-    scale[a] = (pct(col, 90) - pct(col, 10)) / 2 || 1;
-  }
-  const norm = (v: number, a: number) =>
-    Math.tanh((v - mid[a]) / (1.5 * scale[a])) * MAP_SCALE;
-  return coords.map((c) => [norm(c[0], 0), norm(c[1], 1)] as [number, number]);
-}
-
-/**
- * De-smear: push each cluster's centroid OUTWARD from the global centre and
- * tighten points toward their own centroid. Overlapping blobs become distinct,
- * well-separated territories while local structure is preserved.
- */
-function separate(
-  raw: [number, number][],
-  assign: number[],
-  cent: { x: number; y: number }[],
-): [number, number][] {
-  const SEP = 1.9; // how far apart to fling the cluster centroids
-  const INTRA = 0.7; // how much to tighten within a cluster
-  let gx = 0;
-  let gy = 0;
-  for (const [x, y] of raw) {
-    gx += x;
-    gy += y;
-  }
-  gx /= raw.length || 1;
-  gy /= raw.length || 1;
-  return raw.map(([x, y], i) => {
-    const c = cent[assign[i]];
-    const ncx = gx + (c.x - gx) * SEP;
-    const ncy = gy + (c.y - gy) * SEP;
-    return [ncx + (x - c.x) * INTRA, ncy + (y - c.y) * INTRA] as [number, number];
-  });
-}
-
-interface Pt {
-  x: number;
-  y: number;
-}
-
-/** Deterministic 2D k-means (seeded by an even sweep, so the map is stable). */
-function kmeans2d(pts: Pt[], k: number, iters = 14): { assign: number[]; cent: Pt[] } {
+/** Deterministic 2D k-means (seeded by an even sweep) — partitions the laid-out
+ *  positions into contiguous, space-filling colour regions. */
+function kmeans2d(
+  pts: { x: number; y: number }[],
+  k: number,
+  iters = 16,
+): { assign: number[]; cent: { x: number; y: number }[] } {
   const n = pts.length;
   const order = [...pts.keys()].sort((a, b) => pts[a].x + pts[a].y - (pts[b].x + pts[b].y));
-  const cent: Pt[] = [];
-  for (let i = 0; i < k; i++) {
+  const cent = Array.from({ length: k }, (_, i) => {
     const p = pts[order[Math.floor((i * (n - 1)) / Math.max(1, k - 1))]];
-    cent.push({ x: p.x, y: p.y });
-  }
+    return { x: p.x, y: p.y };
+  });
   const assign = new Array(n).fill(0);
   for (let it = 0; it < iters; it++) {
     for (let i = 0; i < n; i++) {
       let bd = Infinity;
       let bj = 0;
       for (let j = 0; j < k; j++) {
-        const dx = pts[i].x - cent[j].x;
-        const dy = pts[i].y - cent[j].y;
-        const d = dx * dx + dy * dy;
+        const d = (pts[i].x - cent[j].x) ** 2 + (pts[i].y - cent[j].y) ** 2;
         if (d < bd) {
           bd = d;
           bj = j;
@@ -166,25 +106,26 @@ function kmeans2d(pts: Pt[], k: number, iters = 14): { assign: number[]; cent: P
     }
     const sx = new Array(k).fill(0);
     const sy = new Array(k).fill(0);
-    const cnt = new Array(k).fill(0);
+    const cn = new Array(k).fill(0);
     for (let i = 0; i < n; i++) {
       sx[assign[i]] += pts[i].x;
       sy[assign[i]] += pts[i].y;
-      cnt[assign[i]]++;
+      cn[assign[i]]++;
     }
-    for (let j = 0; j < k; j++)
-      if (cnt[j]) cent[j] = { x: sx[j] / cnt[j], y: sy[j] / cnt[j] };
+    for (let j = 0; j < k; j++) if (cn[j]) cent[j] = { x: sx[j] / cn[j], y: sy[j] / cn[j] };
   }
   return { assign, cent };
 }
 
-const modeOf = (xs: string[]): string => {
-  const m = new Map<string, number>();
-  for (const v of xs) m.set(v, (m.get(v) ?? 0) + 1);
-  return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
-};
+/** Map a coordinate axis into the scene box via a tanh squash around the median
+ *  (no hard clamp — a clamp piled outliers onto the box edge). */
+function makeNorm(vals: number[]) {
+  const mid = pct(vals, 50);
+  const scale = (pct(vals, 90) - pct(vals, 10)) / 2 || 1;
+  return (v: number) => Math.tanh((v - mid) / (1.5 * scale)) * MAP_SCALE;
+}
 
-/** Ask the local model to name each cluster from a handful of its titles. */
+/** Ask the local model to name each community from a handful of its titles. */
 async function nameRegions(
   clusters: { i: number; titles: string[] }[],
 ): Promise<Map<number, string>> {
@@ -212,7 +153,6 @@ async function nameRegions(
         temperature: 0,
         stream: false,
       }),
-      // Background job — a generous budget, since nothing is waiting on it.
       signal: AbortSignal.timeout(120_000),
     });
     if (!res.ok) return names;
@@ -246,108 +186,10 @@ async function corpusFingerprint(): Promise<string> {
   return `${r?.n ?? 0}:${r?.mx ?? ""}`;
 }
 
-/** Build the atlas from scratch: project → cluster → name. Heavy. */
-async function build(fingerprint: string): Promise<AtlasBlob> {
+/** The k-NN edges over the corpus — each node to its nearest neighbours under
+ *  the "genuinely related" cosine gate. */
+async function fetchLinks(): Promise<[string, string, number][]> {
   const rows = [
-    ...(await db.execute<{
-      id: string;
-      kind: string;
-      title: string;
-      embedding: unknown;
-    }>(dsql`
-      select id::text as id, kind,
-             coalesce(nullif(title, ''), '(untitled)') as title,
-             embedding::text as embedding
-        from search_index
-       where embedding is not null
-       order by updated_at desc
-       limit ${ATLAS_LIMIT}
-    `)),
-  ];
-
-  const positions: Record<string, [number, number]> = {};
-  const clusters: Record<string, number> = {};
-  let regions: OrbitRegion[] = [];
-  if (rows.length >= 4) {
-    // project (compact) → cluster → de-smear → normalise into the box.
-    const raw = projectRaw(rows.map((r) => parseVec(r.embedding)));
-    let coords = raw;
-    let assign: number[] = new Array(rows.length).fill(0);
-    if (rows.length >= K_REGIONS * MIN_REGION) {
-      const km = kmeans2d(
-        raw.map(([x, y]) => ({ x, y })),
-        K_REGIONS,
-      );
-      assign = km.assign;
-      coords = normalize(separate(raw, km.assign, km.cent));
-    } else {
-      coords = normalize(raw);
-    }
-    rows.forEach((r, i) => {
-      positions[r.id] = coords[i];
-      clusters[r.id] = assign[i];
-    });
-
-    if (rows.length >= K_REGIONS * MIN_REGION) {
-      // Region geometry from the FINAL (separated + normalised) coordinates.
-      const members: number[][] = Array.from({ length: K_REGIONS }, () => []);
-      assign.forEach((c, i) => members[c].push(i));
-      const centroid = (idx: number[]) => {
-        let x = 0;
-        let y = 0;
-        for (const j of idx) {
-          x += coords[j][0];
-          y += coords[j][1];
-        }
-        return { x: x / idx.length, y: y / idx.length };
-      };
-      const raw2 = members
-        .map((idx, i) => {
-          if (idx.length < MIN_REGION) return null;
-          const c = centroid(idx);
-          const dists = idx.map((j) => Math.hypot(coords[j][0] - c.x, coords[j][1] - c.y));
-          const r = Math.max(30, pct(dists, 80));
-          const near = idx
-            .map((j, k) => ({ j, d: dists[k] }))
-            .sort((a, b) => a.d - b.d)
-            .slice(0, 8)
-            .map((x) => rows[x.j].title);
-          return {
-            i,
-            cx: c.x,
-            cy: c.y,
-            r,
-            kind: modeOf(idx.map((j) => rows[j].kind)),
-            count: idx.length,
-            titles: near,
-          };
-        })
-        .filter(Boolean) as {
-        i: number;
-        cx: number;
-        cy: number;
-        r: number;
-        kind: string;
-        count: number;
-        titles: string[];
-      }[];
-
-      const names = await nameRegions(raw2.map((c) => ({ i: c.i, titles: c.titles })));
-      regions = raw2.map((c) => ({
-        id: c.i,
-        label: names.get(c.i) ?? c.kind,
-        cx: c.cx,
-        cy: c.cy,
-        r: c.r,
-        kind: c.kind,
-        count: c.count,
-      }));
-    }
-  }
-
-  // Precompute the k-NN edges here too, so the render path never runs the
-  // (multi-second) LATERAL vector join.
-  const linkRows = [
     ...(await db.execute<{ source: string; target: string; dist: number }>(dsql`
       with picked as (
         select id, embedding from search_index
@@ -370,11 +212,130 @@ async function build(fingerprint: string): Promise<AtlasBlob> {
        group by 1, 2
     `)),
   ];
-  const links: [string, string, number][] = linkRows.map((r) => [
-    r.source,
-    r.target,
-    Number(r.dist),
-  ]);
+  return rows.map((r) => [r.source, r.target, Number(r.dist)]);
+}
+
+/** Build the atlas from scratch: layout → communities → name. Heavy. */
+async function build(fingerprint: string): Promise<AtlasBlob> {
+  const rows = [
+    ...(await db.execute<{ id: string; kind: string; title: string }>(dsql`
+      select id::text as id, kind,
+             coalesce(nullif(title, ''), '(untitled)') as title
+        from search_index
+       where embedding is not null
+       order by updated_at desc
+       limit ${ATLAS_LIMIT}
+    `)),
+  ];
+  const links = await fetchLinks();
+  const byId = new Map(rows.map((r) => [r.id, r]));
+
+  const positions: Record<string, [number, number]> = {};
+  const clusters: Record<string, number> = {};
+  let regions: OrbitRegion[] = [];
+
+  if (rows.length >= 4 && links.length) {
+    // Force-directed layout over the k-NN graph.
+    const g = new Graph({ type: "undirected" });
+    let seed = 1;
+    const rnd = () => {
+      // deterministic-ish spread for initial positions
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    for (const r of rows)
+      g.addNode(r.id, { x: rnd() * 100 - 50, y: rnd() * 100 - 50 });
+    for (const [s, t, d] of links)
+      if (g.hasNode(s) && g.hasNode(t) && !g.hasEdge(s, t))
+        g.addEdge(s, t, { weight: 1 - d });
+
+    // Force-directed layout (ForceAtlas2) over the k-NN graph — dense, connected
+    // and space-filling. Low scalingRatio + linLog keeps it compact rather than
+    // a thin uniform disc; Barnes-Hut keeps it fast.
+    const inferred = forceAtlas2.inferSettings(g);
+    forceAtlas2.assign(g, {
+      iterations: 400,
+      settings: {
+        ...inferred,
+        barnesHutOptimize: true,
+        linLogMode: true,
+        outboundAttractionDistribution: false,
+        adjustSizes: false,
+        gravity: 1,
+        scalingRatio: 2,
+        slowDown: 3,
+      },
+    });
+    const fx = (id: string) => g.getNodeAttribute(id, "x") as number;
+    const fy = (id: string) => g.getNodeAttribute(id, "y") as number;
+
+    // Normalise into the box (from connected nodes; isolated ones scattered so
+    // they don't pile at the gravity centre).
+    const connected = rows.filter((r) => g.degree(r.id) > 0);
+    const nx = makeNorm(connected.map((r) => fx(r.id)));
+    const ny = makeNorm(connected.map((r) => fy(r.id)));
+    for (const r of rows) {
+      positions[r.id] =
+        g.degree(r.id) > 0
+          ? [nx(fx(r.id)), ny(fy(r.id))]
+          : [(rnd() * 2 - 1) * MAP_SCALE, (rnd() * 2 - 1) * MAP_SCALE];
+    }
+
+    // Partition the LAID-OUT positions with k-means → contiguous, space-filling
+    // colour territories (a Voronoi split: no overlap, no gaps). Every node gets
+    // a region; the layout already groups similar items, so the regions are
+    // coherent topics.
+    const { assign, cent } = kmeans2d(
+      rows.map((r) => ({ x: positions[r.id][0], y: positions[r.id][1] })),
+      TOP_REGIONS,
+    );
+    rows.forEach((r, i) => (clusters[r.id] = assign[i]));
+
+    const raw = cent
+      .map((c, k) => {
+        const members = rows.filter((_, i) => assign[i] === k);
+        if (members.length < MIN_REGION) return null;
+        const cx = c.x;
+        const cy = c.y;
+        const dists = members.map((r) =>
+          Math.hypot(positions[r.id][0] - cx, positions[r.id][1] - cy),
+        );
+        const near = members
+          .map((r, j) => ({ r, d: dists[j] }))
+          .sort((a, b) => a.d - b.d)
+          .slice(0, 8)
+          .map((x) => x.r.title);
+        return {
+          i: k,
+          cx,
+          cy,
+          r: Math.max(24, pct(dists, 80)),
+          kind: modeOf(members.map((m) => m.kind)),
+          count: members.length,
+          titles: near,
+        };
+      })
+      .filter((c): c is NonNullable<typeof c> => c != null);
+
+    const names = await nameRegions(raw.map((c) => ({ i: c.i, titles: c.titles })));
+    regions = raw.map((c) => ({
+      id: c.i,
+      label: names.get(c.i) ?? c.kind,
+      cx: c.cx,
+      cy: c.cy,
+      r: c.r,
+      kind: c.kind,
+      count: c.count,
+    }));
+  } else {
+    for (const r of rows) {
+      positions[r.id] = [0, 0];
+      clusters[r.id] = -1;
+    }
+  }
+
+  // Keep only links whose endpoints survived (both in the node set).
+  const kept = links.filter(([s, t]) => byId.has(s) && byId.has(t));
 
   return {
     fingerprint,
@@ -382,7 +343,7 @@ async function build(fingerprint: string): Promise<AtlasBlob> {
     positions,
     clusters,
     regions,
-    links,
+    links: kept,
   };
 }
 
@@ -395,7 +356,7 @@ export async function refreshAtlas(): Promise<void> {
   const existing = await getSetting(ATLAS_KEY);
   if (existing) {
     try {
-      if ((JSON.parse(existing) as AtlasBlob).fingerprint === fp) return; // unchanged
+      if ((JSON.parse(existing) as AtlasBlob).fingerprint === fp) return;
     } catch {
       /* corrupt — rebuild */
     }

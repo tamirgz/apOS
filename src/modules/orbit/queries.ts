@@ -15,6 +15,8 @@ export interface OrbitNode {
   mx: number | null;
   my: number | null;
   mz: number | null;
+  /** Topic cluster (region id) from the atlas, or null if unplaced. */
+  cluster: number | null;
 }
 
 export type { OrbitLink, OrbitRegion };
@@ -69,6 +71,7 @@ export async function orbitGraph(): Promise<OrbitGraph> {
   const nodes: OrbitNode[] = rows.map((r) => {
     const refs = Array.isArray(r.project_refs) ? (r.project_refs as string[]) : [];
     const p = atlas?.positions.get(r.id) ?? null;
+    const cl = atlas?.clusters.get(r.id);
     return {
       id: r.id,
       kind: r.kind,
@@ -78,6 +81,7 @@ export async function orbitGraph(): Promise<OrbitGraph> {
       mx: p ? p[0] : null,
       my: p ? p[1] : null,
       mz: p ? 0 : null,
+      cluster: cl ?? null,
     };
   });
 

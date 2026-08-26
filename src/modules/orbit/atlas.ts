@@ -38,6 +38,8 @@ interface AtlasBlob {
   builtAt: string;
   /** id → [mx, my] on the flat 2D map. */
   positions: Record<string, [number, number]>;
+  /** id → cluster index (its k-means group; region ids match). */
+  clusters: Record<string, number>;
   regions: OrbitRegion[];
   /** Compact [source, target, dist] tuples — the k-NN edges, precomputed. */
   links: [string, string, number][];
@@ -45,6 +47,7 @@ interface AtlasBlob {
 
 export interface Atlas {
   positions: Map<string, [number, number]>;
+  clusters: Map<string, number>;
   regions: OrbitRegion[];
   links: OrbitLink[];
   builtAt: string;
@@ -75,21 +78,22 @@ const pct = (arr: number[], p: number) => {
   return s[Math.min(s.length - 1, Math.max(0, Math.floor((p / 100) * s.length)))];
 };
 
-/**
- * Project embeddings to a flat 2D plane and spread them into the scene box.
- * Normalisation is a tanh squash around the median, not a hard clamp — a clamp
- * piled every outlier onto the box edge (the tell-tale straight rectangles);
- * tanh compresses the tails smoothly so strays fade toward the border instead.
- */
-function project(vectors: number[][]): [number, number][] {
+/** Raw 2D UMAP. Tighter locality (lower nNeighbors/minDist) gives compact
+ *  clusters — the separation step below then pushes them apart. */
+function projectRaw(vectors: number[][]): [number, number][] {
   const umap = new UMAP({
     nComponents: 2,
-    nNeighbors: Math.min(20, vectors.length - 1),
-    minDist: 0.6,
-    spread: 2.2,
+    nNeighbors: Math.min(15, vectors.length - 1),
+    minDist: 0.35,
+    spread: 1.6,
     nEpochs: 400,
   });
-  const coords = umap.fit(vectors);
+  return umap.fit(vectors).map((c) => [c[0], c[1]] as [number, number]);
+}
+
+/** tanh squash around the median into the scene box — no hard clamp (a clamp
+ *  piled outliers onto the box edge as straight rectangles). */
+function normalize(coords: [number, number][]): [number, number][] {
   const mid = [0, 0];
   const scale = [1, 1];
   for (let a = 0; a < 2; a++) {
@@ -100,6 +104,34 @@ function project(vectors: number[][]): [number, number][] {
   const norm = (v: number, a: number) =>
     Math.tanh((v - mid[a]) / (1.5 * scale[a])) * MAP_SCALE;
   return coords.map((c) => [norm(c[0], 0), norm(c[1], 1)] as [number, number]);
+}
+
+/**
+ * De-smear: push each cluster's centroid OUTWARD from the global centre and
+ * tighten points toward their own centroid. Overlapping blobs become distinct,
+ * well-separated territories while local structure is preserved.
+ */
+function separate(
+  raw: [number, number][],
+  assign: number[],
+  cent: { x: number; y: number }[],
+): [number, number][] {
+  const SEP = 1.9; // how far apart to fling the cluster centroids
+  const INTRA = 0.7; // how much to tighten within a cluster
+  let gx = 0;
+  let gy = 0;
+  for (const [x, y] of raw) {
+    gx += x;
+    gy += y;
+  }
+  gx /= raw.length || 1;
+  gy /= raw.length || 1;
+  return raw.map(([x, y], i) => {
+    const c = cent[assign[i]];
+    const ncx = gx + (c.x - gx) * SEP;
+    const ncy = gy + (c.y - gy) * SEP;
+    return [ncx + (x - c.x) * INTRA, ncy + (y - c.y) * INTRA] as [number, number];
+  });
 }
 
 interface Pt {
@@ -234,22 +266,46 @@ async function build(fingerprint: string): Promise<AtlasBlob> {
   ];
 
   const positions: Record<string, [number, number]> = {};
+  const clusters: Record<string, number> = {};
   let regions: OrbitRegion[] = [];
   if (rows.length >= 4) {
-    const coords = project(rows.map((r) => parseVec(r.embedding)));
-    rows.forEach((r, i) => (positions[r.id] = coords[i]));
+    // project (compact) → cluster → de-smear → normalise into the box.
+    const raw = projectRaw(rows.map((r) => parseVec(r.embedding)));
+    let coords = raw;
+    let assign: number[] = new Array(rows.length).fill(0);
+    if (rows.length >= K_REGIONS * MIN_REGION) {
+      const km = kmeans2d(
+        raw.map(([x, y]) => ({ x, y })),
+        K_REGIONS,
+      );
+      assign = km.assign;
+      coords = normalize(separate(raw, km.assign, km.cent));
+    } else {
+      coords = normalize(raw);
+    }
+    rows.forEach((r, i) => {
+      positions[r.id] = coords[i];
+      clusters[r.id] = assign[i];
+    });
 
     if (rows.length >= K_REGIONS * MIN_REGION) {
-      const pts: Pt[] = coords.map(([x, y]) => ({ x, y }));
-      const { assign, cent } = kmeans2d(pts, K_REGIONS);
+      // Region geometry from the FINAL (separated + normalised) coordinates.
       const members: number[][] = Array.from({ length: K_REGIONS }, () => []);
       assign.forEach((c, i) => members[c].push(i));
-
-      const raw = members
+      const centroid = (idx: number[]) => {
+        let x = 0;
+        let y = 0;
+        for (const j of idx) {
+          x += coords[j][0];
+          y += coords[j][1];
+        }
+        return { x: x / idx.length, y: y / idx.length };
+      };
+      const raw2 = members
         .map((idx, i) => {
           if (idx.length < MIN_REGION) return null;
-          const c = cent[i];
-          const dists = idx.map((j) => Math.hypot(pts[j].x - c.x, pts[j].y - c.y));
+          const c = centroid(idx);
+          const dists = idx.map((j) => Math.hypot(coords[j][0] - c.x, coords[j][1] - c.y));
           const r = Math.max(30, pct(dists, 80));
           const near = idx
             .map((j, k) => ({ j, d: dists[k] }))
@@ -276,8 +332,8 @@ async function build(fingerprint: string): Promise<AtlasBlob> {
         titles: string[];
       }[];
 
-      const names = await nameRegions(raw.map((c) => ({ i: c.i, titles: c.titles })));
-      regions = raw.map((c) => ({
+      const names = await nameRegions(raw2.map((c) => ({ i: c.i, titles: c.titles })));
+      regions = raw2.map((c) => ({
         id: c.i,
         label: names.get(c.i) ?? c.kind,
         cx: c.cx,
@@ -324,6 +380,7 @@ async function build(fingerprint: string): Promise<AtlasBlob> {
     fingerprint,
     builtAt: new Date().toISOString(),
     positions,
+    clusters,
     regions,
     links,
   };
@@ -355,6 +412,7 @@ export async function readAtlas(): Promise<Atlas | null> {
     const blob = JSON.parse(raw) as AtlasBlob;
     return {
       positions: new Map(Object.entries(blob.positions)),
+      clusters: new Map(Object.entries(blob.clusters ?? {})),
       regions: blob.regions ?? [],
       links: (blob.links ?? []).map(([source, target, dist]) => ({
         source,

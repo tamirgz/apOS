@@ -34,6 +34,26 @@ const esc = (s: string) =>
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const linkEnd = (v: any): string => (typeof v === "object" && v ? v.id : v);
 
+// One distinct colour per topic cluster (the semantic map colours by cluster).
+const CLUSTER_PALETTE = [
+  "#60a5fa",
+  "#34d399",
+  "#f472b6",
+  "#fbbf24",
+  "#a78bfa",
+  "#22d3ee",
+  "#fb7185",
+  "#84cc16",
+  "#c084fc",
+  "#fb923c",
+  "#2dd4bf",
+  "#e879f9",
+];
+const clusterColor = (id: number | null | undefined) =>
+  id == null
+    ? "#5b6673"
+    : CLUSTER_PALETTE[((id % CLUSTER_PALETTE.length) + CLUSTER_PALETTE.length) % CLUSTER_PALETTE.length];
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type XY = { x: number; y: number };
 
@@ -80,7 +100,7 @@ function buildAtlasObjects(
   scene: any,
   regions: OrbitRegion[],
   members: Map<number, GNode[]>,
-  color: (k: string) => string,
+  color: (id: number) => string,
 ) {
   const objs: any[] = [];
   for (const r of regions) {
@@ -88,7 +108,7 @@ function buildAtlasObjects(
       .filter((n) => n.mx != null)
       .map((n) => ({ x: n.mx as number, y: n.my ?? 0 }));
     if (pts.length >= 3) {
-      const outline = makeOutline(THREE, color(r.kind), convexHull(pts), r.cx, r.cy);
+      const outline = makeOutline(THREE, color(r.id), convexHull(pts), r.cx, r.cy);
       outline.position.z = -1;
       scene.add(outline);
       objs.push(outline);
@@ -188,26 +208,15 @@ export function OrbitGraph({ data }: { data: Graph }) {
   // per region + the cross-topic "bridges" (links whose ends are in different
   // regions). All client-side from the atlas centroids — no extra server data.
   const { nodeRegion, regionMembers, bridges } = useMemo(() => {
+    const regionIds = new Set(data.regions.map((r) => r.id));
     const nodeRegion = new Map<string, number>();
     const regionMembers = new Map<number, GNode[]>();
     for (const r of data.regions) regionMembers.set(r.id, []);
+    // Exact membership from the atlas cluster assignment (not nearest-centroid).
     for (const n of allNodes) {
-      if (n.mx == null) continue;
-      let best = -1;
-      let bd = Infinity;
-      for (const r of data.regions) {
-        const dx = n.mx - r.cx;
-        const dy = (n.my ?? 0) - r.cy;
-        const d = dx * dx + dy * dy;
-        if (d < bd) {
-          bd = d;
-          best = r.id;
-        }
-      }
-      if (best >= 0) {
-        nodeRegion.set(n.id, best);
-        regionMembers.get(best)!.push(n);
-      }
+      if (n.cluster == null || !regionIds.has(n.cluster)) continue;
+      nodeRegion.set(n.id, n.cluster);
+      regionMembers.get(n.cluster)!.push(n);
     }
     const lid = (v: unknown): string =>
       typeof v === "object" && v ? (v as { id: string }).id : (v as string);
@@ -314,7 +323,15 @@ export function OrbitGraph({ data }: { data: Graph }) {
         .showNavInfo(false)
         .nodeRelSize(4)
         .nodeVal((n: GNode) => n.val)
-        .nodeColor((n: GNode) => (matches(n) ? colorFor(n.kind) : DIM))
+        .nodeColor((n: GNode) => {
+          if (!matches(n)) return DIM;
+          // Semantic map colours by topic cluster; constellation by source kind.
+          if (modeRef.current === "semantic") {
+            const rid = nodeRegionRef.current.get(n.id);
+            return rid != null ? clusterColor(rid) : "#5b6673";
+          }
+          return colorFor(n.kind);
+        })
         .nodeOpacity(0.92)
         .nodeLabel(
           (n: GNode) =>
@@ -513,7 +530,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
                 scene,
                 data.regions,
                 regionMembers,
-                colorFor,
+                clusterColor,
               )
             : [];
       }
@@ -740,7 +757,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
                         >
                           <span
                             className="size-2.5 shrink-0 rounded-full"
-                            style={{ background: colorFor(r.kind) }}
+                            style={{ background: clusterColor(r.id) }}
                           />
                           <span className="flex-1 truncate text-ink-dim">{r.label}</span>
                           <span className="font-mono text-[9px] text-ink-faint">

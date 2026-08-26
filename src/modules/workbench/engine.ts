@@ -27,6 +27,8 @@ import { researchAdapter } from "./adapters/research";
 import { gatherResearchContext } from "./research";
 import type { Adapter, AdapterEvent } from "./adapters/types";
 import { executorAvailability } from "./adapters/capabilities";
+import { harnessHome } from "./adapters/sandbox";
+import { setupLocalAgent } from "./adapters/local-agents";
 import {
   commitCheckpoint,
   createClone,
@@ -241,6 +243,34 @@ export async function ensureExecutors() {
           "pi --provider ollama --model {{model}} --mode json -p {{prompt}}",
         parser: "pi-json" as const,
         defaultModel: "qwen2.5-coder:7b",
+        gitMode: "worktree" as const,
+        timeoutMs: TIMEOUTS["code-local"],
+      },
+      // Qwen Code — tuned for the local Qwen coder models. Reaches Ollama via its
+      // OpenAI-compatible provider (env supplied by setupLocalAgent); the model
+      // rides OPENAI_MODEL, so the template needs no {{model}}. Text output →
+      // the diff is the deliverable, the final message is the headline.
+      {
+        id: "qwen",
+        name: "Qwen Code (local Ollama)",
+        kind: "cli" as const,
+        commandTemplate: "qwen -y -o text -p {{prompt}}",
+        parser: "text" as const,
+        defaultModel: "ollama/qwen3.5:35b-a3b-coding-nvfp4",
+        gitMode: "worktree" as const,
+        timeoutMs: TIMEOUTS["code-local"],
+      },
+      // Factory Droid — BYOK Ollama custom model provisioned into the sandbox
+      // ~/.factory/config.json by setupLocalAgent; "aios-ollama" → the fixed id
+      // "custom:aios-ollama-0". Runs local at zero Factory cost.
+      {
+        id: "droid",
+        name: "Factory Droid (local Ollama)",
+        kind: "cli" as const,
+        commandTemplate:
+          "droid exec -m custom:aios-ollama-0 --skip-permissions-unsafe --cwd {{workdir}} -o text {{prompt}}",
+        parser: "text" as const,
+        defaultModel: "ollama/qwen3.5:35b-a3b-coding-nvfp4",
         gitMode: "worktree" as const,
         timeoutMs: TIMEOUTS["code-local"],
       },
@@ -465,6 +495,16 @@ export async function runAttempt(attemptId: string): Promise<void> {
       // opencode config; only real opencode runs get one.
       if (task.taskType !== "research") await writeOpencodeConfig(workdir);
     }
+    // Extra env/config for local agents that wire Ollama their own way
+    // (Qwen Code: OPENAI_* env; Droid: a BYOK model in the sandbox
+    // ~/.factory/config.json). No-op for opencode/pi.
+    const localAgentEnv =
+      executor?.kind === "cli"
+        ? setupLocalAgent(attempt.executorId, {
+            runModel,
+            home: harnessHome("cli"),
+          })
+        : {};
 
     // Local models need autonomy spelled out — Claude infers it. But do NOT
     // hand them the absolute workdir path: given a clone whose project root is
@@ -542,6 +582,7 @@ export async function runAttempt(attemptId: string): Promise<void> {
         commandTemplate: executor?.commandTemplate ?? undefined,
         parser: (executor?.parser as CliParser | null) ?? undefined,
         env: {
+          ...localAgentEnv,
           OPENCODE_CONFIG: AIOS_OPENCODE_CONFIG,
           OPENCODE_DISABLE_AUTOUPDATE: "1",
           // Per-attempt opencode data dir (see openDataDir above): isolated from

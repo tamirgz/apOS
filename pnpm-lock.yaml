@@ -83,6 +83,9 @@ importers:
       tailwind-merge:
         specifier: ^3.6.0
         version: 3.6.0
+      three:
+        specifier: 0.185.1
+        version: 0.185.1
       three-spritetext:
         specifier: ^1.10.0
         version: 1.10.0(three@0.185.1)

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { OrbitGraph as Graph, OrbitNode } from "../queries";
+import type { OrbitGraph as Graph, OrbitNode, OrbitRegion } from "../queries";
 
 // One colour per source kind — the legend and the stars share this map.
 const KIND_COLORS: Record<string, string> = {
@@ -31,6 +31,66 @@ const DIM = "#2b3440";
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// A soft radial "territory" glow for a semantic-map region, tinted by kind.
+function makeHalo(THREE: any, hex: string, radius: number) {
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = 128;
+  const ctx = cv.getContext("2d")!;
+  const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, hex + "66");
+  grad.addColorStop(0.55, hex + "22");
+  grad.addColorStop(1, hex + "00");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 128, 128);
+  const mat = new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(cv),
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const sp = new THREE.Sprite(mat);
+  const d = radius * 3.2; // cover the cloud, not just the core
+  sp.scale.set(d, d, 1);
+  return sp;
+}
+
+// Territory halos (behind) + topic labels (in front) for the semantic map.
+function buildAtlasObjects(
+  THREE: any,
+  SpriteText: any,
+  scene: any,
+  regions: OrbitRegion[],
+  color: (k: string) => string,
+) {
+  const objs: any[] = [];
+  for (const r of regions) {
+    const halo = makeHalo(THREE, color(r.kind), r.r);
+    halo.position.set(r.cx, r.cy, -3);
+    scene.add(halo);
+    objs.push(halo);
+    const lbl = new SpriteText(r.label);
+    lbl.color = "#eef4fb";
+    lbl.textHeight = 11;
+    lbl.fontWeight = "600";
+    lbl.backgroundColor = "rgba(6,10,16,0.5)";
+    lbl.padding = 2;
+    lbl.position.set(r.cx, r.cy, 4);
+    scene.add(lbl);
+    objs.push(lbl);
+  }
+  return objs;
+}
+
+function clearAtlasObjects(scene: any, objs: any[]) {
+  for (const o of objs) {
+    scene.remove(o);
+    o.material?.map?.dispose?.();
+    o.material?.dispose?.();
+  }
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 type Mode = "constellation" | "semantic";
 type GNode = OrbitNode & {
   val: number;
@@ -47,13 +107,24 @@ export function OrbitGraph({ data }: { data: Graph }) {
   const holderRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null);
+  // Three.js constructors, stashed from the dynamic import for the data effect.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const libsRef = useRef<{ THREE: any; SpriteText: any } | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const atlasObjsRef = useRef<any[]>([]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [ready, setReady] = useState(false);
   const [mode, setMode] = useState<Mode>("constellation");
   const [query, setQuery] = useState("");
+  // Semantic-search results: a set of matching node ids (null = title-match mode).
+  const [semanticIds, setSemanticIds] = useState<Set<string> | null>(null);
+  const [searching, setSearching] = useState(false);
   // The mode the current layout was built for — lets us tell a real layout
   // change (mode switch) apart from a mere filter toggle.
   const lastLayoutMode = useRef<Mode | null>(null);
+  // Current mode for the (stable) node-label accessor to read without re-init.
+  const modeRef = useRef<Mode>("constellation");
+  modeRef.current = mode;
   // Current query for the (stable) colour accessor to read without re-init.
   const queryRef = useRef("");
   queryRef.current = query.trim().toLowerCase();
@@ -85,8 +156,54 @@ export function OrbitGraph({ data }: { data: Graph }) {
     return { allNodes: nodes, hubIds: hubs };
   }, [data]);
 
-  const matches = (n: GNode) =>
-    !queryRef.current || n.title.toLowerCase().includes(queryRef.current);
+  // What counts as "highlighted": a semantic-search hit when a search has run,
+  // otherwise a live title-substring match. Held in a ref so the stable graph
+  // accessors read the latest predicate without re-init.
+  const highlightRef = useRef<(n: GNode) => boolean>(() => true);
+  highlightRef.current = (n) =>
+    semanticIds
+      ? semanticIds.has(n.id)
+      : !queryRef.current || n.title.toLowerCase().includes(queryRef.current);
+  const matches = (n: GNode) => highlightRef.current(n);
+
+  // Fly the camera to a node (used by search + node click).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const flyTo = (g: any, n: GNode) => {
+    const r = Math.hypot(n.x ?? 0, n.y ?? 0, n.z ?? 0) || 1;
+    g.cameraPosition(
+      {
+        x: (n.x ?? 0) * (1 + 120 / r),
+        y: (n.y ?? 0) * (1 + 120 / r),
+        z: (n.z ?? 0) * (1 + 120 / r),
+      },
+      n,
+      900,
+    );
+  };
+
+  // Semantic search: embed the query server-side, highlight the nearest nodes,
+  // fly to the top hit. Runs on submit (Enter) — never per keystroke.
+  const runSemantic = async () => {
+    const q = query.trim();
+    if (!q) {
+      setSemanticIds(null);
+      return;
+    }
+    setSearching(true);
+    try {
+      const res = await fetch(`/api/orbit/search?q=${encodeURIComponent(q)}`);
+      const { hits } = (await res.json()) as { hits: { id: string }[] };
+      const ids = new Set(hits.map((h) => h.id));
+      setSemanticIds(ids);
+      const g = graphRef.current;
+      const top = g?.graphData().nodes.find((n: GNode) => n.id === hits[0]?.id);
+      if (g && top) flyTo(g, top);
+    } catch {
+      /* leave the current highlight as-is on failure */
+    } finally {
+      setSearching(false);
+    }
+  };
 
   // Init once.
   useEffect(() => {
@@ -95,12 +212,14 @@ export function OrbitGraph({ data }: { data: Graph }) {
     let g: any;
     let onResize: (() => void) | undefined;
     (async () => {
-      const [{ default: ForceGraph3D }, { default: SpriteText }] =
+      const [{ default: ForceGraph3D }, { default: SpriteText }, THREE] =
         await Promise.all([
           import("3d-force-graph"),
           import("three-spritetext"),
+          import("three"),
         ]);
       if (disposed || !holderRef.current) return;
+      libsRef.current = { THREE, SpriteText };
       const el = holderRef.current;
       g = new ForceGraph3D(el, { controlType: "orbit" });
       g.backgroundColor("rgba(0,0,0,0)")
@@ -120,7 +239,8 @@ export function OrbitGraph({ data }: { data: Graph }) {
         )
         .nodeThreeObjectExtend(true)
         .nodeThreeObject((n: GNode) => {
-          if (!hubIds.has(n.id)) return undefined;
+          // Hub labels clutter the semantic map — show them in constellation only.
+          if (modeRef.current === "semantic" || !hubIds.has(n.id)) return undefined;
           const s = new SpriteText(n.title.slice(0, 26));
           s.color = matches(n) ? "#dfeaf5" : DIM;
           s.textHeight = 5;
@@ -203,6 +323,8 @@ export function OrbitGraph({ data }: { data: Graph }) {
       if (g) {
         try {
           g.__ro?.disconnect?.();
+          clearAtlasObjects(g.scene?.() ?? { remove() {} }, atlasObjsRef.current);
+          atlasObjsRef.current = [];
           g._destructor?.();
         } catch {
           /* best effort */
@@ -264,18 +386,35 @@ export function OrbitGraph({ data }: { data: Graph }) {
     // each time so it never mutates our source-of-truth `data.links`.
     const sid = (v: unknown): string =>
       typeof v === "object" && v ? (v as { id: string }).id : (v as string);
-    const links = data.links
+    let links = data.links
       .filter((l) => ids.has(sid(l.source)) && ids.has(sid(l.target)))
       .map((l) => ({ source: sid(l.source), target: sid(l.target), dist: l.dist }));
-    // Semantic map: smaller stars + faint links (position already shows
-    // relatedness). Constellation: full size + visible links pulling clusters.
+    // Semantic map: keep only the CLOSEST links — faint, local connective tissue.
+    // The long cross-map links are the hairball; position already shows the rest.
+    if (semantic) links = links.filter((l) => l.dist < 0.25);
+
     g.nodeRelSize(semantic ? 2.5 : 4);
-    g.linkOpacity(semantic ? 0.15 : 0.7);
+    g.linkWidth(semantic ? 0.35 : 0.8);
+    g.linkOpacity(semantic ? 0.08 : 0.7);
     g.graphData({ nodes: visible, links });
 
-    // Only reshape the camera/controls on an actual mode switch — never on a
-    // filter toggle.
+    // Only reshape the camera/controls (and the atlas overlay) on an actual mode
+    // switch — never on a filter toggle.
     if (layoutChanged) {
+      // Semantic overlay: soft topic territories + labels. Rebuild on entry,
+      // remove entirely in constellation.
+      const scene = g.scene?.();
+      const libs = libsRef.current;
+      if (scene) {
+        clearAtlasObjects(scene, atlasObjsRef.current);
+        atlasObjsRef.current =
+          semantic && libs
+            ? buildAtlasObjects(libs.THREE, libs.SpriteText, scene, data.regions, colorFor)
+            : [];
+      }
+      // Toggle hub labels (accessor reads modeRef): on in constellation, off here.
+      g.nodeThreeObject(g.nodeThreeObject());
+
       const c = g.controls();
       if (semantic) {
         // Lock to a flat top-down 2D map: no rotation, left-drag pans.
@@ -298,7 +437,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
       }, semantic ? 300 : 1200);
     }
     lastLayoutMode.current = mode;
-  }, [allNodes, data.links, hidden, ready, mode]);
+  }, [allNodes, data.links, data.regions, hidden, ready, mode]);
 
   // Search → re-highlight (nodes + labels) without rebuilding the graph.
   useEffect(() => {
@@ -306,7 +445,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
     if (!g) return;
     g.nodeColor(g.nodeColor());
     g.nodeThreeObject(g.nodeThreeObject());
-  }, [query, ready]);
+  }, [query, semanticIds, ready]);
 
   const toggle = (k: string) =>
     setHidden((prev) => {
@@ -329,6 +468,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
         <div className="mt-1 text-sm text-ink-dim">
           <span className="text-ink">{shownCount}</span> of {data.total} nodes ·{" "}
           {data.links.length} links
+          {data.regions.length > 0 ? ` · ${data.regions.length} topics` : ""}
         </div>
 
         <div className="mt-3 inline-flex rounded-lg glass p-0.5 text-xs">
@@ -352,13 +492,50 @@ export function OrbitGraph({ data }: { data: Graph }) {
             ? "A flat 2D map placed by meaning — nearby stars share a topic."
             : "Placed by connection — linked stars pull together."}
         </p>
+        {mode === "semantic" && data.regions.length === 0 ? (
+          <p className="mt-1 max-w-[15rem] text-[11px] leading-snug text-amber-300/70">
+            Topic map is still building in the background — check back in a moment.
+          </p>
+        ) : null}
 
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Highlight… (title match)"
-          className="mt-2 h-8 w-full rounded-lg glass px-2.5 text-xs text-ink outline-none placeholder:text-ink-faint focus:glass-edge"
-        />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            runSemantic();
+          }}
+          className="relative mt-2"
+        >
+          <input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (semanticIds) setSemanticIds(null);
+            }}
+            placeholder="Search by meaning… (press Enter)"
+            className="h-8 w-full rounded-lg glass px-2.5 pr-12 text-xs text-ink outline-none placeholder:text-ink-faint focus:glass-edge"
+          />
+          {searching ? (
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-ink-faint">
+              …
+            </span>
+          ) : semanticIds ? (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setSemanticIds(null);
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-ion hover:underline"
+            >
+              clear
+            </button>
+          ) : null}
+        </form>
+        {semanticIds ? (
+          <p className="mt-1 text-[11px] leading-snug text-ink-faint">
+            {semanticIds.size} closest by meaning — highlighted, flew to the top hit.
+          </p>
+        ) : null}
       </div>
 
       {/* legend / kind filter */}

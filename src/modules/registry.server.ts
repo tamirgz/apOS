@@ -18,6 +18,7 @@ import { askServerManifest } from "./ask/manifest.server";
 import { notionServerManifest } from "./notion/manifest.server";
 import { telegramServerManifest } from "./telegram/manifest.server";
 import { investmentsServerManifest } from "./investments/manifest.server";
+import { orbitServerManifest } from "./orbit/manifest.server";
 
 export const serverModules: ModuleServerManifest[] = [
   todayServerManifest,
@@ -33,6 +34,7 @@ export const serverModules: ModuleServerManifest[] = [
   ideasServerManifest,
   investmentsServerManifest,
   knowledgeServerManifest,
+  orbitServerManifest,
   obsidianServerManifest,
   notionServerManifest,
   telegramServerManifest,

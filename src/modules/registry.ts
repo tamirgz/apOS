@@ -19,6 +19,7 @@ import { askManifest } from "./ask/manifest";
 import { notionManifest } from "./notion/manifest";
 import { telegramManifest } from "./telegram/manifest";
 import { investmentsManifest } from "./investments/manifest";
+import { orbitManifest } from "./orbit/manifest";
 
 export const modules: ModuleManifest[] = [
   todayManifest,
@@ -34,6 +35,7 @@ export const modules: ModuleManifest[] = [
   ideasManifest,
   investmentsManifest,
   knowledgeManifest,
+  orbitManifest,
   obsidianManifest,
   notionManifest,
   telegramManifest,

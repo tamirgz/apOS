@@ -52,7 +52,12 @@ function parseVec(s: unknown): number[] {
   }
 }
 
-/** Project the embeddings to 3D (UMAP) and normalise each axis to the scene box. */
+/**
+ * Project the embeddings to a 2D plane (UMAP) and normalise to the scene box.
+ * The semantic map renders flat (a top-down 2D view), so we optimise the layout
+ * directly in 2D — cleaner cluster separation than projecting 3D then flattening
+ * — and return z = 0 for every point.
+ */
 function project(
   ids: string[],
   vectors: number[][],
@@ -63,7 +68,7 @@ function project(
     return out;
   }
   const umap = new UMAP({
-    nComponents: 3,
+    nComponents: 2,
     nNeighbors: Math.min(20, ids.length - 1),
     // Larger minDist/spread push points apart so clusters read as clouds, not
     // packed clumps (the first cut used 0.1 and everything piled up).
@@ -79,9 +84,9 @@ function project(
     const s = [...arr].sort((a, b) => a - b);
     return s[Math.min(s.length - 1, Math.max(0, Math.floor((p / 100) * s.length)))];
   };
-  const lo = [0, 0, 0];
-  const hi = [0, 0, 0];
-  for (let a = 0; a < 3; a++) {
+  const lo = [0, 0];
+  const hi = [0, 0];
+  for (let a = 0; a < 2; a++) {
     const col = coords.map((c) => c[a]);
     lo[a] = pct(col, 2);
     hi[a] = pct(col, 98);
@@ -93,7 +98,7 @@ function project(
   };
   ids.forEach((id, i) => {
     const c = coords[i];
-    out.set(id, [norm(c[0], 0), norm(c[1], 1), norm(c[2], 2)]);
+    out.set(id, [norm(c[0], 0), norm(c[1], 1), 0]);
   });
   return out;
 }

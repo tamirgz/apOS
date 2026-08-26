@@ -51,6 +51,9 @@ export function OrbitGraph({ data }: { data: Graph }) {
   const [ready, setReady] = useState(false);
   const [mode, setMode] = useState<Mode>("constellation");
   const [query, setQuery] = useState("");
+  // The mode the current layout was built for — lets us tell a real layout
+  // change (mode switch) apart from a mere filter toggle.
+  const lastLayoutMode = useRef<Mode | null>(null);
   // Current query for the (stable) colour accessor to read without re-init.
   const queryRef = useRef("");
   queryRef.current = query.trim().toLowerCase();
@@ -213,20 +216,48 @@ export function OrbitGraph({ data }: { data: Graph }) {
   useEffect(() => {
     const g = graphRef.current;
     if (!g) return;
+    const semantic = mode === "semantic";
+    // A mode switch rebuilds the layout; a plain filter toggle must NOT — it
+    // should hide/show in place with zero re-scatter or camera move.
+    const layoutChanged = lastLayoutMode.current !== mode;
     const visible = allNodes.filter((n) => !hidden.has(n.kind));
-    // Semantic mode: pin each node to its embedding-projection position; force
-    // mode: release it so the simulation lays it out.
-    for (const n of visible) {
-      if (mode === "semantic" && n.mx != null) {
-        n.fx = n.mx;
-        n.fy = n.my ?? 0;
-        n.fz = n.mz ?? 0;
-      } else {
+
+    if (semantic) {
+      // Flat 2D embedding map: pin every node onto the z = 0 plane at its
+      // projection coordinate.
+      for (const n of allNodes) {
+        if (n.mx != null) {
+          n.fx = n.mx;
+          n.fy = n.my ?? 0;
+          n.fz = 0;
+        }
+      }
+    } else if (layoutChanged) {
+      // Entering constellation: release the pins and re-seed a small random 3D
+      // position for every node. Coming from the flat 2D map they all sit at
+      // z = 0, and with zero z-variance the symmetric forces can never lift them
+      // off the plane — so the sim would stay flat unless we seed the spread.
+      for (const n of allNodes) {
         n.fx = undefined;
         n.fy = undefined;
         n.fz = undefined;
+        n.x = (Math.random() - 0.5) * 120;
+        n.y = (Math.random() - 0.5) * 120;
+        n.z = (Math.random() - 0.5) * 120;
+      }
+    } else {
+      // Filter toggle within constellation: FREEZE each node where it currently
+      // sits (graphData() re-warms the sim, which would otherwise push nodes
+      // apart and shrink the whole view every time a kind is toggled).
+      for (const n of allNodes) {
+        if (n.x != null) {
+          n.fx = n.x;
+          n.fy = n.y;
+          n.fz = n.z;
+        }
       }
     }
+
     const ids = new Set(visible.map((n) => n.id));
     // 3d-force-graph rewrites link.source/target from the string id to the node
     // OBJECT on first render, so read the id either way — and hand it fresh copies
@@ -238,18 +269,35 @@ export function OrbitGraph({ data }: { data: Graph }) {
       .map((l) => ({ source: sid(l.source), target: sid(l.target), dist: l.dist }));
     // Semantic map: smaller stars + faint links (position already shows
     // relatedness). Constellation: full size + visible links pulling clusters.
-    g.nodeRelSize(mode === "semantic" ? 2.5 : 4);
-    g.linkOpacity(mode === "semantic" ? 0.12 : 0.7);
+    g.nodeRelSize(semantic ? 2.5 : 4);
+    g.linkOpacity(semantic ? 0.15 : 0.7);
     g.graphData({ nodes: visible, links });
-    g.controls().autoRotate = mode === "constellation";
-    if (mode === "constellation") g.d3ReheatSimulation?.();
-    setTimeout(() => {
-      try {
-        g.zoomToFit(600, 50);
-      } catch {
-        /* ignore */
+
+    // Only reshape the camera/controls on an actual mode switch — never on a
+    // filter toggle.
+    if (layoutChanged) {
+      const c = g.controls();
+      if (semantic) {
+        // Lock to a flat top-down 2D map: no rotation, left-drag pans.
+        c.autoRotate = false;
+        c.enableRotate = false;
+        c.mouseButtons.LEFT = 2; // THREE.MOUSE.PAN
+        g.cameraPosition({ x: 0, y: 0, z: 600 }, { x: 0, y: 0, z: 0 }, 0);
+      } else {
+        c.autoRotate = true;
+        c.enableRotate = true;
+        c.mouseButtons.LEFT = 0; // THREE.MOUSE.ROTATE
+        g.d3ReheatSimulation?.();
       }
-    }, mode === "semantic" ? 200 : 1200);
+      setTimeout(() => {
+        try {
+          g.zoomToFit(600, semantic ? 60 : 50);
+        } catch {
+          /* ignore */
+        }
+      }, semantic ? 300 : 1200);
+    }
+    lastLayoutMode.current = mode;
   }, [allNodes, data.links, hidden, ready, mode]);
 
   // Search → re-highlight (nodes + labels) without rebuilding the graph.
@@ -301,7 +349,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
         </div>
         <p className="mt-1.5 max-w-[15rem] text-[11px] leading-snug text-ink-faint">
           {mode === "semantic"
-            ? "Placed by meaning — nearby stars are about the same thing."
+            ? "A flat 2D map placed by meaning — nearby stars share a topic."
             : "Placed by connection — linked stars pull together."}
         </p>
 
@@ -343,7 +391,9 @@ export function OrbitGraph({ data }: { data: Graph }) {
       </div>
 
       <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
-        drag to orbit · scroll to zoom · click a node to open
+        {mode === "semantic"
+          ? "drag to pan · scroll to zoom · click a node to open"
+          : "drag to orbit · scroll to zoom · click a node to open"}
       </div>
     </div>
   );

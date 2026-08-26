@@ -192,6 +192,15 @@ async function main() {
     });
     log(`job "${job.channel}" scheduled [${job.schedule}]`);
   }
+  // Warm run-on-boot jobs once, so a persisted cache is ready before the first
+  // page load (idempotent jobs no-op when nothing changed).
+  for (const job of moduleJobs) {
+    if (!job.runOnBoot) continue;
+    job.handle("", { db }).catch((e) =>
+      log(`boot job ${job.channel} failed: ${e}`),
+    );
+    log(`job "${job.channel}" kicked on boot`);
+  }
 
   // Dedicated LISTEN connection — made resilient. A Mac that sleeps leaves a
   // half-open socket that postgres.js won't notice on its own: writes succeed

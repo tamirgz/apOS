@@ -148,6 +148,9 @@ export interface ModuleJob {
   handle(payload: string, ctx: AiToolContext): Promise<void>;
   /** Optional cron pattern — the worker also runs this job on a schedule (payload = ""). */
   schedule?: string;
+  /** Run once when the worker boots (in addition to any schedule). For jobs that
+   *  keep a persisted cache warm so the first page load isn't cold. */
+  runOnBoot?: boolean;
 }
 
 export interface ModuleServerManifest {

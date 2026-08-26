@@ -1,6 +1,6 @@
 import { sql as dsql } from "drizzle-orm";
-import { UMAP } from "umap-js";
 import { db } from "@/core/db/client";
+import { readAtlas, type OrbitLink, type OrbitRegion } from "./atlas";
 
 /** One node in the orbital graph — a row from the unified search_index. */
 export interface OrbitNode {
@@ -10,103 +10,45 @@ export interface OrbitNode {
   href: string | null;
   /** Coarse cluster (area/project ref) if the item carries one. */
   group: string | null;
-  /** Semantic-map position: a 3D UMAP projection of the item's embedding, so
-   *  nearness here means "about the same thing". Null if the projection failed. */
+  /** Semantic-map position: the persisted 2D atlas projection. z is always 0
+   *  (flat map). Null when the atlas hasn't placed this item yet. */
   mx: number | null;
   my: number | null;
   mz: number | null;
+  /** Topic cluster (region id) from the atlas, or null if unplaced. */
+  cluster: number | null;
 }
 
-/** A semantic edge — two items whose embeddings are close. */
-export interface OrbitLink {
-  source: string;
-  target: string;
-  dist: number;
-}
+export type { OrbitLink, OrbitRegion };
 
 export interface OrbitGraph {
   nodes: OrbitNode[];
   links: OrbitLink[];
+  regions: OrbitRegion[];
   total: number;
+  /** When the semantic atlas was last rebuilt (null until the job has run). */
+  atlasBuiltAt: string | null;
 }
 
-// The whole corpus at once is unreadable and heavy, so cap to the most
-// recently-touched slice; edges are each node's nearest neighbours under the
-// app's "genuinely related" cosine-distance gate.
-const NODE_LIMIT = 800;
-const NEIGHBORS = 6;
-const MAX_DIST = 0.5;
-const MAP_SCALE = 280; // half-extent of the semantic map, in scene units
-
-// The UMAP projection is the expensive part (~seconds), and the node set is
-// stable between loads, so memoise it by the picked-id fingerprint.
-let projCache: { key: string; coords: Map<string, [number, number, number]> } | null =
-  null;
-
-function parseVec(s: unknown): number[] {
-  if (Array.isArray(s)) return s as number[];
-  try {
-    return JSON.parse(String(s));
-  } catch {
-    return [];
-  }
-}
-
-/** Project the embeddings to 3D (UMAP) and normalise each axis to the scene box. */
-function project(
-  ids: string[],
-  vectors: number[][],
-): Map<string, [number, number, number]> {
-  const out = new Map<string, [number, number, number]>();
-  if (ids.length < 4) {
-    ids.forEach((id) => out.set(id, [0, 0, 0]));
-    return out;
-  }
-  const umap = new UMAP({
-    nComponents: 3,
-    nNeighbors: Math.min(20, ids.length - 1),
-    // Larger minDist/spread push points apart so clusters read as clouds, not
-    // packed clumps (the first cut used 0.1 and everything piled up).
-    minDist: 0.6,
-    spread: 2.2,
-    nEpochs: 400,
-  });
-  const coords = umap.fit(vectors);
-  // Robust per-axis normalisation: map the 2nd–98th percentile band to the box
-  // and clamp outliers, so the bulk fills the space instead of cramming the
-  // centre while a few far points stretch the range.
-  const pct = (arr: number[], p: number) => {
-    const s = [...arr].sort((a, b) => a - b);
-    return s[Math.min(s.length - 1, Math.max(0, Math.floor((p / 100) * s.length)))];
-  };
-  const lo = [0, 0, 0];
-  const hi = [0, 0, 0];
-  for (let a = 0; a < 3; a++) {
-    const col = coords.map((c) => c[a]);
-    lo[a] = pct(col, 2);
-    hi[a] = pct(col, 98);
-  }
-  const norm = (v: number, a: number) => {
-    const span = hi[a] - lo[a] || 1;
-    const t = Math.max(0, Math.min(1, (v - lo[a]) / span));
-    return t * 2 * MAP_SCALE - MAP_SCALE;
-  };
-  ids.forEach((id, i) => {
-    const c = coords[i];
-    out.set(id, [norm(c[0], 0), norm(c[1], 1), norm(c[2], 2)]);
-  });
-  return out;
-}
+// Show the whole embedded corpus; the ceiling is a safety guard for very large
+// vaults, not a display choice (the semantic layout is precomputed off-path).
+const NODE_LIMIT = 3000;
 
 /**
  * Build the interconnected graph over everything apOS has embedded — knowledge,
  * the Obsidian vault, notes, tasks, mail, events, people, projects, memory … —
- * from the single `search_index` vector space. Nodes carry both a force-graph
- * identity and a semantic-map position; links are the k-NN between them.
+ * from the single `search_index` vector space. Positions, named topic regions
+ * AND links all come from the precomputed atlas (see atlas.ts) — this path only
+ * lists the current nodes and reads the cache, so it stays fast (no vector join,
+ * no UMAP, no LLM).
  */
 export async function orbitGraph(): Promise<OrbitGraph> {
+  // Mail + calendar are excluded from the graph (the mails that matter are
+  // auto-analysed daily and already in the Obsidian vault).
+  const excluded = dsql`kind not in ('mail', 'event')`;
   const totalRow = await db.execute<{ n: number }>(
-    dsql`select count(*)::int as n from search_index where embedding is not null`,
+    dsql`select count(*)::int as n from search_index
+          where embedding is not null and ${excluded}`,
   );
   const total = Number([...totalRow][0]?.n ?? 0);
 
@@ -117,37 +59,23 @@ export async function orbitGraph(): Promise<OrbitGraph> {
     href: string | null;
     area_ref: string | null;
     project_refs: unknown;
-    embedding: unknown;
   }>(dsql`
     select id::text as id, kind,
            coalesce(nullif(title, ''), '(untitled)') as title,
-           href, area_ref, project_refs, embedding::text as embedding
+           href, area_ref, project_refs
       from search_index
-     where embedding is not null
+     where embedding is not null and ${excluded}
      order by updated_at desc
      limit ${NODE_LIMIT}
   `);
   const rows = [...nodeRows];
 
-  // Semantic projection (cached by the picked-id fingerprint).
-  const ids = rows.map((r) => r.id);
-  const key = `${ids.length}:${ids[0] ?? ""}:${ids[ids.length - 1] ?? ""}`;
-  let coords = projCache?.key === key ? projCache.coords : null;
-  if (!coords) {
-    try {
-      coords = project(
-        ids,
-        rows.map((r) => parseVec(r.embedding)),
-      );
-      projCache = { key, coords };
-    } catch {
-      coords = new Map();
-    }
-  }
+  const atlas = await readAtlas();
 
   const nodes: OrbitNode[] = rows.map((r) => {
     const refs = Array.isArray(r.project_refs) ? (r.project_refs as string[]) : [];
-    const p = coords!.get(r.id) ?? null;
+    const p = atlas?.positions.get(r.id) ?? null;
+    const cl = atlas?.clusters.get(r.id);
     return {
       id: r.id,
       kind: r.kind,
@@ -156,41 +84,23 @@ export async function orbitGraph(): Promise<OrbitGraph> {
       group: r.area_ref ?? refs[0] ?? null,
       mx: p ? p[0] : null,
       my: p ? p[1] : null,
-      mz: p ? p[2] : null,
+      mz: p ? 0 : null,
+      cluster: cl ?? null,
     };
   });
 
-  const linkRows = await db.execute<{
-    source: string;
-    target: string;
-    dist: number;
-  }>(dsql`
-    with picked as (
-      select id, embedding from search_index
-       where embedding is not null
-       order by updated_at desc
-       limit ${NODE_LIMIT}
-    )
-    select least(a.id::text, b.id::text) as source,
-           greatest(a.id::text, b.id::text) as target,
-           min(a.embedding <=> b.embedding)::float8 as dist
-      from picked a
-      cross join lateral (
-        select n.id, n.embedding
-          from picked n
-         where n.id <> a.id
-         order by a.embedding <=> n.embedding
-         limit ${NEIGHBORS}
-      ) b
-     where (a.embedding <=> b.embedding) < ${MAX_DIST}
-     group by 1, 2
-  `);
+  // Links come precomputed from the atlas; keep only those whose endpoints are
+  // in the currently-listed node set.
+  const present = new Set(nodes.map((n) => n.id));
+  const links: OrbitLink[] = (atlas?.links ?? []).filter(
+    (l) => present.has(l.source) && present.has(l.target),
+  );
 
-  const links: OrbitLink[] = [...linkRows].map((r) => ({
-    source: r.source,
-    target: r.target,
-    dist: Number(r.dist),
-  }));
-
-  return { nodes, links, total };
+  return {
+    nodes,
+    links,
+    regions: atlas?.regions ?? [],
+    total,
+    atlasBuiltAt: atlas?.builtAt ?? null,
+  };
 }

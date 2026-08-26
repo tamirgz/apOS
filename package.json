@@ -26,6 +26,8 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "echarts": "^6.1.0",
+    "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
     "lucide-react": "^1.25.0",
     "mammoth": "^1.12.0",
     "motion": "^12.42.2",
@@ -40,6 +42,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.6.0",
+    "three": "0.185.1",
     "three-spritetext": "^1.10.0",
     "umap-js": "^1.4.0",
     "zod": "^4.4.3"

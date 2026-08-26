@@ -50,6 +50,9 @@ export function OrbitGraph({ data }: { data: Graph }) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [ready, setReady] = useState(false);
   const [mode, setMode] = useState<Mode>("constellation");
+  // Tracks the mode the graph was last laid out in, so a mere filter toggle
+  // doesn't reheat the sim or re-zoom the camera (only a real mode switch does).
+  const lastLayoutMode = useRef<Mode | null>(null);
   const [query, setQuery] = useState("");
   // Current query for the (stable) colour accessor to read without re-init.
   const queryRef = useRef("");
@@ -241,15 +244,26 @@ export function OrbitGraph({ data }: { data: Graph }) {
     g.nodeRelSize(mode === "semantic" ? 2.5 : 4);
     g.linkOpacity(mode === "semantic" ? 0.12 : 0.7);
     g.graphData({ nodes: visible, links });
-    g.controls().autoRotate = mode === "constellation";
-    if (mode === "constellation") g.d3ReheatSimulation?.();
-    setTimeout(() => {
-      try {
-        g.zoomToFit(600, 50);
-      } catch {
-        /* ignore */
-      }
-    }, mode === "semantic" ? 200 : 1200);
+
+    // Only a real layout change (mode switch / first load) reheats the sim and
+    // reframes the camera. A filter toggle just hides/shows nodes in place — no
+    // scatter, no zoom.
+    const layoutChanged = lastLayoutMode.current !== mode;
+    lastLayoutMode.current = mode;
+    if (layoutChanged) {
+      g.controls().autoRotate = mode === "constellation";
+      if (mode === "constellation") g.d3ReheatSimulation?.();
+      setTimeout(
+        () => {
+          try {
+            g.zoomToFit(600, 50);
+          } catch {
+            /* ignore */
+          }
+        },
+        mode === "semantic" ? 200 : 1200,
+      );
+    }
   }, [allNodes, data.links, hidden, ready, mode]);
 
   // Search → re-highlight (nodes + labels) without rebuilding the graph.

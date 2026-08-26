@@ -321,8 +321,11 @@ export function OrbitGraph({ data }: { data: Graph }) {
               : "rgba(130,180,235,0.04)";
           }
           const t = Math.max(0, Math.min(1, 1 - (l.dist ?? 0.4) / 0.5));
-          const aa = (0.28 + 0.42 * t).toFixed(2);
-          return `rgba(130,180,235,${aa})`;
+          // On the map, draw edges Obsidian-style: light, clearly visible lines.
+          if (modeRef.current === "semantic") {
+            return `rgba(160,178,205,${(0.4 + 0.4 * t).toFixed(2)})`;
+          }
+          return `rgba(130,180,235,${(0.28 + 0.42 * t).toFixed(2)})`;
         })
         .linkWidth(0.8)
         .linkOpacity(0.7)
@@ -462,9 +465,9 @@ export function OrbitGraph({ data }: { data: Graph }) {
     // The map is a force-directed layout, so related nodes already sit together
     // and the edges are short — show them as structure (they define the graph),
     // just lighter than in the 3D view.
-    g.nodeRelSize(semantic ? 1.8 : 4);
-    g.linkWidth(semantic ? 0.4 : 0.8);
-    g.linkOpacity(semantic ? 0.18 : 0.7);
+    g.nodeRelSize(semantic ? 2 : 4);
+    g.linkWidth(semantic ? 0.5 : 0.8);
+    g.linkOpacity(semantic ? 0.45 : 0.7);
     g.graphData({ nodes: visible, links });
 
     // Only reshape the camera/controls (and the atlas overlay) on an actual mode

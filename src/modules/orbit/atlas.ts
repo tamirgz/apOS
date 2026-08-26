@@ -177,10 +177,15 @@ async function nameRegions(
   return names;
 }
 
+// Mail + calendar are excluded from the graph: the mails that matter are
+// auto-analysed daily and already live in the Obsidian vault, so raw mail/event
+// rows are redundant noise here.
+const EXCLUDED_KINDS = dsql`kind not in ('mail', 'event')`;
+
 async function corpusFingerprint(): Promise<string> {
   const row = await db.execute<{ n: number; mx: string | null }>(
     dsql`select count(*)::int as n, max(updated_at)::text as mx
-           from search_index where embedding is not null`,
+           from search_index where embedding is not null and ${EXCLUDED_KINDS}`,
   );
   const r = [...row][0];
   return `${r?.n ?? 0}:${r?.mx ?? ""}`;
@@ -193,7 +198,7 @@ async function fetchLinks(): Promise<[string, string, number][]> {
     ...(await db.execute<{ source: string; target: string; dist: number }>(dsql`
       with picked as (
         select id, embedding from search_index
-         where embedding is not null
+         where embedding is not null and ${EXCLUDED_KINDS}
          order by updated_at desc
          limit ${ATLAS_LIMIT}
       )
@@ -222,7 +227,7 @@ async function build(fingerprint: string): Promise<AtlasBlob> {
       select id::text as id, kind,
              coalesce(nullif(title, ''), '(untitled)') as title
         from search_index
-       where embedding is not null
+       where embedding is not null and ${EXCLUDED_KINDS}
        order by updated_at desc
        limit ${ATLAS_LIMIT}
     `)),

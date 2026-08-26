@@ -43,8 +43,12 @@ const NODE_LIMIT = 3000;
  * no UMAP, no LLM).
  */
 export async function orbitGraph(): Promise<OrbitGraph> {
+  // Mail + calendar are excluded from the graph (the mails that matter are
+  // auto-analysed daily and already in the Obsidian vault).
+  const excluded = dsql`kind not in ('mail', 'event')`;
   const totalRow = await db.execute<{ n: number }>(
-    dsql`select count(*)::int as n from search_index where embedding is not null`,
+    dsql`select count(*)::int as n from search_index
+          where embedding is not null and ${excluded}`,
   );
   const total = Number([...totalRow][0]?.n ?? 0);
 
@@ -60,7 +64,7 @@ export async function orbitGraph(): Promise<OrbitGraph> {
            coalesce(nullif(title, ''), '(untitled)') as title,
            href, area_ref, project_refs
       from search_index
-     where embedding is not null
+     where embedding is not null and ${excluded}
      order by updated_at desc
      limit ${NODE_LIMIT}
   `);

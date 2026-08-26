@@ -38,6 +38,11 @@ export function OrbitGraph({ data }: { data: Graph }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  // The graph is created after a dynamic import, so it isn't ready on first
+  // render. Flip this when it is, to (re)run the data-feeding effect below —
+  // without it, the initial graphData() call bailed on a null graph and the
+  // scene stayed empty until a filter toggle happened to re-run it.
+  const [ready, setReady] = useState(false);
 
   // Kinds present, most-common first — drives the legend/filter.
   const kinds = useMemo(() => {
@@ -87,9 +92,14 @@ export function OrbitGraph({ data }: { data: Graph }) {
               n.kind,
             )}</span><br>${esc(n.title)}</div>`,
         )
-        .linkColor(() => "rgba(150,180,210,0.18)")
-        .linkWidth(0.5)
-        .linkOpacity(0.3)
+        .linkColor((l: { dist?: number }) => {
+          // Brighter for closer (more related) links; clearly visible either way.
+          const t = Math.max(0, Math.min(1, 1 - (l.dist ?? 0.4) / 0.5));
+          const a = (0.28 + 0.42 * t).toFixed(2);
+          return `rgba(130,180,235,${a})`;
+        })
+        .linkWidth(0.8)
+        .linkOpacity(0.7)
         .width(el.clientWidth || 800)
         .height(el.clientHeight || 600)
         .onNodeClick((n: GNode) => {
@@ -111,6 +121,14 @@ export function OrbitGraph({ data }: { data: Graph }) {
           );
         });
       graphRef.current = g;
+
+      // Pull related nodes closer so clusters read as clusters.
+      try {
+        g.d3Force("charge")?.strength(-32);
+        g.d3Force("link")?.distance(26);
+      } catch {
+        /* forces not ready — defaults are fine */
+      }
 
       // Gentle orbital drift.
       const controls = g.controls();
@@ -146,6 +164,10 @@ export function OrbitGraph({ data }: { data: Graph }) {
       };
       setTimeout(fit, 1500);
       setTimeout(fit, 3500);
+
+      // Graph is live — let the data effect feed it (it ran too early to catch
+      // the async init).
+      if (!disposed) setReady(true);
     })();
 
     return () => {
@@ -173,7 +195,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
       (l) => ids.has(l.source) && ids.has(l.target),
     );
     g.graphData({ nodes: visible, links });
-  }, [allNodes, data.links, hidden]);
+  }, [allNodes, data.links, hidden, ready]);
 
   const toggle = (k: string) =>
     setHidden((prev) => {

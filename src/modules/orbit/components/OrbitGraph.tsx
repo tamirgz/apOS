@@ -30,50 +30,74 @@ const colorFor = (k: string) => KIND_COLORS[k] ?? "#8aa0b3";
 const DIM = "#2b3440";
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// A link endpoint is a string id at first, then the node object after render.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const linkEnd = (v: any): string => (typeof v === "object" && v ? v.id : v);
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// A soft radial "territory" glow for a semantic-map region, tinted by kind.
-function makeHalo(THREE: any, hex: string, radius: number) {
-  const cv = document.createElement("canvas");
-  cv.width = cv.height = 128;
-  const ctx = cv.getContext("2d")!;
-  const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grad.addColorStop(0, hex + "66");
-  grad.addColorStop(0.55, hex + "22");
-  grad.addColorStop(1, hex + "00");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 128, 128);
-  const mat = new THREE.SpriteMaterial({
-    map: new THREE.CanvasTexture(cv),
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  const sp = new THREE.Sprite(mat);
-  const d = radius * 3.2; // cover the cloud, not just the core
-  sp.scale.set(d, d, 1);
-  return sp;
+type XY = { x: number; y: number };
+
+// Convex hull (Andrew's monotone chain) → ordered boundary points.
+function convexHull(pts: XY[]): XY[] {
+  if (pts.length < 3) return pts;
+  const p = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o: XY, a: XY, b: XY) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: XY[] = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0)
+      lower.pop();
+    lower.push(q);
+  }
+  const upper: XY[] = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0)
+      upper.pop();
+    upper.push(q);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
 }
 
-// Territory halos (behind) + topic labels (in front) for the semantic map.
+// A thin territory OUTLINE — the region's expanded convex hull. Minimal, not glowy.
+function makeOutline(THREE: any, hex: string, hull: XY[], cx: number, cy: number) {
+  const pad = 1.12; // small breathing room around the cloud
+  const pts = hull.map(
+    (h) => new THREE.Vector3(cx + (h.x - cx) * pad, cy + (h.y - cy) * pad, 0),
+  );
+  if (pts.length) pts.push(pts[0]);
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: 0.28 });
+  return new THREE.Line(geo, mat);
+}
+
+// Thin territory outlines + topic labels for the semantic map.
 function buildAtlasObjects(
   THREE: any,
   SpriteText: any,
   scene: any,
   regions: OrbitRegion[],
+  members: Map<number, GNode[]>,
   color: (k: string) => string,
 ) {
   const objs: any[] = [];
   for (const r of regions) {
-    const halo = makeHalo(THREE, color(r.kind), r.r);
-    halo.position.set(r.cx, r.cy, -3);
-    scene.add(halo);
-    objs.push(halo);
+    const pts = (members.get(r.id) ?? [])
+      .filter((n) => n.mx != null)
+      .map((n) => ({ x: n.mx as number, y: n.my ?? 0 }));
+    if (pts.length >= 3) {
+      const outline = makeOutline(THREE, color(r.kind), convexHull(pts), r.cx, r.cy);
+      outline.position.z = -1;
+      scene.add(outline);
+      objs.push(outline);
+    }
     const lbl = new SpriteText(r.label);
     lbl.color = "#eef4fb";
-    lbl.textHeight = 11;
+    lbl.textHeight = 10;
     lbl.fontWeight = "600";
-    lbl.backgroundColor = "rgba(6,10,16,0.5)";
+    lbl.backgroundColor = "rgba(6,10,16,0.55)";
     lbl.padding = 2;
     lbl.position.set(r.cx, r.cy, 4);
     scene.add(lbl);
@@ -119,6 +143,10 @@ export function OrbitGraph({ data }: { data: Graph }) {
   // Semantic-search results: a set of matching node ids (null = title-match mode).
   const [semanticIds, setSemanticIds] = useState<Set<string> | null>(null);
   const [searching, setSearching] = useState(false);
+  // Insights panel: which tab, and the focused topic / bridge (for highlighting).
+  const [panelTab, setPanelTab] = useState<"topics" | "bridges" | "kinds">("topics");
+  const [activeRegion, setActiveRegion] = useState<number | null>(null);
+  const [activeBridge, setActiveBridge] = useState<string | null>(null);
   // The mode the current layout was built for — lets us tell a real layout
   // change (mode switch) apart from a mere filter toggle.
   const lastLayoutMode = useRef<Mode | null>(null);
@@ -156,14 +184,74 @@ export function OrbitGraph({ data }: { data: Graph }) {
     return { allNodes: nodes, hubIds: hubs };
   }, [data]);
 
+  // Assign each placed node to its nearest topic region, and derive the members
+  // per region + the cross-topic "bridges" (links whose ends are in different
+  // regions). All client-side from the atlas centroids — no extra server data.
+  const { nodeRegion, regionMembers, bridges } = useMemo(() => {
+    const nodeRegion = new Map<string, number>();
+    const regionMembers = new Map<number, GNode[]>();
+    for (const r of data.regions) regionMembers.set(r.id, []);
+    for (const n of allNodes) {
+      if (n.mx == null) continue;
+      let best = -1;
+      let bd = Infinity;
+      for (const r of data.regions) {
+        const dx = n.mx - r.cx;
+        const dy = (n.my ?? 0) - r.cy;
+        const d = dx * dx + dy * dy;
+        if (d < bd) {
+          bd = d;
+          best = r.id;
+        }
+      }
+      if (best >= 0) {
+        nodeRegion.set(n.id, best);
+        regionMembers.get(best)!.push(n);
+      }
+    }
+    const lid = (v: unknown): string =>
+      typeof v === "object" && v ? (v as { id: string }).id : (v as string);
+    const pairs = new Map<string, { a: number; b: number; count: number }>();
+    for (const l of data.links) {
+      const ra = nodeRegion.get(lid(l.source));
+      const rb = nodeRegion.get(lid(l.target));
+      if (ra == null || rb == null || ra === rb) continue;
+      const a = Math.min(ra, rb);
+      const b = Math.max(ra, rb);
+      const key = `${a}|${b}`;
+      const e = pairs.get(key) ?? { a, b, count: 0 };
+      e.count++;
+      pairs.set(key, e);
+    }
+    const bridges = [...pairs.entries()]
+      .map(([key, v]) => ({ key, ...v }))
+      .sort((x, y) => y.count - x.count)
+      .slice(0, 12);
+    return { nodeRegion, regionMembers, bridges };
+  }, [allNodes, data.regions, data.links]);
+
+  const regionLabel = (id: number) =>
+    data.regions.find((r) => r.id === id)?.label ?? `topic ${id}`;
+
   // What counts as "highlighted": a semantic-search hit when a search has run,
   // otherwise a live title-substring match. Held in a ref so the stable graph
   // accessors read the latest predicate without re-init.
+  // Refs so the stable graph accessors read the latest focus without re-init.
+  const nodeRegionRef = useRef(nodeRegion);
+  nodeRegionRef.current = nodeRegion;
+  const activeBridgeRef = useRef<string | null>(null);
+  activeBridgeRef.current = activeBridge;
   const highlightRef = useRef<(n: GNode) => boolean>(() => true);
-  highlightRef.current = (n) =>
-    semanticIds
-      ? semanticIds.has(n.id)
-      : !queryRef.current || n.title.toLowerCase().includes(queryRef.current);
+  highlightRef.current = (n) => {
+    if (semanticIds) return semanticIds.has(n.id);
+    if (activeBridge) {
+      const [a, b] = activeBridge.split("|").map(Number);
+      const r = nodeRegion.get(n.id);
+      return r === a || r === b;
+    }
+    if (activeRegion != null) return nodeRegion.get(n.id) === activeRegion;
+    return !queryRef.current || n.title.toLowerCase().includes(queryRef.current);
+  };
   const matches = (n: GNode) => highlightRef.current(n);
 
   // Fly the camera to a node (used by search + node click).
@@ -249,10 +337,20 @@ export function OrbitGraph({ data }: { data: Graph }) {
           (s as unknown as { position: { y: number } }).position.y = 9;
           return s;
         })
-        .linkColor((l: { dist?: number }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .linkColor((l: any) => {
+          // Bridge focus: light up the cross-topic links, mute the rest.
+          if (activeBridgeRef.current) {
+            const [a, b] = activeBridgeRef.current.split("|").map(Number);
+            const ra = nodeRegionRef.current.get(linkEnd(l.source));
+            const rb = nodeRegionRef.current.get(linkEnd(l.target));
+            return (ra === a && rb === b) || (ra === b && rb === a)
+              ? "rgba(255,214,110,0.9)"
+              : "rgba(130,180,235,0.04)";
+          }
           const t = Math.max(0, Math.min(1, 1 - (l.dist ?? 0.4) / 0.5));
-          const a = (0.28 + 0.42 * t).toFixed(2);
-          return `rgba(130,180,235,${a})`;
+          const aa = (0.28 + 0.42 * t).toFixed(2);
+          return `rgba(130,180,235,${aa})`;
         })
         .linkWidth(0.8)
         .linkOpacity(0.7)
@@ -409,7 +507,14 @@ export function OrbitGraph({ data }: { data: Graph }) {
         clearAtlasObjects(scene, atlasObjsRef.current);
         atlasObjsRef.current =
           semantic && libs
-            ? buildAtlasObjects(libs.THREE, libs.SpriteText, scene, data.regions, colorFor)
+            ? buildAtlasObjects(
+                libs.THREE,
+                libs.SpriteText,
+                scene,
+                data.regions,
+                regionMembers,
+                colorFor,
+              )
             : [];
       }
       // Toggle hub labels (accessor reads modeRef): on in constellation, off here.
@@ -437,15 +542,60 @@ export function OrbitGraph({ data }: { data: Graph }) {
       }, semantic ? 300 : 1200);
     }
     lastLayoutMode.current = mode;
-  }, [allNodes, data.links, data.regions, hidden, ready, mode]);
+  }, [allNodes, data.links, data.regions, regionMembers, hidden, ready, mode]);
 
-  // Search → re-highlight (nodes + labels) without rebuilding the graph.
+  // Re-highlight (nodes + links + labels) on any focus change, without rebuilding.
   useEffect(() => {
     const g = graphRef.current;
     if (!g) return;
     g.nodeColor(g.nodeColor());
+    g.linkColor(g.linkColor());
     g.nodeThreeObject(g.nodeThreeObject());
-  }, [query, semanticIds, ready]);
+  }, [query, semanticIds, activeRegion, activeBridge, ready]);
+
+  const openNode = (n: GNode) => {
+    if (n.href && /^\/m\//.test(n.href)) {
+      router.push(n.href);
+      return;
+    }
+    const g = graphRef.current;
+    if (g) flyTo(g, n);
+  };
+
+  const frameAt = (cx: number, cy: number, z: number) => {
+    const g = graphRef.current;
+    if (g) g.cameraPosition({ x: cx, y: cy, z }, { x: cx, y: cy, z: 0 }, 800);
+  };
+
+  // Focus a topic: highlight its members, frame it (switching to the map first).
+  const focusTopic = (rid: number) => {
+    const r = data.regions.find((x) => x.id === rid);
+    setActiveBridge(null);
+    setActiveRegion((cur) => (cur === rid ? null : rid));
+    if (!r) return;
+    const doFrame = () => frameAt(r.cx, r.cy, Math.max(220, r.r * 3));
+    if (mode !== "semantic") {
+      setMode("semantic");
+      setTimeout(doFrame, 700);
+    } else doFrame();
+  };
+
+  // Focus a bridge: light up the cross-links, frame both territories.
+  const focusBridge = (key: string, a: number, b: number) => {
+    const ra = data.regions.find((x) => x.id === a);
+    const rb = data.regions.find((x) => x.id === b);
+    setActiveRegion(null);
+    setActiveBridge((cur) => (cur === key ? null : key));
+    if (!ra || !rb) return;
+    const cx = (ra.cx + rb.cx) / 2;
+    const cy = (ra.cy + rb.cy) / 2;
+    const span = Math.hypot(ra.cx - rb.cx, ra.cy - rb.cy) + Math.max(ra.r, rb.r) * 2;
+    const doFrame = () => frameAt(cx, cy, Math.max(260, span * 1.1));
+    if (mode !== "semantic") {
+      setMode("semantic");
+      setTimeout(doFrame, 700);
+    } else doFrame();
+  };
 
   const toggle = (k: string) =>
     setHidden((prev) => {
@@ -538,32 +688,155 @@ export function OrbitGraph({ data }: { data: Graph }) {
         ) : null}
       </div>
 
-      {/* legend / kind filter */}
-      <div className="absolute right-4 top-4 z-10 max-h-[70%] w-40 overflow-y-auto rounded-xl glass p-2.5">
-        <div className="mb-1.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
-          filter · click to toggle
+      {/* insights panel — topics · bridges · kinds */}
+      <div className="absolute right-4 top-4 z-10 flex max-h-[84%] w-52 flex-col rounded-xl glass p-2.5">
+        <div className="mb-2 flex gap-1 text-[10px]">
+          {(["topics", "bridges", "kinds"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => {
+                setPanelTab(t);
+                if (t === "kinds") {
+                  setActiveRegion(null);
+                  setActiveBridge(null);
+                }
+              }}
+              className={`flex-1 rounded-md px-1.5 py-1 capitalize transition ${
+                panelTab === t
+                  ? "bg-ion/20 text-ion"
+                  : "text-ink-faint hover:text-ink-dim"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
         </div>
-        <div className="flex flex-col gap-0.5">
-          {kinds.map(([k, n]) => {
-            const off = hidden.has(k);
-            return (
-              <button
-                key={k}
-                type="button"
-                onClick={() => toggle(k)}
-                className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs transition hover:bg-white/6 ${
-                  off ? "opacity-35" : ""
-                }`}
-              >
-                <span
-                  className="size-2.5 shrink-0 rounded-full"
-                  style={{ background: colorFor(k) }}
-                />
-                <span className="flex-1 truncate text-ink-dim">{k}</span>
-                <span className="font-mono text-[9px] text-ink-faint">{n}</span>
-              </button>
-            );
-          })}
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {panelTab === "topics" ? (
+            data.regions.length === 0 ? (
+              <p className="px-1 py-2 text-[11px] leading-snug text-ink-faint">
+                Topics are still being mapped in the background.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                <p className="px-1 pb-1 text-[10px] leading-snug text-ink-faint">
+                  Click a topic to zoom in and list its items.
+                </p>
+                {[...data.regions]
+                  .sort((a, b) => b.count - a.count)
+                  .map((r) => {
+                    const active = activeRegion === r.id;
+                    const mem = regionMembers.get(r.id) ?? [];
+                    return (
+                      <div key={r.id}>
+                        <button
+                          type="button"
+                          onClick={() => focusTopic(r.id)}
+                          className={`flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs transition ${
+                            active ? "bg-white/10" : "hover:bg-white/6"
+                          }`}
+                        >
+                          <span
+                            className="size-2.5 shrink-0 rounded-full"
+                            style={{ background: colorFor(r.kind) }}
+                          />
+                          <span className="flex-1 truncate text-ink-dim">{r.label}</span>
+                          <span className="font-mono text-[9px] text-ink-faint">
+                            {r.count}
+                          </span>
+                        </button>
+                        {active ? (
+                          <div className="mb-1 ml-3.5 mt-0.5 max-h-44 overflow-y-auto border-l border-white/10 pl-2">
+                            {mem.slice(0, 24).map((n) => (
+                              <button
+                                key={n.id}
+                                type="button"
+                                title={n.title}
+                                onClick={() => openNode(n)}
+                                className="block w-full truncate py-0.5 text-left text-[11px] text-ink-faint transition hover:text-ink"
+                              >
+                                {n.title}
+                              </button>
+                            ))}
+                            {mem.length > 24 ? (
+                              <div className="py-0.5 text-[10px] text-ink-faint">
+                                +{mem.length - 24} more
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+              </div>
+            )
+          ) : null}
+
+          {panelTab === "bridges" ? (
+            bridges.length === 0 ? (
+              <p className="px-1 py-2 text-[11px] leading-snug text-ink-faint">
+                No cross-topic links yet.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                <p className="px-1 pb-1 text-[10px] leading-snug text-ink-faint">
+                  Topics tied together by related items — click to light up the links.
+                </p>
+                {bridges.map((b) => {
+                  const active = activeBridge === b.key;
+                  return (
+                    <button
+                      key={b.key}
+                      type="button"
+                      onClick={() => focusBridge(b.key, b.a, b.b)}
+                      className={`flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition ${
+                        active ? "bg-white/10" : "hover:bg-white/6"
+                      }`}
+                    >
+                      <span className="flex-1 text-[11px] leading-tight text-ink-dim">
+                        {regionLabel(b.a)}
+                        <span className="text-ink-faint"> ↔ </span>
+                        {regionLabel(b.b)}
+                      </span>
+                      <span className="font-mono text-[9px] text-ink-faint">
+                        {b.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )
+          ) : null}
+
+          {panelTab === "kinds" ? (
+            <div className="flex flex-col gap-0.5">
+              <p className="px-1 pb-1 text-[10px] leading-snug text-ink-faint">
+                Click to hide / show a source kind.
+              </p>
+              {kinds.map(([k, n]) => {
+                const off = hidden.has(k);
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => toggle(k)}
+                    className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs transition hover:bg-white/6 ${
+                      off ? "opacity-35" : ""
+                    }`}
+                  >
+                    <span
+                      className="size-2.5 shrink-0 rounded-full"
+                      style={{ background: colorFor(k) }}
+                    />
+                    <span className="flex-1 truncate text-ink-dim">{k}</span>
+                    <span className="font-mono text-[9px] text-ink-faint">{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       </div>
 

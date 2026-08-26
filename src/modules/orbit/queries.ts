@@ -36,7 +36,7 @@ export interface OrbitGraph {
 const NODE_LIMIT = 800;
 const NEIGHBORS = 6;
 const MAX_DIST = 0.5;
-const MAP_SCALE = 180; // half-extent of the semantic map, in scene units
+const MAP_SCALE = 280; // half-extent of the semantic map, in scene units
 
 // The UMAP projection is the expensive part (~seconds), and the node set is
 // stable between loads, so memoise it by the picked-id fingerprint.
@@ -64,23 +64,32 @@ function project(
   }
   const umap = new UMAP({
     nComponents: 3,
-    nNeighbors: Math.min(15, ids.length - 1),
-    minDist: 0.1,
-    spread: 1.2,
-    nEpochs: 300,
+    nNeighbors: Math.min(20, ids.length - 1),
+    // Larger minDist/spread push points apart so clusters read as clouds, not
+    // packed clumps (the first cut used 0.1 and everything piled up).
+    minDist: 0.6,
+    spread: 2.2,
+    nEpochs: 400,
   });
   const coords = umap.fit(vectors);
-  // per-axis min/max → [-MAP_SCALE, MAP_SCALE]
-  const lo = [Infinity, Infinity, Infinity];
-  const hi = [-Infinity, -Infinity, -Infinity];
-  for (const c of coords)
-    for (let a = 0; a < 3; a++) {
-      lo[a] = Math.min(lo[a], c[a]);
-      hi[a] = Math.max(hi[a], c[a]);
-    }
+  // Robust per-axis normalisation: map the 2nd–98th percentile band to the box
+  // and clamp outliers, so the bulk fills the space instead of cramming the
+  // centre while a few far points stretch the range.
+  const pct = (arr: number[], p: number) => {
+    const s = [...arr].sort((a, b) => a - b);
+    return s[Math.min(s.length - 1, Math.max(0, Math.floor((p / 100) * s.length)))];
+  };
+  const lo = [0, 0, 0];
+  const hi = [0, 0, 0];
+  for (let a = 0; a < 3; a++) {
+    const col = coords.map((c) => c[a]);
+    lo[a] = pct(col, 2);
+    hi[a] = pct(col, 98);
+  }
   const norm = (v: number, a: number) => {
     const span = hi[a] - lo[a] || 1;
-    return ((v - lo[a]) / span) * 2 * MAP_SCALE - MAP_SCALE;
+    const t = Math.max(0, Math.min(1, (v - lo[a]) / span));
+    return t * 2 * MAP_SCALE - MAP_SCALE;
   };
   ids.forEach((id, i) => {
     const c = coords[i];

@@ -228,9 +228,18 @@ export function OrbitGraph({ data }: { data: Graph }) {
       }
     }
     const ids = new Set(visible.map((n) => n.id));
-    const links = data.links.filter(
-      (l) => ids.has(l.source) && ids.has(l.target),
-    );
+    // 3d-force-graph rewrites link.source/target from the string id to the node
+    // OBJECT on first render, so read the id either way — and hand it fresh copies
+    // each time so it never mutates our source-of-truth `data.links`.
+    const sid = (v: unknown): string =>
+      typeof v === "object" && v ? (v as { id: string }).id : (v as string);
+    const links = data.links
+      .filter((l) => ids.has(sid(l.source)) && ids.has(sid(l.target)))
+      .map((l) => ({ source: sid(l.source), target: sid(l.target), dist: l.dist }));
+    // Semantic map: smaller stars + faint links (position already shows
+    // relatedness). Constellation: full size + visible links pulling clusters.
+    g.nodeRelSize(mode === "semantic" ? 2.5 : 4);
+    g.linkOpacity(mode === "semantic" ? 0.12 : 0.7);
     g.graphData({ nodes: visible, links });
     g.controls().autoRotate = mode === "constellation";
     if (mode === "constellation") g.d3ReheatSimulation?.();

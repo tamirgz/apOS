@@ -398,7 +398,11 @@ export async function runAttempt(attemptId: string): Promise<void> {
   // then breaks EVERY later run that shares it (observed). Giving each attempt
   // its own throwaway dir means a killed run can only ever poison itself — the
   // next run starts clean. Removed in `finally`.
-  const openDataDir = join(homedir(), ".aios", "opencode-runs", attempt.id.slice(0, 8));
+  //
+  // MUST live under the sandbox home: the seatbelt confines writes to the
+  // workdir + harness home + tmp, so a dir under the real ~/.aios is blocked
+  // (EPERM on opencode's mkdir) — which broke every seatboxed opencode run.
+  const openDataDir = join(harnessHome("cli"), "opencode-runs", attempt.id.slice(0, 8));
 
   // Stall-based, not wall-clock: a run is only killed when it stops making
   // progress. As long as the executor keeps emitting events (tool calls, text,

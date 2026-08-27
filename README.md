@@ -83,6 +83,20 @@ machine's job.
 
 <p align="center"><img src="docs/screenshots/knowledge.png" alt="Knowledge — paste-anything capture with enriched, tagged, searchable cards" width="820"></p>
 
+### 🕸️ See your whole system as a living graph
+**Orbit** renders everything apOS has connected — knowledge, your Obsidian vault, notes,
+ideas, tasks, projects, people, memory — as one interconnected graph over the same semantic
+index. Switch between a **3D constellation** (a live force layout you can fly through) and a
+**2D map** — an **Obsidian‑style physics graph**: draggable, self‑organizing, and clustered
+by meaning into colour‑coded **topic territories a local model names for you**. Search by
+meaning to light up the nearest items, drill into any topic, or trace the **bridges** that
+quietly connect two subjects.
+
+> _Reach for it when:_ you want to _see_ how your thinking hangs together — which topics are
+> dense, what's isolated, and where two areas of your life overlap.
+
+<p align="center"><img src="docs/screenshots/orbit.png" alt="Orbit — a live physics knowledge graph, clustered by meaning into named topic territories with semantic search" width="820"></p>
+
 ### 🗂️ The everyday surfaces, connected
 **Tasks, Projects, Calendar, Inbox, Notes, People** — the ordinary building blocks, but
 cross‑linked (a task knows its project; a note knows its idea) and rolled up into one
@@ -282,7 +296,7 @@ Nav entry, routes (`/m/foo`), dashboard widgets, ⌘K commands, AI tools, agent 
 - **Think & decide** — **Ask** (cited answers across your whole corpus) · an **Ideas** pipeline with an AI reality‑check → promote to project · **Projects** with health, goals, next‑action + a per‑project advisor · **Tasks** (board, priorities, due dates, project/feature links).
 - **Automate** — autonomous **Agents** (cron‑scheduled, live transcripts, idempotent ledger, install‑from‑template) · a **Workbench** to delegate longer jobs to CLI executors · an approvals queue for risky actions · notifications to the bell + Slack.
 - **Connect & control** — per‑task **AI routing** (local Ollama · Apple MLX · optional Claude subscription · optional Gemini · OpenRouter with a free tier) · memory blocks injected into every call · **Calendar** (Google/ICS sync) + a Today "needs‑you" queue · People · integrations for Google, Slack (two‑way), Notion, Obsidian, keyless web search & a reader proxy · 5 themes.
-- **Foundation** — one **semantic search** across everything · local‑first & private (no metered key can start billing) · a plugin architecture (a module = a folder + two registry lines) · container & native editions with a one‑command installer.
+- **Foundation** — one **semantic search** across everything · an **Orbit** knowledge graph (a live 2D Obsidian‑style physics map + a 3D constellation, clustered by meaning into named topics) · local‑first & private (no metered key can start billing) · a plugin architecture (a module = a folder + two registry lines) · container & native editions with a one‑command installer.
 
 ## Roadmap — thinking out loud
 
@@ -291,7 +305,6 @@ These are directions I'm considering, and I'm honestly trying to work out which 
 - 🎙️ **Voice capture** — speak a thought; it's transcribed locally and triaged into the right module.
 - 📱 **Quick‑capture companion** — a menubar drop‑zone and a phone PWA, synced back to your system.
 - 🗣️ **Spoken daily brief** — your morning digest as local text‑to‑speech, ready before coffee.
-- 🕸️ **Constellation view** — an interactive graph of how your notes, ideas, and projects connect.
 - 🔁 **Offline‑first sync** — CRDT‑based, so your system travels across devices and merges later.
 - ✉️ **Email co‑pilot** — draft replies grounded in your own context; triage the inbox for you.
 - 🧩 **Module marketplace** — install community modules and agents in a click.

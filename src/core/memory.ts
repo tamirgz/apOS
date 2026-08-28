@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, sql as dsql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import {
   MEMORY_TIER,
@@ -508,5 +508,90 @@ export async function recallSemantic(
       .filter((r) => r.text);
   } catch {
     return [];
+  }
+}
+
+// ── Per-agent self-learning ──────────────────────────────────────────────────
+// The archival `source` field already stamps who wrote a memory
+// (`agent-run:<name>`). These functions turn that provenance into a real
+// feedback loop: an agent RECALLS only its own past lessons at run start, and
+// REFLECTS on each run to write a fresh one. The weekly distill still abstracts
+// the global picture; this is the tight, per-agent inner loop.
+
+/** The lessons THIS agent wrote about itself, newest first. Best-effort. */
+export async function recallAgentLessons(
+  agentName: string,
+  limit = 5,
+): Promise<string[]> {
+  try {
+    const rows = await db
+      .select({ text: memoryEntries.text })
+      .from(memoryEntries)
+      .where(
+        and(
+          eq(memoryEntries.source, `agent-run:${agentName}`),
+          eq(memoryEntries.kind, "lesson"),
+        ),
+      )
+      .orderBy(desc(memoryEntries.createdAt))
+      .limit(limit);
+    return rows.map((r) => r.text).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Reflect on a just-finished run and, if there is something worth remembering,
+ * store ONE terse lesson scoped to this agent (kind `lesson`, source
+ * `agent-run:<name>`) so its next run recalls it. Runs on the free local
+ * `memory.distill` route; fully best-effort — never affects the run.
+ */
+export async function reflectOnRun(input: {
+  agentName: string;
+  prompt: string;
+  status: string;
+  error?: string | null;
+  report?: string | null;
+}): Promise<void> {
+  try {
+    const { resolveRoute } = await import("@/core/ai/routing");
+    const route = await resolveRoute("memory.distill");
+    const system = [
+      "You are the reflective memory of an autonomous background agent. In ONE terse sentence, capture a durable LESSON for this agent's NEXT run — a concrete 'next time, do/avoid X' grounded in what just happened (a recurring failure, a wasteful path, a heuristic that worked).",
+      "If the run was unremarkable and there is nothing worth remembering, reply with exactly: NONE.",
+      "No preamble, no quotes, no markdown — output only the one-sentence lesson, or NONE.",
+    ].join("\n");
+    const user = [
+      `AGENT: ${input.agentName}`,
+      `TASK: ${input.prompt.slice(0, 700)}`,
+      `OUTCOME: ${input.status}${input.error ? ` — ${input.error.slice(0, 240)}` : ""}`,
+      input.report ? `WHAT IT REPORTED:\n${input.report.slice(0, 700)}` : "",
+    ].join("\n");
+
+    let text = "";
+    for await (const ev of route.provider.run({
+      system,
+      messages: [{ role: "user", content: `/no_think\n${user}` }],
+      tools: [],
+      toolCtx: { db },
+      model: route.model,
+      maxTurns: 1,
+    })) {
+      if (ev.type === "done") text = ev.text;
+      else if (ev.type === "text" && !text) text += ev.text;
+    }
+    const lesson = text
+      .replace(/<think>[\s\S]*?<\/think>/gi, "")
+      .replace(/^["'\s]+|["'\s]+$/g, "")
+      .trim();
+    if (!lesson || /^none\.?$/i.test(lesson) || lesson.length < 12) return;
+    await rememberEntry({
+      kind: "lesson",
+      source: `agent-run:${input.agentName}`,
+      text: lesson.slice(0, 400),
+    });
+  } catch {
+    // best-effort — reflection failure must never affect the run
   }
 }

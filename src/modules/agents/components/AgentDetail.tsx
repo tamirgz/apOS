@@ -10,6 +10,7 @@ import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { useProviderModels } from "@/core/ui/useProviderModels";
 import { deleteAgent, requestRun, updateAgent } from "../actions";
+import type { AgentDocView } from "../agent-doc";
 import { RUN_STATUS_META, runDuration } from "./runMeta";
 
 interface TranscriptEvent {
@@ -135,12 +136,15 @@ export function AgentDetail({
   runs,
   allTools,
   defaultRoute,
+  doc,
 }: {
   agent: Agent;
   runs: AgentRun[];
   allTools: string[];
   /** What this agent falls back to when it has no provider/model override. */
   defaultRoute: { providerId: AIProviderId; model: string };
+  /** Derived "how it works": what it reads / suggests / learns. */
+  doc: AgentDocView;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -224,6 +228,52 @@ export function AgentDetail({
           <Trash2 className="size-3" />
           {confirmDelete ? "sure?" : "delete"}
         </button>
+      </div>
+
+      {/* How it works — derived from the agent's tools + the shared learning loop */}
+      <div className="glass mb-5 rounded-2xl p-5">
+        <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
+          how it works
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="mb-1.5 text-xs font-semibold text-ink">Reads (inputs)</p>
+            <ul className="space-y-1">
+              {doc.reads.length ? (
+                doc.reads.map((r) => (
+                  <li key={r.name} className="text-[11px] leading-snug text-ink-dim">
+                    <code className="text-ion">{r.name}</code> — {r.gist}
+                  </li>
+                ))
+              ) : (
+                <li className="text-[11px] text-ink-faint">—</li>
+              )}
+            </ul>
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-semibold text-ink">Suggests / acts</p>
+            <ul className="space-y-1">
+              {doc.suggests.length ? (
+                doc.suggests.map((s) => (
+                  <li key={s.name} className="text-[11px] leading-snug text-ink-dim">
+                    <code className="text-flare">{s.name}</code> — {s.gist}
+                  </li>
+                ))
+              ) : (
+                <li className="text-[11px] text-ink-faint">
+                  Read-only — produces briefs/digests, raises nothing.
+                </li>
+              )}
+            </ul>
+          </div>
+        </div>
+        <div className="mt-4 border-t border-white/5 pt-3">
+          <p className="mb-1 text-xs font-semibold text-ink">Learns</p>
+          <p className="text-[11px] leading-snug text-ink-faint">{doc.learns}</p>
+        </div>
+        <p className="mt-2 text-[10px] text-ink-faint">
+          Decides per its mission prompt below.
+        </p>
       </div>
 
       <div className="glass mb-5 flex flex-col gap-4 rounded-2xl p-5">

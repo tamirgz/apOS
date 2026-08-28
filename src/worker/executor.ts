@@ -149,7 +149,8 @@ export async function executeRun(runId: string): Promise<void> {
       ...ledgerTools(ledger),
     ];
 
-    const { renderMemoryContext, recallSemantic } = await import("@/core/memory");
+    const { renderMemoryContext, recallSemantic, recallAgentLessons } =
+      await import("@/core/memory");
     // Retrieval-augment the run across the WHOLE ecosystem — the agent's own
     // memory (lessons/decisions/facts) PLUS the user's knowledge base and notes,
     // ranked by relevance to this agent's task. So accumulated wisdom and saved
@@ -176,6 +177,24 @@ export async function executeRun(runId: string): Promise<void> {
     } catch {
       // recall is best-effort — a memory hiccup must not affect the run
     }
+    // Self-learning: this agent's OWN lessons from past runs (it wrote them when
+    // it reflected on earlier runs), recalled explicitly so they always surface —
+    // not left to semantic ranking. Isolated agents keep their single-source mind.
+    let ownLessons = "";
+    try {
+      if (!agent.isolated) {
+        const lessons = await recallAgentLessons(agent.name, 5);
+        if (lessons.length) {
+          ownLessons = [
+            "",
+            "YOUR OWN LESSONS FROM PAST RUNS (you wrote these — apply them; don't repeat a mistake you already learned from):",
+            ...lessons.map((l) => `• ${l}`),
+          ].join("\n");
+        }
+      }
+    } catch {
+      // best-effort
+    }
     const system = [
       `You are "${agent.name}", an autonomous background agent inside apOS, the user's Agentic Personalized Operating System.`,
       "You run unattended — do the work with your tools, then produce a concise final report of what you did and found.",
@@ -185,6 +204,7 @@ export async function executeRun(runId: string): Promise<void> {
       "",
       await renderMemoryContext(),
       recalled,
+      ownLessons,
     ].join("\n");
 
     // One provider attempt, with its own timeout + heartbeat so a fallback
@@ -302,6 +322,24 @@ export async function executeRun(runId: string): Promise<void> {
       status: terminal.status,
       error: "error" in terminal ? terminal.error : null,
     });
+    // Self-feedback: reflect on this run and store a scoped lesson for next time
+    // (free local model, fire-and-forget — never delays or affects the run).
+    if (!agent.isolated) {
+      void (async () => {
+        try {
+          const { reflectOnRun } = await import("@/core/memory");
+          await reflectOnRun({
+            agentName: agent.name,
+            prompt: agent.prompt,
+            status: terminal.status,
+            error: "error" in terminal ? terminal.error : null,
+            report: terminal.status === "succeeded" ? res.finalText : null,
+          });
+        } catch {
+          /* best-effort */
+        }
+      })();
+    }
 
     // Learning loop — bank a genuine failure (not a transient timeout) as an
     // EPISODIC event, so the weekly distillation can abstract a recurring

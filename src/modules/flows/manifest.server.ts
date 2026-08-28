@@ -1,4 +1,5 @@
 import type { ModuleServerManifest } from "@/core/modules/types.server";
+import { runFlow } from "./engine";
 import { flowNodeRuns, flowRuns, flows } from "./schema";
 
 /**
@@ -14,4 +15,14 @@ export const flowsServerManifest: ModuleServerManifest = {
   schema: { flows, flowRuns, flowNodeRuns },
   aiTools: [],
   agentTemplates: [],
+  // The Studio "Run" button NOTIFYs this channel; the worker runs the flow off
+  // the request path so heavy agent runs don't tie up the web process.
+  jobs: [
+    {
+      channel: "flow_run",
+      handle: async (payload: string) => {
+        if (payload) await runFlow(payload, "manual");
+      },
+    },
+  ],
 };

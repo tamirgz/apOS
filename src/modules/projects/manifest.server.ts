@@ -102,10 +102,9 @@ export const projectsServerManifest: ModuleServerManifest = {
         "Per project with an attached code repo, summarizes what the recent commits actually did into a short digest on the cockpit — so the advisor and you can see code momentum without reading the log. Read-only, free local model; a run only counts as done if it recorded a digest.",
       defaultPrompt: [
         "You watch each project's code so the user doesn't have to read git logs. Produce a short, concrete digest of what's actually moving in the code.",
-        "1. Iterate with projects.focusNext until it returns done:true. Each call FOCUSES the next active project; the backbone picks it — you never type an id.",
-        "2. On the focused project call projects.readRepo. If attached is false, SKIP it — call projects.focusNext for the next one.",
-        "3. If it HAS a repo, read its recentCommits and write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id): what the recent commits actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'.",
-        "4. Do not raise cards or send anything. The digests are the only output. Call projects.focusNext until done.",
+        "1. Iterate with projects.focusNext({withRepo:true}) until it returns done:true. This focuses ONLY projects that HAVE a code repo (the backbone picks each; you never type an id), so every focused project has commits to read.",
+        "2. On the focused project call projects.readRepo for its recentCommits, then write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id): what the recent commits actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'. (If readRepo ever returns attached:false because the repo hasn't cloned yet, just call projects.focusNext for the next one.)",
+        "3. Do not raise cards or send anything. The digests are the only output. Call projects.focusNext until done.",
       ].join("\n"),
       defaultTools: [
         "projects.focusNext",

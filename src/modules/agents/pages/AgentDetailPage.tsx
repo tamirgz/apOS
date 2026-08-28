@@ -3,6 +3,7 @@ import { getAllTools } from "@/core/ai/tool-registry";
 import { resolveRoute } from "@/core/ai/routing";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import { AgentDetail } from "../components/AgentDetail";
+import { agentDoc } from "../agent-doc";
 import { getAgent, listRuns } from "../queries";
 
 const UUID_RE =
@@ -28,12 +29,18 @@ export async function AgentDetailPage({ params }: ModuleRouteProps) {
     resolveRoute("agent.default"),
   ]);
   const allTools = getAllTools().map((t) => t.name);
+  const doc = agentDoc({
+    name: agent.name,
+    tools: agent.tools ?? [],
+    prompt: agent.prompt ?? "",
+  });
   return (
     <AgentDetail
       agent={agent}
       runs={runs}
       allTools={allTools}
       defaultRoute={{ providerId: defaultRoute.providerId, model: defaultRoute.model }}
+      doc={doc}
     />
   );
 }

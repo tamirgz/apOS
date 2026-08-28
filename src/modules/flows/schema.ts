@@ -14,8 +14,9 @@ import {
  * EDGES; the Flow Engine (worker) walks it, running each node and passing one
  * node's output into the next. Agent nodes run as real agent_runs, so a flow is
  * pure ORCHESTRATION over primitives that already exist — see the build plan.
- * Phase 1 executes linear chains (trigger → agent → agent → output); branch /
- * fan-out / merge / human land in later phases.
+ * The engine is a dataflow scheduler: branch routes on a condition (one port),
+ * fan-out runs downstream branches in parallel, merge is a join barrier, filter
+ * drops downstream. human / loop / sub-routine land in later phases.
  */
 export const FLOW_RUN_STATUSES = [
   "queued",

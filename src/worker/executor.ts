@@ -10,6 +10,7 @@ import {
 import type { AIEvent, AIProvider } from "@/core/ai/provider";
 import { providers, resolveRoute } from "@/core/ai/routing";
 import { getToolsByNames } from "@/core/ai/tool-registry";
+import { reportAgentRunOutcome } from "@/core/alerts";
 import type { AiToolDef } from "@/core/modules/types.server";
 
 const RUN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -273,8 +274,7 @@ export async function executeRun(runId: string): Promise<void> {
       !!agent.successTool &&
       !res.okTools.has(agent.successTool);
 
-    await patchRun(
-      runId,
+    const terminal =
       res.errored || verifyFailed
         ? {
             status: res.aborted ? "timed_out" : "failed",
@@ -291,8 +291,17 @@ export async function executeRun(runId: string): Promise<void> {
             finishedAt: new Date(),
             tokensIn: res.tokensIn,
             tokensOut: res.tokensOut,
-          },
-    );
+          };
+    await patchRun(runId, terminal);
+    // Make failures noisy (transition-based bell + Slack + self-closing card);
+    // best-effort, never affects the run's own outcome.
+    await reportAgentRunOutcome({
+      agent: { id: agent.id, name: agent.name },
+      runId,
+      trigger: run.trigger,
+      status: terminal.status,
+      error: "error" in terminal ? terminal.error : null,
+    });
 
     // Learning loop — bank a genuine failure (not a transient timeout) as an
     // EPISODIC event, so the weekly distillation can abstract a recurring
@@ -318,6 +327,13 @@ export async function executeRun(runId: string): Promise<void> {
       status: "failed",
       error: String(e),
       finishedAt: new Date(),
+    });
+    await reportAgentRunOutcome({
+      agent: { id: agent.id, name: agent.name },
+      runId,
+      trigger: run.trigger,
+      status: "failed",
+      error: String(e),
     });
   }
 }

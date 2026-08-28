@@ -15,6 +15,7 @@ import { db, sql } from "@/core/db/client";
 import { agentRuns, agents, type Agent } from "@/core/db/schema/agents";
 import { notifications } from "@/core/db/schema/notifications";
 import { getSetting, SETTING_KEYS } from "@/core/app-settings";
+import { reportJobOutcome } from "@/core/alerts";
 import { serverModules } from "@/modules/registry.server";
 import { fireRoutine } from "@/modules/workbench/routines";
 import { routines } from "@/modules/workbench/schema";
@@ -49,6 +50,18 @@ const url =
 
 const log = (msg: string) =>
   console.log(`[worker ${new Date().toISOString()}] ${msg}`);
+
+/** Run a module job and make a persistent failure NOISY (transition-based bell +
+ *  Slack + self-closing card via reportJobOutcome). Still logs like before. */
+async function runJob(channel: string, run: () => Promise<void>) {
+  try {
+    await run();
+    await reportJobOutcome(channel, true);
+  } catch (e) {
+    log(`job ${channel} failed: ${e}`);
+    await reportJobOutcome(channel, false, e);
+  }
+}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -186,9 +199,7 @@ async function main() {
   for (const job of moduleJobs) {
     if (!job.schedule) continue;
     new Cron(job.schedule, { protect: true }, () => {
-      job.handle("", { db }).catch((e) =>
-        log(`scheduled job ${job.channel} failed: ${e}`),
-      );
+      void runJob(job.channel, () => job.handle("", { db }));
     });
     log(`job "${job.channel}" scheduled [${job.schedule}]`);
   }
@@ -196,9 +207,7 @@ async function main() {
   // page load (idempotent jobs no-op when nothing changed).
   for (const job of moduleJobs) {
     if (!job.runOnBoot) continue;
-    job.handle("", { db }).catch((e) =>
-      log(`boot job ${job.channel} failed: ${e}`),
-    );
+    void runJob(job.channel, () => job.handle("", { db }));
     log(`job "${job.channel}" kicked on boot`);
   }
 
@@ -254,7 +263,7 @@ async function main() {
     for (const [channel, handle] of jobHandlers) {
       await l.listen(channel, (payload) => {
         log(`job ${channel} ← ${payload}`);
-        handle(payload, { db }).catch((e) => log(`job ${channel} failed: ${e}`));
+        void runJob(channel, () => handle(payload, { db }));
       });
     }
   };

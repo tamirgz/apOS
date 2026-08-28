@@ -142,11 +142,52 @@ export async function executeRun(runId: string): Promise<void> {
     const memoryToolNames = agent.isolated
       ? ["memory.remember"]
       : ["memory.update", "memory.remember", "memory.recall"];
+
+    // Flow integration: when this run is a node inside a flow, inject the
+    // upstream step's result and expose flow.emit (sets the structured signal a
+    // downstream branch routes on). A normal run has neither — best-effort.
+    let upstream = "";
+    let flowTools: AiToolDef[] = [];
+    if (run.flowNodeRunId) {
+      try {
+        const { flowNodeRuns } = await import("@/modules/flows/schema");
+        const fnrId = run.flowNodeRunId;
+        const [fnr] = await db
+          .select()
+          .from(flowNodeRuns)
+          .where(eq(flowNodeRuns.id, fnrId));
+        const inp = fnr?.input as { report?: string } | null;
+        if (inp?.report) {
+          upstream =
+            "\n\nUPSTREAM RESULT (from the previous step of this flow — build on it, don't restart):\n" +
+            String(inp.report).slice(0, 4000);
+        }
+        flowTools = [
+          {
+            name: "flow.emit",
+            description:
+              'Emit a small JSON signal that this flow\'s branches route on — e.g. {"state":"at_risk"} or {"score":8}. Call once with the key facts a downstream "if" needs.',
+            input: z.object({ signal: z.record(z.string(), z.any()) }),
+            execute: async (i: { signal: Record<string, unknown> }) => {
+              await db
+                .update(flowNodeRuns)
+                .set({ signal: i.signal })
+                .where(eq(flowNodeRuns.id, fnrId));
+              return { emitted: true };
+            },
+          },
+        ];
+      } catch {
+        /* flow context is best-effort — never breaks a run */
+      }
+    }
+
     const tools = [
       ...getToolsByNames([...new Set([...agent.tools, ...memoryToolNames])]).map(
         (t) => (t.risk === "approval" ? wrapWithApproval(t, agent, runId) : t),
       ),
       ...ledgerTools(ledger),
+      ...flowTools,
     ];
 
     const { renderMemoryContext, recallSemantic, recallAgentLessons } =
@@ -205,6 +246,7 @@ export async function executeRun(runId: string): Promise<void> {
       await renderMemoryContext(),
       recalled,
       ownLessons,
+      upstream,
     ].join("\n");
 
     // One provider attempt, with its own timeout + heartbeat so a fallback

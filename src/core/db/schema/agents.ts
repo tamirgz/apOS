@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { AI_PROVIDERS } from "./ai-routes";
 
-export const AGENT_TRIGGERS = ["cron", "manual"] as const;
+export const AGENT_TRIGGERS = ["cron", "manual", "flow"] as const;
 export const RUN_STATUSES = [
   "queued",
   "running",
@@ -83,6 +83,9 @@ export const agentRuns = pgTable(
     transcript: jsonb("transcript").$type<unknown[]>().notNull().default([]),
     result: text("result"),
     error: text("error"),
+    /** When this run is a node inside a flow, the flow_node_run it belongs to.
+     *  Set → the executor injects the upstream payload + a flow.emit tool. */
+    flowNodeRunId: uuid("flow_node_run_id"),
     tokensIn: integer("tokens_in").notNull().default(0),
     tokensOut: integer("tokens_out").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })

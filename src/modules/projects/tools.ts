@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull, ne } from "drizzle-orm";
 import type { AiToolDef } from "@/core/modules/types.server";
 import { sql } from "@/core/db/client";
 import { getProjectCockpit, getProjectTasks } from "./queries";
@@ -104,16 +104,35 @@ export const projectTools: AiToolDef[] = [
   {
     name: "projects.focusNext",
     description:
-      "Iterate your active projects ONE at a time. Each call focuses the next active project — the backbone picks it, you never choose or type an id — and returns its full read: goal, health, task counts, days idle, and its open tasks. Do your per-project work on the focused project (projects.setHealth / setGoal / setNextAction / setAdvisorBrief / recordRepoDigest / attention.raise all target it automatically, with NO id argument), then call projects.focusNext again. Returns { done: true } once every active project has been visited. This is the ONLY correct way to loop projects: because you never handle an id, a judgement can never land on the wrong project.",
-    input: z.object({}),
-    async execute(_input, ctx) {
+      "Iterate your active projects ONE at a time. Each call focuses the next active project — the backbone picks it, you never choose or type an id — and returns its full read: goal, health, task counts, days idle, and its open tasks. Do your per-project work on the focused project (projects.setHealth / setGoal / setNextAction / setAdvisorBrief / recordRepoDigest / attention.raise all target it automatically, with NO id argument), then call projects.focusNext again. Returns { done: true } once every active project has been visited. Pass { withRepo: true } for a repo-focused run (e.g. recording repo digests) to iterate ONLY projects that have a code repo — so you never land on one with nothing to read. This is the ONLY correct way to loop projects: because you never handle an id, a judgement can never land on the wrong project.",
+    input: z.object({
+      withRepo: z
+        .boolean()
+        .optional()
+        .describe(
+          "Only iterate projects that have a code repo attached — for repo-focused runs, so you never land on a project with nothing to read.",
+        ),
+    }),
+    async execute(input, ctx) {
       // Build the queue once: the backbone owns the SET (active projects) and
-      // the ORDER, so the model iterates without ever selecting an entity.
+      // the ORDER, so the model iterates without ever selecting an entity. The
+      // withRepo filter (set on the first call) narrows the set to projects with
+      // an attached repo, so a repo-only run never has to skip empties.
       if (!ctx.subjectCursor) {
         const all = await getProjectCockpit(ctx.db);
-        const items = all
-          .filter((p) => p.status === "active")
-          .map((p) => ({
+        let active = all.filter((p) => p.status === "active");
+        if (input.withRepo) {
+          const repoIds = new Set(
+            (
+              await ctx.db
+                .select({ id: projects.id })
+                .from(projects)
+                .where(and(isNotNull(projects.repoUrl), ne(projects.repoUrl, "")))
+            ).map((r) => r.id),
+          );
+          active = active.filter((p) => repoIds.has(p.id));
+        }
+        const items = active.map((p) => ({
             id: p.id,
             name: p.name,
             read: {

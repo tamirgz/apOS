@@ -72,6 +72,14 @@ export interface AiToolDef<I = any> {
    * approve (chat executes directly — the user is present).
    */
   risk?: "safe" | "approval";
+  /**
+   * Stateful ITERATOR tool: identical args intentionally return a DIFFERENT
+   * result each call (a cursor advancing — e.g. projects.focusNext). The
+   * loop-guard must NOT memoize these (its "you already called this" echo would
+   * freeze the cursor on its first item) and must NOT count them toward the
+   * runaway tool-call cap (advancing is progress, not a stuck loop).
+   */
+  repeatable?: boolean;
 }
 
 export interface AgentTemplate {

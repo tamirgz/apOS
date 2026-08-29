@@ -8,6 +8,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import type { AIEvent, AIRunOptions } from "./provider";
 import { fromWireName, toWireName } from "./provider";
+import { acquireLocalSlot } from "./local-queue";
 
 export async function* runOpenAICompatible(
   baseURL: string,
@@ -17,6 +18,12 @@ export async function* runOpenAICompatible(
   // `reasoning_effort: "none"` to keep a Qwen3 reasoning model snappy. Ollama
   // ignores unknown fields, so this stays empty for it.
   extraBody: Record<string, unknown> = {},
+  // Serialize the model-generation call through the local-inference queue (only
+  // for on-machine runtimes — Ollama/LM Studio — so concurrent runs don't thrash
+  // the GPU). The slot is held ONLY around generation and freed during tool
+  // execution, so a tool's own local call (embedText) can't deadlock the run.
+  // Cloud callers (OpenRouter) leave this false.
+  serializeLocal = false,
 ): AsyncIterable<AIEvent> {
   const openai = new OpenAI({ baseURL, apiKey });
   const maxTurns = opts.maxTurns ?? 8;
@@ -63,6 +70,19 @@ export async function* runOpenAICompatible(
       }
       // Streaming: yield text as it generates — a big local model can take
       // many seconds per turn, and a silent wait reads as a hang in the UI.
+      let turnText = "";
+      let turnReasoning = "";
+      const toolCallAcc = new Map<
+        number,
+        { id: string; name: string; args: string }
+      >();
+
+      // Hold a local-inference slot around JUST this generation call — released
+      // in the finally before tool execution, so a tool's own local call
+      // (attention.raise → embedText) can acquire the slot instead of
+      // deadlocking against a run that held it for its whole lifetime.
+      const releaseSlot = serializeLocal ? await acquireLocalSlot() : null;
+      try {
       const stream = await openai.chat.completions.create(
         {
           model: opts.model,
@@ -74,13 +94,6 @@ export async function* runOpenAICompatible(
         },
         { signal: opts.signal },
       );
-
-      let turnText = "";
-      let turnReasoning = "";
-      const toolCallAcc = new Map<
-        number,
-        { id: string; name: string; args: string }
-      >();
 
       for await (const chunk of stream) {
         const usage = chunk.usage;
@@ -113,6 +126,9 @@ export async function* runOpenAICompatible(
           toolCallAcc.set(tc.index, acc);
         }
       }
+      } finally {
+        releaseSlot?.();
+      }
 
       if (turnText) finalText = turnText;
 
@@ -132,12 +148,23 @@ export async function* runOpenAICompatible(
         const name = fromWireName(call.name);
         const def = opts.tools.find((t) => t.name === name);
         const sig = `${name}(${call.args || "{}"})`;
-        totalToolCalls++;
+        // Iterator tools (projects.focusNext) return a DIFFERENT result on each
+        // identical call — memoizing them freezes their cursor and capping them
+        // truncates a legitimate multi-item sweep. Exempt from both guards, and
+        // treat an advance as PROGRESS: reset the runaway budget so each item
+        // gets a fresh cap. A model that loops WITHOUT advancing still trips it.
+        const repeatable = def?.repeatable === true;
+        if (repeatable) {
+          totalToolCalls = 0;
+          nudged = false;
+        } else {
+          totalToolCalls++;
+        }
         let result: unknown;
         if (!def) {
           result = { error: `unknown tool ${name}` };
           yield { type: "tool_call", name, input: {} };
-        } else if (toolMemo.has(sig)) {
+        } else if (!repeatable && toolMemo.has(sig)) {
           // Identical call already made this run — return the earlier result
           // (no re-execution) and tell the model to stop and answer.
           const prior = toolMemo.get(sig);
@@ -152,7 +179,7 @@ export async function* runOpenAICompatible(
             const input = def.input.parse(JSON.parse(call.args || "{}"));
             yield { type: "tool_call", name, input };
             result = await def.execute(input, opts.toolCtx);
-            toolMemo.set(sig, result);
+            if (!repeatable) toolMemo.set(sig, result);
           } catch (e) {
             result = { error: String(e) };
           }

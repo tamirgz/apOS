@@ -103,6 +103,10 @@ export const projectTools: AiToolDef[] = [
   },
   {
     name: "projects.focusNext",
+    // Stateful iterator: identical args ({}) advance the backbone's cursor to the
+    // NEXT project, so the loop-guard must never memoize or rate-cap it (doing so
+    // froze every focusNext sweep on its first project — see PR).
+    repeatable: true,
     description:
       "Iterate your active projects ONE at a time. Each call focuses the next active project — the backbone picks it, you never choose or type an id — and returns its full read: goal, health, task counts, days idle, and its open tasks. Do your per-project work on the focused project (projects.setHealth / setGoal / setNextAction / setAdvisorBrief / recordRepoDigest / attention.raise all target it automatically, with NO id argument), then call projects.focusNext again. Returns { done: true } once every active project has been visited. Pass { withRepo: true } for a repo-focused run (e.g. recording repo digests) to iterate ONLY projects that have a code repo — so you never land on one with nothing to read. This is the ONLY correct way to loop projects: because you never handle an id, a judgement can never land on the wrong project.",
     input: z.object({

@@ -267,14 +267,20 @@ const INTERNAL_SOURCES: InternalSource[] = [
   {
     kind: "notion",
     pk: "id",
+    // Only CONTENT-BEARING pages become graph nodes. A Notion container / index
+    // page (e.g. "Second Brain") has no body of its own — its children are
+    // separate pages that already appear as their own nodes — so an empty page
+    // is a noise node with nothing to relate on. `~ '[^[:space:]]'` keeps a page
+    // only if its content holds a real (non-whitespace) character — note SQL
+    // trim() strips spaces but NOT newlines, so a "\n"-only page needs this.
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
       select 'notion', id, title, left(coalesce(content, ''), 160),
              title || E'\n' || coalesce(content, ''), null,
              md5(title || E'\n' || coalesce(content, '')), '[]'::jsonb
-        from notion_pages where true ${scope}
+        from notion_pages where coalesce(content, '') ~ '[^[:space:]]' ${scope}
       ${ON_CONFLICT}`,
-    orphan: dsql`delete from search_index where kind='notion' and source_id not in (select id from notion_pages)`,
+    orphan: dsql`delete from search_index where kind='notion' and source_id not in (select id from notion_pages where coalesce(content, '') ~ '[^[:space:]]')`,
   },
   {
     kind: "file",

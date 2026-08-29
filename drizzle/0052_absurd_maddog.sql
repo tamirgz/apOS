@@ -1,0 +1,1 @@
+ALTER TABLE "telegram_posts" ADD COLUMN "text_en" text;

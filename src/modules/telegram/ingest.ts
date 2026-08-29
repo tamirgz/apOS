@@ -9,6 +9,7 @@ import { db, sql } from "@/core/db/client";
 import type { ModuleJob } from "@/core/modules/types.server";
 import { fetchChannelPosts, fetchUrlText } from "./fetch";
 import { classifyRelevance } from "./relevance";
+import { needsTranslation, translateToEnglish } from "./translate";
 import { telegramChannels, telegramPosts } from "./schema";
 
 const log = (m: string) =>
@@ -67,6 +68,8 @@ export async function ingestChannel(channelId: string): Promise<void> {
         include: ch.criteria,
         exclude: ch.exclude,
       });
+      // Foreign-language posts get an English gloss so cross-lingual search works.
+      const textEn = needsTranslation(p.text) ? await translateToEnglish(p.text) : null;
       const [row] = await db
         .insert(telegramPosts)
         .values({
@@ -76,6 +79,7 @@ export async function ingestChannel(channelId: string): Promise<void> {
           text: p.text,
           urls: p.urls,
           linkedText: linkedText || null,
+          textEn,
           relevant: verdict.relevant ? "yes" : "no",
           relevanceWhy: verdict.why,
         })

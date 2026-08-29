@@ -44,15 +44,24 @@ export async function withLocalSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Wrap an async generator so it holds a slot for its whole streaming lifetime —
- *  a chat/tool run occupies the model until the stream ends. */
-export async function* withLocalSlotGen<T>(
-  gen: () => AsyncIterable<T>,
-): AsyncIterable<T> {
+/**
+ * Acquire a slot and return a release fn — for holding the slot across a section
+ * that yields (a streaming model call) rather than a single await.
+ *
+ * IMPORTANT: hold this only around the actual model generation, NOT across a
+ * whole agent run. An agent run runs TOOLS between model turns, and a tool can
+ * itself make a local call (attention.raise → embedText, projects.focusNext →
+ * recall). If the run held the slot for its whole lifetime, that nested call
+ * would wait for a slot the run itself holds → deadlock (LIMIT=1). Releasing
+ * between turns keeps model generation serialized (the anti-thrash goal) while
+ * letting a tool's embed acquire the slot freely.
+ */
+export async function acquireLocalSlot(): Promise<() => void> {
   await acquire();
-  try {
-    yield* gen();
-  } finally {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
     release();
-  }
+  };
 }

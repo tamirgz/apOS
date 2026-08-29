@@ -19,7 +19,6 @@
  * Point the endpoint at `mlx_base_url` (Settings · Connections) or `MLX_BASE_URL`.
  */
 import type { AIProvider } from "./provider";
-import { withLocalSlotGen } from "./local-queue";
 import { runOpenAICompatible } from "./openai-compat";
 
 async function mlxBase(): Promise<string> {
@@ -66,10 +65,16 @@ export const mlxProvider: AIProvider = {
     // snappy); otherwise light reasoning for agentic/tool runs, none for chat.
     const agentic = (opts.tools?.length ?? 0) > 0;
     const reasoning = opts.reasoning ?? (agentic ? "low" : "none");
-    // Serialized through the local-inference queue (shared with Ollama) so a big
-    // MLX run doesn't thrash against agents / the embed sweep on the same box.
-    yield* withLocalSlotGen(() =>
-      runOpenAICompatible(base, "lmstudio", opts, { reasoning_effort: reasoning }),
+    // serializeLocal routes each model-generation call through the local queue
+    // (shared with Ollama) so a big MLX run doesn't thrash against agents / the
+    // embed sweep on the same box — freed during tool execution, so a tool's own
+    // local call can't deadlock the run.
+    yield* runOpenAICompatible(
+      base,
+      "lmstudio",
+      opts,
+      { reasoning_effort: reasoning },
+      true,
     );
   },
 };

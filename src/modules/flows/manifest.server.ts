@@ -1,5 +1,5 @@
 import type { ModuleServerManifest } from "@/core/modules/types.server";
-import { runFlow } from "./engine";
+import { resumeFlow, runFlow } from "./engine";
 import { flowNodeRuns, flowRuns, flows } from "./schema";
 
 /**
@@ -22,6 +22,14 @@ export const flowsServerManifest: ModuleServerManifest = {
       channel: "flow_run",
       handle: async (payload: string) => {
         if (payload) await runFlow(payload, "manual");
+      },
+    },
+    // A human node's Approve/Reject NOTIFYs this with the flow_run id → the
+    // worker replays the run from where it paused.
+    {
+      channel: "flow_resume",
+      handle: async (payload: string) => {
+        if (payload) await resumeFlow(payload);
       },
     },
   ],

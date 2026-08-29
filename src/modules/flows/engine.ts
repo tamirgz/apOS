@@ -24,6 +24,7 @@ import {
   flows,
   type FlowGraph,
   type FlowNode,
+  type FlowNodeRun,
   type FlowPayload,
 } from "./schema";
 
@@ -47,28 +48,67 @@ export async function runFlow(
     .returning();
   log(`▶ "${flow.name}" run ${run.id}`);
   bump(run.id);
+  await settleGraph(flow.name, run.id, () => executeGraph(flow.graph, run.id));
+  return run.id;
+}
+
+/** Resume a paused run — replay executeGraph, reusing every node that already
+ *  ran (memoized by nodeId), so the human gate continues and nothing re-executes. */
+export async function resumeFlow(flowRunId: string): Promise<void> {
+  const [run] = await db.select().from(flowRuns).where(eq(flowRuns.id, flowRunId));
+  if (!run || run.status !== "paused") return;
+  const [flow] = await db.select().from(flows).where(eq(flows.id, run.flowId));
+  if (!flow) return;
+  const priors = await db
+    .select()
+    .from(flowNodeRuns)
+    .where(eq(flowNodeRuns.flowRunId, flowRunId));
+  const memo = new Map<string, FlowNodeRun>();
+  for (const r of priors) {
+    // Prefer a terminal state over a stale "running"/"pending" duplicate.
+    const cur = memo.get(r.nodeId);
+    if (!cur || cur.status === "running" || cur.status === "pending") memo.set(r.nodeId, r);
+  }
+  await db.update(flowRuns).set({ status: "running" }).where(eq(flowRuns.id, flowRunId));
+  bump(flowRunId);
+  log(`▶ resuming "${flow.name}" run ${flowRunId}`);
+  await settleGraph(flow.name, flowRunId, () =>
+    executeGraph(flow.graph, flowRunId, 0, null, memo),
+  );
+}
+
+/** Shared terminal handling: run/resume a graph, then set the run
+ *  succeeded / paused / failed. */
+async function settleGraph(
+  flowName: string,
+  flowRunId: string,
+  run: () => Promise<GraphResult>,
+): Promise<void> {
   try {
-    await executeGraph(flow.graph, run.id);
-    await db
-      .update(flowRuns)
-      .set({ status: "succeeded", finishedAt: new Date() })
-      .where(eq(flowRuns.id, run.id));
-    log(`✔ "${flow.name}" run ${run.id} succeeded`);
+    const res = await run();
+    if (res.paused) {
+      log(`⏸ "${flowName}" run ${flowRunId} paused (awaiting a human decision)`);
+    } else {
+      await db
+        .update(flowRuns)
+        .set({ status: "succeeded", finishedAt: new Date() })
+        .where(eq(flowRuns.id, flowRunId));
+      log(`✔ "${flowName}" run ${flowRunId} succeeded`);
+    }
   } catch (e) {
     await db
       .update(flowRuns)
       .set({ status: "failed", error: String(e).slice(0, 500), finishedAt: new Date() })
-      .where(eq(flowRuns.id, run.id));
-    log(`✘ "${flow.name}" run ${run.id} failed: ${e}`);
+      .where(eq(flowRuns.id, flowRunId));
+    log(`✘ "${flowName}" run ${flowRunId} failed: ${e}`);
     try {
       const { reportJobOutcome } = await import("@/core/alerts");
-      await reportJobOutcome(`flow:${flow.name}`, false, e);
+      await reportJobOutcome(`flow:${flowName}`, false, e);
     } catch {
       /* best-effort */
     }
   }
-  bump(run.id);
-  return run.id;
+  bump(flowRunId);
 }
 
 type EdgeS = { status: "pending" | "delivered" | "skipped"; payload?: FlowPayload | null };
@@ -86,12 +126,20 @@ const MAX_DEPTH = 6;
  * its caller's payload. Returns the combined output of the terminal (no-outgoing)
  * nodes, so a sub-routine/loop can read a sub-flow's result.
  */
+interface GraphResult {
+  /** A human node is waiting on a decision — the run is suspended, not done. */
+  paused: boolean;
+  /** Combined terminal-node output (for a sub-flow's caller). */
+  output: FlowPayload | null;
+}
+
 async function executeGraph(
   graph: FlowGraph,
   flowRunId: string,
   depth = 0,
   seed: FlowPayload | null = null,
-): Promise<FlowPayload | null> {
+  memo: Map<string, FlowNodeRun> = new Map(),
+): Promise<GraphResult> {
   const { nodes } = graph;
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const E = graph.edges
@@ -119,44 +167,159 @@ async function executeGraph(
     return ins.length > 0 && ins.every((e) => est.get(e.i)!.status === "skipped");
   };
 
+  const inputOf = (n: FlowNode): FlowPayload | null => {
+    const inbound = inE.get(n.id)!;
+    if (inbound.length === 0 && seed) return seed;
+    return combine(
+      inbound
+        .filter((e) => est.get(e.i)!.status === "delivered")
+        .map((e) => est.get(e.i)!.payload ?? null),
+    );
+  };
+  const deliver = (n: FlowNode, output: FlowPayload | null, ports: string[] | null) => {
+    for (const oe of outE.get(n.id)!) {
+      const take =
+        ports === null ||
+        ports.includes(oe.fromPort ?? "") ||
+        ports.includes(String(portIndex(n, oe.fromPort)));
+      est.set(oe.i, take ? { status: "delivered", payload: output } : { status: "skipped" });
+    }
+  };
+  const skipEdges = (n: FlowNode) => {
+    for (const oe of outE.get(n.id)!) est.set(oe.i, { status: "skipped" });
+  };
+
   let guard = 0;
+  let paused = false;
   for (;;) {
     if (++guard > nodes.length * 4 + 20) throw new Error("flow did not converge (cycle?)");
     const batch = nodes.filter((n) => nstate.get(n.id) === "pending" && ready(n));
     if (!batch.length) break;
-    await Promise.all(
-      batch.map(async (n) => {
-        if (allSkipped(n)) {
-          nstate.set(n.id, "skipped");
-          await recordSkip(n, flowRunId);
-          for (const oe of outE.get(n.id)!) est.set(oe.i, { status: "skipped" });
-          return;
+
+    // Pass A — reuse memoized runs (resume) and resolve human gates. A human
+    // node with no decision suspends the WHOLE run before any fresh node starts,
+    // so a resume never re-executes an agent that already ran.
+    const fresh: FlowNode[] = [];
+    for (const n of batch) {
+      const prior = memo.get(n.id);
+      if (prior && prior.status === "succeeded") {
+        const out = (prior.output as FlowPayload | null) ?? null;
+        nstate.set(n.id, "done");
+        nodeOutputs.set(n.id, out);
+        deliver(n, out, memoPorts(n, prior));
+        continue;
+      }
+      if (prior && prior.status === "skipped") {
+        nstate.set(n.id, "skipped");
+        skipEdges(n);
+        continue;
+      }
+      if (allSkipped(n)) {
+        nstate.set(n.id, "skipped");
+        await recordSkip(n, flowRunId);
+        skipEdges(n);
+        continue;
+      }
+      if (n.kind === "human") {
+        const decided = await settleHuman(n, inputOf(n), flowRunId, prior ?? null);
+        if (!decided) {
+          paused = true;
+          break;
         }
-        const inbound = inE.get(n.id)!;
-        const inputs = inbound
-          .filter((e) => est.get(e.i)!.status === "delivered")
-          .map((e) => est.get(e.i)!.payload ?? null);
-        // Root (input-less) nodes receive the caller's seed, if any.
-        const input = inbound.length === 0 && seed ? seed : combine(inputs);
-        const { output, ports } = await runNode(n, input, flowRunId, depth);
+        nstate.set(n.id, "done");
+        nodeOutputs.set(n.id, decided.output);
+        deliver(n, decided.output, decided.approved ? null : []);
+        continue;
+      }
+      fresh.push(n);
+    }
+    if (paused) break;
+
+    // Pass B — run the remaining fresh nodes concurrently.
+    await Promise.all(
+      fresh.map(async (n) => {
+        const { output, ports } = await runNode(n, inputOf(n), flowRunId, depth);
         nstate.set(n.id, "done");
         nodeOutputs.set(n.id, output);
-        for (const oe of outE.get(n.id)!) {
-          const take =
-            ports === null ||
-            ports.includes(oe.fromPort ?? "") ||
-            ports.includes(String(portIndex(n, oe.fromPort)));
-          est.set(oe.i, take ? { status: "delivered", payload: output } : { status: "skipped" });
-        }
+        deliver(n, output, ports);
       }),
     );
   }
 
+  if (paused) return { paused: true, output: null };
   // The sub-flow's result = the combined output of its terminal (leaf) nodes.
   const terminals = nodes.filter(
     (n) => outE.get(n.id)!.length === 0 && nstate.get(n.id) === "done",
   );
-  return combine(terminals.map((n) => nodeOutputs.get(n.id) ?? null));
+  return { paused: false, output: combine(terminals.map((n) => nodeOutputs.get(n.id) ?? null)) };
+}
+
+/** Reconstruct a memoized node's output ports on resume (branch/filter routed
+ *  by their stored signal; everything else delivers on all ports). */
+function memoPorts(node: FlowNode, run: FlowNodeRun): string[] | null {
+  const sig = run.signal as Record<string, unknown> | null;
+  if (node.kind === "branch") {
+    const chose = sig?.chose;
+    return chose == null ? null : [String(chose), String(portIndex(node, String(chose)))];
+  }
+  if (node.kind === "filter") return sig?.pass === false ? [] : null;
+  if (node.kind === "human") return sig?.decision === "rejected" ? [] : null;
+  return null;
+}
+
+/** Resolve a human gate. Returns { approved, output } once decided, else null
+ *  (records a paused node-run + pauses the run, awaiting Approve/Reject). */
+async function settleHuman(
+  node: FlowNode,
+  input: FlowPayload | null,
+  flowRunId: string,
+  prior: FlowNodeRun | null,
+): Promise<{ approved: boolean; output: FlowPayload } | null> {
+  const sig = (prior?.signal as Record<string, unknown> | null) ?? null;
+  const decision = sig?.decision as string | undefined;
+  if (decision === "approved" || decision === "rejected") {
+    const approved = decision === "approved";
+    const output: FlowPayload = {
+      ...(input ?? {}),
+      signal: { ...(input?.signal ?? {}), approved },
+      from: node.name ?? "human",
+    };
+    if (prior) {
+      await db
+        .update(flowNodeRuns)
+        .set({ status: "succeeded", output, finishedAt: new Date() })
+        .where(eq(flowNodeRuns.id, prior.id));
+    }
+    bump(flowRunId);
+    return { approved, output };
+  }
+  // No decision yet → park. Record the paused node-run once, alert the user.
+  if (!prior) {
+    const prompt = String(node.config?.prompt ?? node.config?.question ?? "Approve to continue.");
+    await db.insert(flowNodeRuns).values({
+      flowRunId,
+      nodeId: node.id,
+      kind: "human",
+      status: "paused",
+      input: input ?? null,
+      signal: { prompt, awaiting: true },
+      startedAt: new Date(),
+    });
+    try {
+      const { notify } = await import("@/core/notify");
+      await notify({
+        title: `Flow waiting: ${node.name ?? "review"}`,
+        body: prompt,
+        source: "flow",
+        level: "info",
+      });
+    } catch {
+      /* best-effort */
+    }
+  }
+  await db.update(flowRuns).set({ status: "paused" }).where(eq(flowRuns.id, flowRunId));
+  bump(flowRunId);
+  return null;
 }
 
 /** Merge several inbound payloads into one (report concatenated, signals merged). */
@@ -225,6 +388,10 @@ async function runNode(
       const pass = await evalCondition(cond, input);
       ports = pass ? null : []; // pass → all ports; drop → none (skip downstream)
       output = input;
+      await db
+        .update(flowNodeRuns)
+        .set({ signal: { pass } }) // persisted so a resume reconstructs the route
+        .where(eq(flowNodeRuns.id, nr.id));
     } else if (node.kind === "subroutine") {
       output = await runSubroutineNode(node, input, depth);
     } else if (node.kind === "loop") {
@@ -302,13 +469,14 @@ async function runSubflow(
     .returning();
   bump(run.id);
   try {
-    const out = await executeGraph(flow.graph, run.id, depth, input);
+    const res = await executeGraph(flow.graph, run.id, depth, input);
+    if (res.paused) throw new Error("a human step can't run inside a sub-flow");
     await db
       .update(flowRuns)
       .set({ status: "succeeded", finishedAt: new Date() })
       .where(eq(flowRuns.id, run.id));
     bump(run.id);
-    return out;
+    return res.output;
   } catch (e) {
     await db
       .update(flowRuns)

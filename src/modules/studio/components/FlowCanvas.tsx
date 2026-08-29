@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Check, Loader2, Play } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Play, UserCheck } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -17,7 +17,13 @@ import type {
   FlowNodeKind,
   FlowTrigger,
 } from "@/modules/flows/schema";
-import { loadRunView, runFlowNow, saveFlowGraph, renameFlow } from "../actions";
+import {
+  decideFlowStep,
+  loadRunView,
+  runFlowNow,
+  saveFlowGraph,
+  renameFlow,
+} from "../actions";
 import type { AgentOption, FlowOption, NodeRunView, RunMeta, RunView } from "../queries";
 import { Inspector } from "./Inspector";
 import { NodePalette } from "./NodePalette";
@@ -34,6 +40,7 @@ const STATUS_RING: Record<string, string> = {
   running: "var(--color-plasma)",
   succeeded: "#16a97a",
   failed: "var(--color-flare)",
+  paused: "#e0a94a",
 };
 
 const fmtDur = (a: number | null, b: number | null): string => {
@@ -201,7 +208,9 @@ export function FlowCanvas({
             ? { tool: "notify" }
             : kind === "loop"
               ? { itemsKey: "items", maxIterations: 10 }
-              : {};
+              : kind === "human"
+                ? { prompt: "" }
+                : {};
     const node: FlowNode = {
       id: uid(kind),
       kind,
@@ -308,6 +317,12 @@ export function FlowCanvas({
 
   const selectedNode = selected?.kind === "node" ? nodes.find((n) => n.id === selected.id) : null;
   const running = isRunning || optimisticRun;
+  // A live (not a past-run) human gate awaiting a decision.
+  const pausedRun =
+    !pickedRunId && trace?.status === "paused"
+      ? trace.nodes.find((n) => n.status === "paused")
+      : null;
+  const pausedNode = pausedRun ? nodes.find((n) => n.id === pausedRun.nodeId) : null;
 
   return (
     <div className="relative h-[calc(100vh-7rem)] overflow-hidden rounded-2xl glass">
@@ -476,11 +491,71 @@ export function FlowCanvas({
             )}
           </div>
 
-          {selectedNode && statusByNode.get(selectedNode.id) && (
+          {pausedRun && (
+            <HumanGate
+              flowId={flow.id}
+              runId={trace!.runId}
+              nodeId={pausedRun.nodeId}
+              title={pausedNode?.name || "Review"}
+              prompt={(pausedRun.signal as { prompt?: string } | null)?.prompt ?? "Approve to continue."}
+            />
+          )}
+
+          {!pausedRun && selectedNode && statusByNode.get(selectedNode.id) && (
             <NodeRunDetail node={selectedNode} run={statusByNode.get(selectedNode.id)!} />
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function HumanGate({
+  flowId,
+  runId,
+  nodeId,
+  title,
+  prompt,
+}: {
+  flowId: string;
+  runId: string;
+  nodeId: string;
+  title: string;
+  prompt: string;
+}) {
+  const [pending, setPending] = useState(false);
+  const decide = (approved: boolean) => {
+    setPending(true);
+    void decideFlowStep(flowId, runId, nodeId, approved);
+  };
+  return (
+    <div className="glass-edge glass pointer-events-auto w-80 rounded-xl p-3" style={{ boxShadow: "0 0 0 1px #e0a94a55, 0 0 26px -6px #e0a94a66" }}>
+      <div className="flex items-center gap-2">
+        <UserCheck className="h-4 w-4" style={{ color: "#e0a94a" }} />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{title}</span>
+        <span className="font-mono text-[10px] uppercase tracking-widest" style={{ color: "#e0a94a" }}>
+          waiting
+        </span>
+      </div>
+      <p className="mt-1.5 text-[13px] leading-snug text-ink-dim">{prompt}</p>
+      <div className="mt-2.5 flex gap-2">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => decide(false)}
+          className="flex-1 rounded-lg border border-flare/30 py-1.5 font-mono text-[11px] uppercase tracking-widest text-flare transition hover:bg-flare/10 disabled:opacity-50"
+        >
+          Reject
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => decide(true)}
+          className="flex-1 rounded-lg border border-plasma/40 bg-plasma/10 py-1.5 font-mono text-[11px] uppercase tracking-widest text-plasma transition hover:bg-plasma/20 disabled:opacity-50"
+        >
+          Approve
+        </button>
+      </div>
     </div>
   );
 }
@@ -584,7 +659,10 @@ function NodeCard({
         boxShadow: ring
           ? `0 0 0 2px ${ring}, 0 0 20px -4px ${ring}`
           : undefined,
-        animation: status === "running" ? "pulse 1.4s ease-in-out infinite" : undefined,
+        animation:
+          status === "running" || status === "paused"
+            ? "pulse 1.4s ease-in-out infinite"
+            : undefined,
       }}
     >
       <div className="flex items-center gap-2">
@@ -642,6 +720,7 @@ function subtitleFor(node: FlowNode, agents: AgentOption[], flows: FlowOption[])
     const name = f ? f.name : "no flow set";
     return node.kind === "loop" ? `${name} · per item` : name;
   }
+  if (node.kind === "human") return (cfg.prompt as string) || "waits for you";
   if (node.kind === "output") return (cfg.tool as string) || "notify";
   return metaFor(node.kind).label.toLowerCase();
 }

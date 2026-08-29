@@ -31,6 +31,8 @@ export const NODE_RUN_STATUSES = [
   "succeeded",
   "failed",
   "skipped",
+  // A human node waiting on an Approve/Reject decision (run is "paused" too).
+  "paused",
 ] as const;
 export const FLOW_NODE_KINDS = [
   "trigger",

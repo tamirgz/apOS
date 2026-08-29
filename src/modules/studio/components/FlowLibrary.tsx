@@ -2,12 +2,19 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Bot, Plus, Trash2, Workflow } from "lucide-react";
+import { Bot, LayoutTemplate, Plus, Trash2, Upload, Workflow } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import type { AgentOption, FlowCard, FlowStats } from "../queries";
-import { createFlow, deleteFlow, importAgentAsFlow } from "../actions";
+import type { TemplateCard } from "../templates";
+import {
+  createFlow,
+  createFlowFromTemplate,
+  deleteFlow,
+  importAgentAsFlow,
+  importFlow,
+} from "../actions";
 
 const fmtMs = (ms: number | null) =>
   ms == null ? "—" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
@@ -26,17 +33,31 @@ export function FlowLibrary({
   flows,
   agents,
   stats,
+  templates,
 }: {
   flows: FlowCard[];
   agents: AgentOption[];
   stats: Record<string, FlowStats>;
+  templates: TemplateCard[];
 }) {
   const router = useRouter();
   const search = useSearchParams();
   const [pending, start] = useTransition();
   const [importing, setImporting] = useState(false);
+  const [importErr, setImportErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const newGuard = useRef(false);
   useLiveEvents(["flows_changed", "flow_runs"]);
+
+  const onImportFile = async (file: File) => {
+    setImportErr(null);
+    try {
+      const json = JSON.parse(await file.text());
+      start(async () => router.push(`/m/studio/${await importFlow(json)}`));
+    } catch {
+      setImportErr("That file isn't a valid flow export.");
+    }
+  };
 
   // ⌘K "New flow" → /m/studio?new=1 lands here and auto-creates one.
   useEffect(() => {
@@ -94,6 +115,25 @@ export function FlowLibrary({
           </div>
           <button
             type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={pending}
+            className="flex items-center gap-2 rounded-lg border border-plasma/25 px-3 py-2 font-mono text-xs uppercase tracking-widest text-ink-dim transition hover:bg-plasma/10 disabled:opacity-40"
+          >
+            <Upload className="h-3.5 w-3.5" /> Import
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onImportFile(f);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
             onClick={onNew}
             disabled={pending}
             className="flex items-center gap-2 rounded-lg border border-plasma/40 bg-plasma/10 px-3 py-2 font-mono text-xs uppercase tracking-widest text-plasma transition hover:bg-plasma/20 disabled:opacity-40"
@@ -102,6 +142,34 @@ export function FlowLibrary({
           </button>
         </div>
       </header>
+
+      {importErr && <p className="-mt-2 text-sm text-flare">{importErr}</p>}
+
+      <section className="flex flex-col gap-2">
+        <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint">
+          start from a template
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {templates.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              disabled={pending}
+              onClick={() => start(async () => router.push(`/m/studio/${await createFlowFromTemplate(t.id)}`))}
+              className="group flex flex-col gap-1.5 rounded-xl border border-ink/8 p-3 text-left transition hover:border-plasma/30 hover:bg-plasma/5 disabled:opacity-50"
+            >
+              <div className="flex items-center gap-2">
+                <LayoutTemplate className="h-4 w-4 text-plasma-dim" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{t.name}</span>
+              </div>
+              <span className="text-[11px] leading-snug text-ink-faint">{t.description}</span>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+                {t.nodeCount} nodes · {t.agentCount} agents
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       {flows.length === 0 ? (
         <GlassPanel className="flex flex-col items-center gap-3 px-8 py-20 text-center">

@@ -2,7 +2,12 @@ import Link from "next/link";
 import type { ModuleRouteProps } from "@/core/modules/types.server";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import { FlowCanvas } from "../components/FlowCanvas";
-import { getFlow, latestRunTrace, listAgentOptions } from "../queries";
+import {
+  getFlow,
+  latestRunView,
+  listAgentOptions,
+  listRecentRuns,
+} from "../queries";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -27,9 +32,10 @@ export async function FlowEditorPage({ params }: ModuleRouteProps) {
     );
   }
 
-  const [agents, trace] = await Promise.all([
+  const [agents, trace, recentRuns] = await Promise.all([
     listAgentOptions(),
-    latestRunTrace(flow.id),
+    latestRunView(flow.id),
+    listRecentRuns(flow.id),
   ]);
   return (
     <FlowCanvas
@@ -37,20 +43,12 @@ export async function FlowEditorPage({ params }: ModuleRouteProps) {
         id: flow.id,
         name: flow.name,
         graph: flow.graph,
+        trigger: flow.trigger ?? { kind: "manual" },
+        enabled: flow.enabled,
       }}
       agents={agents}
-      trace={
-        trace
-          ? {
-              runId: trace.run.id,
-              status: trace.run.status,
-              nodes: trace.nodes.map((n) => ({
-                nodeId: n.nodeId,
-                status: n.status,
-              })),
-            }
-          : null
-      }
+      trace={trace}
+      recentRuns={recentRuns}
     />
   );
 }

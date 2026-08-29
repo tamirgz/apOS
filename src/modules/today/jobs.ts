@@ -15,4 +15,15 @@ export const todayJobs: ModuleJob[] = [
       await pruneAttention();
     },
   },
+  {
+    // Deterministic day planner — replaces the old LLM "Daily planner" agent.
+    // Weekday mornings; also runnable on demand via NOTIFY "today.plan".
+    channel: "today.plan",
+    schedule: "30 7 * * 1-5",
+    handle: async () => {
+      const { planDay } = await import("./planner");
+      const { raised, closed } = await planDay();
+      console.log(`[today.plan] raised ${raised}, closed ${closed} attention card(s)`);
+    },
+  },
 ];

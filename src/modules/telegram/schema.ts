@@ -48,6 +48,11 @@ export const telegramPosts = pgTable(
     urls: jsonb("urls").$type<string[]>().notNull().default([]),
     /** Readable text pulled from the linked article(s), truncated. */
     linkedText: text("linked_text"),
+    /** English translation of a non-English post, for CROSS-LINGUAL search:
+     *  nomic embeddings cluster by language, so a Russian/Hebrew post is invisible
+     *  to an English query. We embed this English gloss instead, so an English
+     *  search retrieves the original foreign post. Null = post is already English. */
+    textEn: text("text_en"),
     /** The relevance gate's verdict: "yes" | "no" | null (not yet judged). */
     relevant: text("relevant"),
     relevanceWhy: text("relevance_why"),

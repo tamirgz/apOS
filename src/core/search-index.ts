@@ -48,18 +48,21 @@ const UPSERTS = [
       content_hash=excluded.content_hash,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
       updated_at=now()`,
-  // Telegram posts — channel + text (+ any linked article text).
+  // Telegram posts — channel + text (+ any linked article text). For a foreign
+  // post we embed its English gloss (text_en) so an English semantic query finds
+  // it; the displayed snippet keeps the original text.
   dsql`
-    insert into search_index (kind, source_id, title, snippet, href, content_hash)
+    insert into search_index (kind, source_id, title, snippet, embed_text, href, content_hash)
     select 'telegram', id::text,
-           left(channel || ': ' || coalesce(text,''), 80),
+           left(channel || ': ' || coalesce(text_en, text, ''), 80),
            left(coalesce(text,'') || '  ' || coalesce(linked_text,''), 500),
+           channel || ': ' || coalesce(text_en, coalesce(text,'') || ' ' || coalesce(linked_text,'')),
            '/m/telegram',
-           md5(coalesce(text,'') || '|' || coalesce(linked_text,''))
+           md5(coalesce(text,'') || '|' || coalesce(linked_text,'') || '|' || coalesce(text_en,''))
       from telegram_posts
      where coalesce(text,'') <> ''
     on conflict (kind, source_id) do update set
-      title=excluded.title, snippet=excluded.snippet, href=excluded.href,
+      title=excluded.title, snippet=excluded.snippet, embed_text=excluded.embed_text, href=excluded.href,
       content_hash=excluded.content_hash,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
       updated_at=now()`,

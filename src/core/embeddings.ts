@@ -1,6 +1,7 @@
 import { isNull, sql as dsql } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
 import { searchIndex } from "@/core/db/schema/search-index";
+import { withLocalSlot } from "@/core/ai/local-queue";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 export const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
@@ -23,20 +24,24 @@ export async function getEmbeddingModel(): Promise<string> {
 
 export async function embedText(text: string): Promise<number[]> {
   const model = await getEmbeddingModel();
-  const res = await fetch(`${OLLAMA_BASE}/api/embeddings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, prompt: text.slice(0, 8000) }),
-    signal: AbortSignal.timeout(30_000),
+  // Serialized through the local-inference queue so the embed sweep doesn't
+  // contend with (and get evicted by) a big chat model on the same machine.
+  return withLocalSlot(async () => {
+    const res = await fetch(`${OLLAMA_BASE}/api/embeddings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, prompt: text.slice(0, 8000) }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      throw new Error(`ollama embeddings (${model}) → ${res.status}`);
+    }
+    const data = (await res.json()) as { embedding?: number[] };
+    if (!data.embedding?.length) {
+      throw new Error(`model "${model}" returned no embedding — is it an embedding model?`);
+    }
+    return data.embedding;
   });
-  if (!res.ok) {
-    throw new Error(`ollama embeddings (${model}) → ${res.status}`);
-  }
-  const data = (await res.json()) as { embedding?: number[] };
-  if (!data.embedding?.length) {
-    throw new Error(`model "${model}" returned no embedding — is it an embedding model?`);
-  }
-  return data.embedding;
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { AIProvider } from "./provider";
+import { withLocalSlotGen } from "./local-queue";
 import { runOpenAICompatible } from "./openai-compat";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
@@ -15,8 +16,11 @@ export const ollamaProvider: AIProvider = {
     return (data.models ?? []).map((m) => m.name);
   },
 
-  // The streaming + tool loop is shared with the mlx provider.
+  // The streaming + tool loop is shared with the mlx provider. Serialized through
+  // the local-inference queue so concurrent runs don't thrash the machine.
   run(opts) {
-    return runOpenAICompatible(`${OLLAMA_BASE}/v1`, "ollama", opts);
+    return withLocalSlotGen(() =>
+      runOpenAICompatible(`${OLLAMA_BASE}/v1`, "ollama", opts),
+    );
   },
 };

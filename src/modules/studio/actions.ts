@@ -13,6 +13,8 @@ import {
   type FlowTrigger,
 } from "@/modules/flows/schema";
 import { runView, type RunView } from "./queries";
+import { sanitizeFlowGraph } from "./graph";
+import { templateById } from "./templates";
 
 const uid = (p: string) => `${p}_${crypto.randomUUID().slice(0, 8)}`;
 
@@ -32,6 +34,31 @@ export async function createFlow(name?: string): Promise<string> {
     .insert(flows)
     .values({ name: name?.trim() || "Untitled flow", graph })
     .returning();
+  await touched(row.id);
+  return row.id;
+}
+
+/** Create a new flow from a built-in template. */
+export async function createFlowFromTemplate(templateId: string): Promise<string> {
+  const tpl = templateById(templateId);
+  if (!tpl) throw new Error("unknown template");
+  const graph = JSON.parse(JSON.stringify(tpl.graph)) as FlowGraph; // clone
+  const [row] = await db
+    .insert(flows)
+    .values({ name: tpl.name, description: tpl.description, graph })
+    .returning();
+  await touched(row.id);
+  return row.id;
+}
+
+/** Import a flow from exported JSON. Validates + sanitizes the graph shape. */
+export async function importFlow(payload: unknown): Promise<string> {
+  const p = payload as { name?: unknown; description?: unknown; graph?: unknown } | null;
+  const graph = sanitizeFlowGraph(p?.graph);
+  if (!graph) throw new Error("not a valid flow file (missing nodes/edges)");
+  const name = typeof p?.name === "string" && p.name.trim() ? p.name.trim() : "Imported flow";
+  const description = typeof p?.description === "string" ? p.description : null;
+  const [row] = await db.insert(flows).values({ name, description, graph }).returning();
   await touched(row.id);
   return row.id;
 }

@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
+  Download,
   History,
   Loader2,
   Play,
@@ -380,6 +381,15 @@ export function FlowCanvas({
   const commitName = async () => {
     if (name.trim() && name !== flow.name) await renameFlow(flow.id, name.trim());
   };
+  const onExport = () => {
+    const data = JSON.stringify({ name, graph: { nodes, edges } }, null, 2);
+    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "flow"}.flow.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const selectedNode = selected?.kind === "node" ? nodes.find((n) => n.id === selected.id) : null;
   const running = isRunning || optimisticRun;
@@ -429,6 +439,14 @@ export function FlowCanvas({
           className="rounded-lg border border-ink/15 p-1.5 text-ink-faint transition hover:text-ink disabled:opacity-30"
         >
           <Undo2 className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={onExport}
+          title="Export this flow as JSON"
+          className="rounded-lg border border-ink/15 p-1.5 text-ink-faint transition hover:text-ink"
+        >
+          <Download className="h-3.5 w-3.5" />
         </button>
         <SaveBadge state={saveState} />
         <ScheduleControl flowId={flow.id} trigger={flow.trigger} enabled={flow.enabled} />

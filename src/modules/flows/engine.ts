@@ -15,7 +15,7 @@
  * local-model yes/no judge. Human / loop / sub-routine land in Phase 4.
  */
 import { eq } from "drizzle-orm";
-import { db } from "@/core/db/client";
+import { db, sql } from "@/core/db/client";
 import { agentRuns } from "@/core/db/schema/agents";
 import { executeRun } from "@/worker/executor";
 import {
@@ -29,6 +29,11 @@ import {
 
 const log = (m: string) => console.log(`[flow ${new Date().toISOString()}] ${m}`);
 
+/** Nudge the Studio canvas (SSE "flow_runs") that this run's state changed. */
+const bump = (flowRunId: string) => {
+  void sql.notify("flow_runs", flowRunId).catch(() => {});
+};
+
 /** Run a flow once. Returns the flow_run id (or null if the flow is missing). */
 export async function runFlow(
   flowId: string,
@@ -41,6 +46,7 @@ export async function runFlow(
     .values({ flowId, trigger, status: "running", startedAt: new Date() })
     .returning();
   log(`▶ "${flow.name}" run ${run.id}`);
+  bump(run.id);
   try {
     await executeGraph(flow.graph, run.id);
     await db
@@ -61,6 +67,7 @@ export async function runFlow(
       /* best-effort */
     }
   }
+  bump(run.id);
   return run.id;
 }
 
@@ -167,6 +174,7 @@ async function runNode(
       startedAt: new Date(),
     })
     .returning();
+  bump(flowRunId);
   try {
     let output: FlowPayload | null = input;
     let ports: string[] | null = null;
@@ -200,12 +208,14 @@ async function runNode(
       .update(flowNodeRuns)
       .set({ status: "succeeded", output: output ?? null, finishedAt: new Date() })
       .where(eq(flowNodeRuns.id, nr.id));
+    bump(flowRunId);
     return { output, ports };
   } catch (e) {
     await db
       .update(flowNodeRuns)
       .set({ status: "failed", error: String(e).slice(0, 500), finishedAt: new Date() })
       .where(eq(flowNodeRuns.id, nr.id));
+    bump(flowRunId);
     throw e;
   }
 }
@@ -219,6 +229,7 @@ async function recordSkip(node: FlowNode, flowRunId: string): Promise<void> {
     startedAt: new Date(),
     finishedAt: new Date(),
   });
+  bump(flowRunId);
 }
 
 /** Run an agent node as a real agent_run, handing it the upstream payload. */

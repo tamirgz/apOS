@@ -18,7 +18,7 @@ import type {
   FlowTrigger,
 } from "@/modules/flows/schema";
 import { loadRunView, runFlowNow, saveFlowGraph, renameFlow } from "../actions";
-import type { AgentOption, NodeRunView, RunMeta, RunView } from "../queries";
+import type { AgentOption, FlowOption, NodeRunView, RunMeta, RunView } from "../queries";
 import { Inspector } from "./Inspector";
 import { NodePalette } from "./NodePalette";
 import { ScheduleControl } from "./ScheduleControl";
@@ -62,6 +62,7 @@ const edgePath = (a: { x: number; y: number }, b: { x: number; y: number }) => {
 export function FlowCanvas({
   flow,
   agents,
+  flows,
   trace,
   recentRuns,
 }: {
@@ -73,6 +74,7 @@ export function FlowCanvas({
     enabled: boolean;
   };
   agents: AgentOption[];
+  flows: FlowOption[];
   trace: RunView | null;
   recentRuns: RunMeta[];
 }) {
@@ -197,7 +199,9 @@ export function FlowCanvas({
           ? { condition: "" }
           : kind === "output"
             ? { tool: "notify" }
-            : {};
+            : kind === "loop"
+              ? { itemsKey: "items", maxIterations: 10 }
+              : {};
     const node: FlowNode = {
       id: uid(kind),
       kind,
@@ -346,6 +350,7 @@ export function FlowCanvas({
             <Inspector
               node={selectedNode}
               agents={agents}
+              flows={flows}
               onPatch={(patch) => patchNode(selectedNode.id, patch)}
               onDelete={() => {
                 removeNode(selectedNode.id);
@@ -426,6 +431,7 @@ export function FlowCanvas({
               key={n.id}
               node={n}
               agents={agents}
+              flows={flows}
               selected={selected?.kind === "node" && selected.id === n.id}
               status={statusByNode.get(n.id)?.status}
               onDown={(e) => onNodeDown(e, n.id)}
@@ -541,6 +547,7 @@ function SaveBadge({ state }: { state: "idle" | "saving" | "saved" }) {
 function NodeCard({
   node,
   agents,
+  flows,
   selected,
   status,
   onDown,
@@ -548,6 +555,7 @@ function NodeCard({
 }: {
   node: FlowNode;
   agents: AgentOption[];
+  flows: FlowOption[];
   selected: boolean;
   status?: string;
   onDown: (e: RPointerEvent) => void;
@@ -558,7 +566,7 @@ function NodeCard({
   const ports = outputPortsOf(node.kind, node.config);
   const ring = status ? STATUS_RING[status] : undefined;
   const dim = status === "skipped";
-  const subtitle = subtitleFor(node, agents);
+  const subtitle = subtitleFor(node, agents, flows);
 
   return (
     <div
@@ -621,7 +629,7 @@ function NodeCard({
   );
 }
 
-function subtitleFor(node: FlowNode, agents: AgentOption[]): string {
+function subtitleFor(node: FlowNode, agents: AgentOption[], flows: FlowOption[]): string {
   const cfg = node.config ?? {};
   if (node.kind === "agent") {
     const a = agents.find((x) => x.id === cfg.agentId);
@@ -629,6 +637,11 @@ function subtitleFor(node: FlowNode, agents: AgentOption[]): string {
   }
   if (node.kind === "branch" || node.kind === "filter")
     return (cfg.condition as string) || "no condition";
+  if (node.kind === "subroutine" || node.kind === "loop") {
+    const f = flows.find((x) => x.id === cfg.flowId);
+    const name = f ? f.name : "no flow set";
+    return node.kind === "loop" ? `${name} · per item` : name;
+  }
   if (node.kind === "output") return (cfg.tool as string) || "notify";
   return metaFor(node.kind).label.toLowerCase();
 }

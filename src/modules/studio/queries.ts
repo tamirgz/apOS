@@ -159,3 +159,17 @@ export async function listAgentOptions(): Promise<AgentOption[]> {
     .orderBy(asc(agents.name));
   return rows;
 }
+
+export interface FlowOption {
+  id: string;
+  name: string;
+}
+
+/** Other flows available as a loop/sub-routine target (excludes `exceptId`). */
+export async function listFlowOptions(exceptId?: string): Promise<FlowOption[]> {
+  const rows = await db
+    .select({ id: flows.id, name: flows.name })
+    .from(flows)
+    .orderBy(asc(flows.name));
+  return exceptId ? rows.filter((r) => r.id !== exceptId) : rows;
+}

@@ -6,6 +6,7 @@ import {
   getFlow,
   latestRunView,
   listAgentOptions,
+  listFlowOptions,
   listRecentRuns,
 } from "../queries";
 
@@ -32,8 +33,9 @@ export async function FlowEditorPage({ params }: ModuleRouteProps) {
     );
   }
 
-  const [agents, trace, recentRuns] = await Promise.all([
+  const [agents, flowOptions, trace, recentRuns] = await Promise.all([
     listAgentOptions(),
+    listFlowOptions(flow.id),
     latestRunView(flow.id),
     listRecentRuns(flow.id),
   ]);
@@ -47,6 +49,7 @@ export async function FlowEditorPage({ params }: ModuleRouteProps) {
         enabled: flow.enabled,
       }}
       agents={agents}
+      flows={flowOptions}
       trace={trace}
       recentRuns={recentRuns}
     />

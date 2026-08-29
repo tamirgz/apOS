@@ -3,6 +3,7 @@ import type { ModuleRouteProps } from "@/core/modules/types.server";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import { FlowCanvas } from "../components/FlowCanvas";
 import {
+  flowStats,
   getFlow,
   latestRunView,
   listAgentOptions,
@@ -33,11 +34,12 @@ export async function FlowEditorPage({ params }: ModuleRouteProps) {
     );
   }
 
-  const [agents, flowOptions, trace, recentRuns] = await Promise.all([
+  const [agents, flowOptions, trace, recentRuns, stats] = await Promise.all([
     listAgentOptions(),
     listFlowOptions(flow.id),
     latestRunView(flow.id),
-    listRecentRuns(flow.id),
+    listRecentRuns(flow.id, 30),
+    flowStats(flow.id),
   ]);
   return (
     <FlowCanvas
@@ -50,6 +52,7 @@ export async function FlowEditorPage({ params }: ModuleRouteProps) {
       }}
       agents={agents}
       flows={flowOptions}
+      stats={stats}
       trace={trace}
       recentRuns={recentRuns}
     />

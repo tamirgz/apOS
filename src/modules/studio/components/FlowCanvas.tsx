@@ -1,7 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Check, Loader2, Play, UserCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  History,
+  Loader2,
+  Play,
+  Undo2,
+  UserCheck,
+} from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -24,10 +33,18 @@ import {
   saveFlowGraph,
   renameFlow,
 } from "../actions";
-import type { AgentOption, FlowOption, NodeRunView, RunMeta, RunView } from "../queries";
+import type {
+  AgentOption,
+  FlowOption,
+  FlowStats,
+  NodeRunView,
+  RunMeta,
+  RunView,
+} from "../queries";
 import { Inspector } from "./Inspector";
 import { NodePalette } from "./NodePalette";
 import { ScheduleControl } from "./ScheduleControl";
+import { hasCycle } from "../graph";
 import { KIND_META, NODE_H, NODE_W, metaFor, outputPortsOf } from "../nodes";
 
 type Edge = FlowEdge & { id: string };
@@ -48,6 +65,10 @@ const fmtDur = (a: number | null, b: number | null): string => {
   const d = b - a;
   return d < 1000 ? `${d}ms` : `${(d / 1000).toFixed(1)}s`;
 };
+const fmtMs = (ms: number | null) =>
+  ms == null ? "—" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+const fmtTokens = (t: number) =>
+  t >= 1000 ? `${(t / 1000).toFixed(t >= 10000 ? 0 : 1)}k` : `${t}`;
 const relTime = (ms: number): string => {
   const s = Math.round((Date.now() - ms) / 1000);
   if (s < 60) return `${s}s ago`;
@@ -70,6 +91,7 @@ export function FlowCanvas({
   flow,
   agents,
   flows,
+  stats,
   trace,
   recentRuns,
 }: {
@@ -82,6 +104,7 @@ export function FlowCanvas({
   };
   agents: AgentOption[];
   flows: FlowOption[];
+  stats: FlowStats;
   trace: RunView | null;
   recentRuns: RunMeta[];
 }) {
@@ -98,6 +121,8 @@ export function FlowCanvas({
   // Run picker: null = follow the live/latest run (prop); else a fetched past run.
   const [pickedRunId, setPickedRunId] = useState<string | null>(null);
   const [pickedTrace, setPickedTrace] = useState<RunView | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [undoDepth, setUndoDepth] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef(view);
@@ -111,6 +136,33 @@ export function FlowCanvas({
     | null
   >(null);
   const lastSaved = useRef(JSON.stringify({ nodes, edges }));
+  // Undo: settled graph states, most-recent last, capped at 5 deep.
+  const stableRef = useRef(JSON.stringify({ nodes, edges }));
+  const undoRef = useRef<string[]>([]);
+
+  // Capture an undo step once an edit settles (coalesces drags + typing bursts).
+  useEffect(() => {
+    const cur = JSON.stringify({ nodes, edges });
+    if (cur === stableRef.current) return;
+    const t = setTimeout(() => {
+      undoRef.current.push(stableRef.current);
+      if (undoRef.current.length > 5) undoRef.current.shift();
+      stableRef.current = cur;
+      setUndoDepth(undoRef.current.length);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [nodes, edges]);
+
+  const undo = () => {
+    const prev = undoRef.current.pop();
+    if (prev === undefined) return;
+    stableRef.current = prev; // restore is not itself a new undo step
+    const g = JSON.parse(prev) as { nodes: FlowNode[]; edges: Edge[] };
+    setNodes(g.nodes);
+    setEdges(g.edges);
+    setSelected(null);
+    setUndoDepth(undoRef.current.length);
+  };
 
   // Live trace — SSE refreshes the server component, which re-passes `trace`.
   // The first flow_runs event after a Run also clears the optimistic state.
@@ -164,12 +216,26 @@ export function FlowCanvas({
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Delete key removes the selection (unless typing in a field).
+  // Delete key removes the selection; Cmd/Ctrl+Z undoes (unless typing).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
       const t = e.target as HTMLElement;
-      if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      const typing = !!t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
+        if (typing) return;
+        const prev = undoRef.current.pop();
+        if (prev === undefined) return;
+        e.preventDefault();
+        stableRef.current = prev;
+        const g = JSON.parse(prev) as { nodes: FlowNode[]; edges: Edge[] };
+        setNodes(g.nodes);
+        setEdges(g.edges);
+        setSelected(null);
+        setUndoDepth(undoRef.current.length);
+        return;
+      }
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (typing) return;
       if (!selected) return;
       e.preventDefault();
       if (selected.kind === "node") {
@@ -323,6 +389,7 @@ export function FlowCanvas({
       ? trace.nodes.find((n) => n.status === "paused")
       : null;
   const pausedNode = pausedRun ? nodes.find((n) => n.id === pausedRun.nodeId) : null;
+  const cyclic = hasCycle(nodes, edges);
 
   return (
     <div className="relative h-[calc(100vh-7rem)] overflow-hidden rounded-2xl glass">
@@ -338,12 +405,38 @@ export function FlowCanvas({
           onBlur={commitName}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
         />
+        {stats.runs > 0 && (
+          <span className="hidden items-center gap-2.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint sm:flex">
+            <span>{stats.runs} runs</span>
+            <span>{Math.round((stats.succeeded / stats.runs) * 100)}% ok</span>
+            <span>{fmtMs(stats.avgMs)}</span>
+            {stats.tokens > 0 && <span>{fmtTokens(stats.tokens)} tok</span>}
+          </span>
+        )}
+        {cyclic && (
+          <span
+            className="flex items-center gap-1.5 rounded-lg border border-flare/30 px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-flare"
+            title="This flow has a cycle — the engine can't run it until you remove the loop-back edge."
+          >
+            <AlertTriangle className="h-3.5 w-3.5" /> cycle
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={undo}
+          disabled={undoDepth === 0}
+          title="Undo (⌘Z) — up to 5 steps"
+          className="rounded-lg border border-ink/15 p-1.5 text-ink-faint transition hover:text-ink disabled:opacity-30"
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+        </button>
         <SaveBadge state={saveState} />
         <ScheduleControl flowId={flow.id} trigger={flow.trigger} enabled={flow.enabled} />
         <button
           type="button"
           onClick={onRun}
-          disabled={running}
+          disabled={running || cyclic}
+          title={cyclic ? "Remove the cycle before running" : undefined}
           className="flex items-center gap-2 rounded-lg border border-plasma/40 bg-plasma/10 px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-plasma transition hover:bg-plasma/20 disabled:opacity-50"
         >
           {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
@@ -460,7 +553,7 @@ export function FlowCanvas({
       {recentRuns.length > 0 && (
         <div className="pointer-events-none absolute inset-x-3 bottom-3 z-10 flex items-end justify-between gap-3">
           <div className="glass pointer-events-auto min-w-[240px] max-w-sm rounded-xl p-2.5">
-            <div className="flex items-center gap-2">
+            <div className="relative flex items-center gap-2">
               <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
                 run
               </span>
@@ -477,6 +570,53 @@ export function FlowCanvas({
                   </option>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={() => setShowHistory((v) => !v)}
+                title="Run history"
+                className={cn(
+                  "rounded-md border border-ink/15 p-1 transition hover:text-ink",
+                  showHistory ? "text-ink" : "text-ink-faint",
+                )}
+              >
+                <History className="h-3.5 w-3.5" />
+              </button>
+
+              {showHistory && (
+                <div className="absolute bottom-9 left-0 right-0 max-h-64 overflow-auto rounded-xl glass p-1.5">
+                  <p className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
+                    history · {recentRuns.length}
+                  </p>
+                  {recentRuns.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => {
+                        pickRun(r.id);
+                        setShowHistory(false);
+                      }}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-plasma/5",
+                        (pickedRunId ?? trace?.runId) === r.id && "bg-plasma/10",
+                      )}
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ background: STATUS_RING[r.status] ?? "var(--color-ink-faint)" }}
+                      />
+                      <span className="flex-1 truncate text-xs text-ink-dim">{relTime(r.createdAt)}</span>
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+                        {fmtDur(r.startedAt, r.finishedAt) || r.status}
+                      </span>
+                      {r.trigger !== "manual" && (
+                        <span className="font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+                          {r.trigger}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             {effTrace && (
               <div className="mt-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest">

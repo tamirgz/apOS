@@ -82,6 +82,8 @@ export interface RunMeta {
   status: string;
   trigger: string;
   createdAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
 }
 
 const ms = (d: Date | null | undefined) => (d ? new Date(d).getTime() : null);
@@ -143,6 +145,8 @@ export async function listRecentRuns(flowId: string, limit = 8): Promise<RunMeta
     status: r.status,
     trigger: r.trigger,
     createdAt: ms(r.createdAt) ?? 0,
+    startedAt: ms(r.startedAt),
+    finishedAt: ms(r.finishedAt),
   }));
 }
 
@@ -158,6 +162,64 @@ export async function listAgentOptions(): Promise<AgentOption[]> {
     .from(agents)
     .orderBy(asc(agents.name));
   return rows;
+}
+
+export interface FlowStats {
+  runs: number;
+  succeeded: number;
+  failed: number;
+  /** Mean wall-clock of succeeded runs, ms (null = none yet). */
+  avgMs: number | null;
+  /** Total agent tokens (in + out) across all this flow's runs. */
+  tokens: number;
+}
+
+const RUNS_AGG = (whereFlow = dsql``) => dsql`
+  select flow_id,
+    count(*)::int as runs,
+    count(*) filter (where status = 'succeeded')::int as succeeded,
+    count(*) filter (where status = 'failed')::int as failed,
+    avg(extract(epoch from (finished_at - started_at)) * 1000)
+      filter (where status = 'succeeded' and finished_at is not null) as avg_ms
+  from flow_runs ${whereFlow}
+  group by flow_id`;
+const TOKENS_AGG = (whereFlow = dsql``) => dsql`
+  select fr.flow_id, coalesce(sum(ar.tokens_in + ar.tokens_out), 0) as tokens
+  from flow_runs fr
+  join flow_node_runs fnr on fnr.flow_run_id = fr.id
+  join agent_runs ar on ar.id = fnr.agent_run_id
+  ${whereFlow}
+  group by fr.flow_id`;
+
+type RunsRow = { flow_id: string; runs: number; succeeded: number; failed: number; avg_ms: string | null };
+type TokRow = { flow_id: string; tokens: string };
+const toStats = (r: RunsRow | undefined, tokens: number): FlowStats => ({
+  runs: r?.runs ?? 0,
+  succeeded: r?.succeeded ?? 0,
+  failed: r?.failed ?? 0,
+  avgMs: r?.avg_ms != null ? Math.round(Number(r.avg_ms)) : null,
+  tokens,
+});
+
+/** Aggregate run stats for every flow, keyed by flow id — for the library. */
+export async function listFlowStats(): Promise<Map<string, FlowStats>> {
+  const [runs, toks] = await Promise.all([
+    db.execute<RunsRow>(RUNS_AGG()),
+    db.execute<TokRow>(TOKENS_AGG()),
+  ]);
+  const tok = new Map([...toks].map((r) => [r.flow_id, Number(r.tokens)]));
+  const m = new Map<string, FlowStats>();
+  for (const r of runs) m.set(r.flow_id, toStats(r, tok.get(r.flow_id) ?? 0));
+  return m;
+}
+
+/** Aggregate run stats for one flow — for the editor. */
+export async function flowStats(flowId: string): Promise<FlowStats> {
+  const [runs, toks] = await Promise.all([
+    db.execute<RunsRow>(RUNS_AGG(dsql`where flow_id = ${flowId}`)),
+    db.execute<TokRow>(TOKENS_AGG(dsql`where fr.flow_id = ${flowId}`)),
+  ]);
+  return toStats([...runs][0], Number([...toks][0]?.tokens ?? 0));
 }
 
 export interface FlowOption {

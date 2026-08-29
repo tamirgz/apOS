@@ -15,20 +15,17 @@ import type {
   FlowGraph,
   FlowNode,
   FlowNodeKind,
+  FlowTrigger,
 } from "@/modules/flows/schema";
-import { runFlowNow, saveFlowGraph, renameFlow } from "../actions";
-import type { AgentOption } from "../queries";
+import { loadRunView, runFlowNow, saveFlowGraph, renameFlow } from "../actions";
+import type { AgentOption, NodeRunView, RunMeta, RunView } from "../queries";
 import { Inspector } from "./Inspector";
 import { NodePalette } from "./NodePalette";
+import { ScheduleControl } from "./ScheduleControl";
 import { KIND_META, NODE_H, NODE_W, metaFor, outputPortsOf } from "../nodes";
 
 type Edge = FlowEdge & { id: string };
 type View = { x: number; y: number; k: number };
-type Trace = {
-  runId: string;
-  status: string;
-  nodes: { nodeId: string; status: string }[];
-} | null;
 
 const uid = (p: string) => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -37,6 +34,19 @@ const STATUS_RING: Record<string, string> = {
   running: "var(--color-plasma)",
   succeeded: "#16a97a",
   failed: "var(--color-flare)",
+};
+
+const fmtDur = (a: number | null, b: number | null): string => {
+  if (a == null || b == null) return "";
+  const d = b - a;
+  return d < 1000 ? `${d}ms` : `${(d / 1000).toFixed(1)}s`;
+};
+const relTime = (ms: number): string => {
+  const s = Math.round((Date.now() - ms) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
 };
 
 const inPos = (n: FlowNode) => ({ x: (n.x ?? 0), y: (n.y ?? 0) + NODE_H / 2 });
@@ -53,10 +63,18 @@ export function FlowCanvas({
   flow,
   agents,
   trace,
+  recentRuns,
 }: {
-  flow: { id: string; name: string; graph: FlowGraph };
+  flow: {
+    id: string;
+    name: string;
+    graph: FlowGraph;
+    trigger: FlowTrigger;
+    enabled: boolean;
+  };
   agents: AgentOption[];
-  trace: Trace;
+  trace: RunView | null;
+  recentRuns: RunMeta[];
 }) {
   const [nodes, setNodes] = useState<FlowNode[]>(() => flow.graph.nodes ?? []);
   const [edges, setEdges] = useState<Edge[]>(() =>
@@ -68,6 +86,9 @@ export function FlowCanvas({
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [wire, setWire] = useState<{ from: string; fromPort: string; x: number; y: number } | null>(null);
   const [optimisticRun, setOptimisticRun] = useState(false);
+  // Run picker: null = follow the live/latest run (prop); else a fetched past run.
+  const [pickedRunId, setPickedRunId] = useState<string | null>(null);
+  const [pickedTrace, setPickedTrace] = useState<RunView | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef(view);
@@ -85,9 +106,21 @@ export function FlowCanvas({
   // Live trace — SSE refreshes the server component, which re-passes `trace`.
   // The first flow_runs event after a Run also clears the optimistic state.
   useLiveEvents(["flow_runs"], () => setOptimisticRun(false));
-  const statusByNode = new Map<string, string>();
-  for (const n of trace?.nodes ?? []) statusByNode.set(n.nodeId, n.status);
+  // Effective trace: the picked past run, else the live latest run.
+  const effTrace = pickedRunId ? pickedTrace : trace;
+  const statusByNode = new Map<string, NodeRunView>();
+  for (const n of effTrace?.nodes ?? []) statusByNode.set(n.nodeId, n);
   const isRunning = trace?.status === "running" || trace?.status === "queued";
+
+  const pickRun = (id: string) => {
+    if (id === "" || (trace && id === trace.runId)) {
+      setPickedRunId(null);
+      setPickedTrace(null);
+      return;
+    }
+    setPickedRunId(id);
+    loadRunView(id).then(setPickedTrace);
+  };
 
   // Debounced autosave of the graph.
   useEffect(() => {
@@ -287,6 +320,7 @@ export function FlowCanvas({
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
         />
         <SaveBadge state={saveState} />
+        <ScheduleControl flowId={flow.id} trigger={flow.trigger} enabled={flow.enabled} />
         <button
           type="button"
           onClick={onRun}
@@ -393,13 +427,96 @@ export function FlowCanvas({
               node={n}
               agents={agents}
               selected={selected?.kind === "node" && selected.id === n.id}
-              status={statusByNode.get(n.id)}
+              status={statusByNode.get(n.id)?.status}
               onDown={(e) => onNodeDown(e, n.id)}
               onPortDown={onPortDown}
             />
           ))}
         </div>
       </div>
+
+      {/* bottom: run trace + selected-node detail */}
+      {recentRuns.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-3 bottom-3 z-10 flex items-end justify-between gap-3">
+          <div className="glass pointer-events-auto min-w-[240px] max-w-sm rounded-xl p-2.5">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
+                run
+              </span>
+              <select
+                className="min-w-0 flex-1 rounded-md glass px-2 py-1 text-xs text-ink outline-none focus:glass-edge"
+                value={pickedRunId ?? trace?.runId ?? ""}
+                onChange={(e) => pickRun(e.target.value)}
+              >
+                {recentRuns.map((r, i) => (
+                  <option key={r.id} value={r.id}>
+                    {i === 0 ? "latest · " : ""}
+                    {relTime(r.createdAt)} · {r.status}
+                    {r.trigger !== "manual" ? ` · ${r.trigger}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {effTrace && (
+              <div className="mt-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: STATUS_RING[effTrace.status] ?? "var(--color-ink-faint)" }}
+                />
+                <span className="text-ink-dim">{effTrace.status}</span>
+                <span className="text-ink-faint">{fmtDur(effTrace.startedAt, effTrace.finishedAt)}</span>
+                <span className="ml-auto text-ink-faint">{effTrace.nodes.length} steps</span>
+              </div>
+            )}
+          </div>
+
+          {selectedNode && statusByNode.get(selectedNode.id) && (
+            <NodeRunDetail node={selectedNode} run={statusByNode.get(selectedNode.id)!} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NodeRunDetail({ node, run }: { node: FlowNode; run: NodeRunView }) {
+  const meta = metaFor(node.kind);
+  const chose = (run.signal as { chose?: string } | null)?.chose;
+  return (
+    <div className="glass pointer-events-auto max-h-56 w-72 overflow-auto rounded-xl p-3">
+      <div className="flex items-center gap-2">
+        <span
+          className="flex h-5 w-5 items-center justify-center rounded-md"
+          style={{ background: `${meta.color}22`, color: meta.color }}
+        >
+          <meta.Icon className="h-3 w-3" />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
+          {node.name || meta.label}
+        </span>
+        <span
+          className="font-mono text-[10px] uppercase tracking-widest"
+          style={{ color: STATUS_RING[run.status] ?? "var(--color-ink-faint)" }}
+        >
+          {run.status}
+        </span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+        <span>{fmtDur(run.startedAt, run.finishedAt) || "—"}</span>
+        {chose && (
+          <span>
+            chose <span className="text-plasma">{chose}</span>
+          </span>
+        )}
+      </div>
+      {run.error && (
+        <p className="mt-2 rounded-md bg-flare/10 px-2 py-1.5 text-[11px] text-flare">{run.error}</p>
+      )}
+      {run.report && (
+        <p className="mt-2 whitespace-pre-wrap text-[11px] leading-snug text-ink-dim">
+          {run.report.length > 600 ? `${run.report.slice(0, 600)}…` : run.report}
+        </p>
+      )}
     </div>
   );
 }

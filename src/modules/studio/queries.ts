@@ -57,26 +57,93 @@ export async function getFlow(id: string): Promise<Flow | null> {
   return row ?? null;
 }
 
-export interface RunTrace {
-  run: FlowRun;
-  nodes: FlowNodeRun[];
+/** A per-node run, flattened for the client (dates → epoch ms, report lifted). */
+export interface NodeRunView {
+  nodeId: string;
+  kind: string;
+  status: string;
+  startedAt: number | null;
+  finishedAt: number | null;
+  /** Emitted signal / a branch's chosen port ({ chose, truthy }). */
+  signal: Record<string, unknown> | null;
+  report: string | null;
+  error: string | null;
+}
+export interface RunView {
+  runId: string;
+  status: string;
+  trigger: string;
+  startedAt: number | null;
+  finishedAt: number | null;
+  nodes: NodeRunView[];
+}
+export interface RunMeta {
+  id: string;
+  status: string;
+  trigger: string;
+  createdAt: number;
 }
 
-/** The most recent run of a flow plus its per-node runs — powers live trace. */
-export async function latestRunTrace(flowId: string): Promise<RunTrace | null> {
-  const [run] = await db
-    .select()
-    .from(flowRuns)
-    .where(eq(flowRuns.flowId, flowId))
-    .orderBy(desc(flowRuns.createdAt))
-    .limit(1);
+const ms = (d: Date | null | undefined) => (d ? new Date(d).getTime() : null);
+
+function toNodeView(n: FlowNodeRun): NodeRunView {
+  const out = n.output as { report?: string } | null;
+  return {
+    nodeId: n.nodeId,
+    kind: n.kind,
+    status: n.status,
+    startedAt: ms(n.startedAt),
+    finishedAt: ms(n.finishedAt),
+    signal: (n.signal as Record<string, unknown> | null) ?? null,
+    report: out?.report ?? null,
+    error: n.error ?? null,
+  };
+}
+
+/** One run + its per-node runs, flattened for the canvas trace panel. */
+export async function runView(runId: string): Promise<RunView | null> {
+  const [run] = await db.select().from(flowRuns).where(eq(flowRuns.id, runId));
   if (!run) return null;
   const nodes = await db
     .select()
     .from(flowNodeRuns)
     .where(eq(flowNodeRuns.flowRunId, run.id))
     .orderBy(asc(flowNodeRuns.startedAt));
-  return { run, nodes };
+  return {
+    runId: run.id,
+    status: run.status,
+    trigger: run.trigger,
+    startedAt: ms(run.startedAt),
+    finishedAt: ms(run.finishedAt),
+    nodes: nodes.map(toNodeView),
+  };
+}
+
+/** The most recent run of a flow — powers the live trace on load. */
+export async function latestRunView(flowId: string): Promise<RunView | null> {
+  const [run] = await db
+    .select({ id: flowRuns.id })
+    .from(flowRuns)
+    .where(eq(flowRuns.flowId, flowId))
+    .orderBy(desc(flowRuns.createdAt))
+    .limit(1);
+  return run ? runView(run.id) : null;
+}
+
+/** Recent runs of a flow (metadata only) for the run picker. */
+export async function listRecentRuns(flowId: string, limit = 8): Promise<RunMeta[]> {
+  const rows = await db
+    .select()
+    .from(flowRuns)
+    .where(eq(flowRuns.flowId, flowId))
+    .orderBy(desc(flowRuns.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    trigger: r.trigger,
+    createdAt: ms(r.createdAt) ?? 0,
+  }));
 }
 
 export interface AgentOption {

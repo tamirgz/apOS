@@ -1,10 +1,17 @@
 "use server";
 
+import { Cron } from "croner";
 import { eq, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
 import { agents } from "@/core/db/schema/agents";
-import { flowRuns, flows, type FlowGraph } from "@/modules/flows/schema";
+import {
+  flowRuns,
+  flows,
+  type FlowGraph,
+  type FlowTrigger,
+} from "@/modules/flows/schema";
+import { runView, type RunView } from "./queries";
 
 const uid = (p: string) => `${p}_${crypto.randomUUID().slice(0, 8)}`;
 
@@ -86,4 +93,30 @@ export async function deleteFlow(id: string): Promise<void> {
 export async function runFlowNow(id: string): Promise<void> {
   await sql.notify("flow_run", id);
   revalidatePath(`/m/studio/${id}`);
+}
+
+/** Set how a flow fires. A schedule cron is validated before it's stored, so a
+ *  bad pattern never reaches the worker. NOTIFYs the worker to (re)sync crons. */
+export async function setFlowTrigger(id: string, trigger: FlowTrigger): Promise<void> {
+  if (trigger.kind === "schedule") {
+    if (!trigger.cron?.trim()) throw new Error("a schedule needs a cron pattern");
+    try {
+      new Cron(trigger.cron).stop();
+    } catch {
+      throw new Error(`invalid cron pattern: "${trigger.cron}"`);
+    }
+  }
+  await db.update(flows).set({ trigger, updatedAt: new Date() }).where(eq(flows.id, id));
+  await touched(id);
+}
+
+/** Arm/disarm a flow. Only enabled + schedule-triggered flows get a worker cron. */
+export async function setFlowEnabled(id: string, enabled: boolean): Promise<void> {
+  await db.update(flows).set({ enabled, updatedAt: new Date() }).where(eq(flows.id, id));
+  await touched(id);
+}
+
+/** Load one past run's trace for the canvas run-picker. */
+export async function loadRunView(runId: string): Promise<RunView | null> {
+  return runView(runId);
 }

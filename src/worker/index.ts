@@ -19,6 +19,8 @@ import { reportJobOutcome } from "@/core/alerts";
 import { serverModules } from "@/modules/registry.server";
 import { fireRoutine } from "@/modules/workbench/routines";
 import { routines } from "@/modules/workbench/schema";
+import { runFlow } from "@/modules/flows/engine";
+import { flows } from "@/modules/flows/schema";
 import { enqueueRun, executeApproval, executeRun } from "./executor";
 import { hasFreshBackup, runBackup } from "./backup";
 
@@ -138,6 +140,45 @@ async function syncRoutineCrons() {
   }
 }
 
+const flowCrons = new Map<string, Cron>();
+
+/** Schedule-triggered flows get a cron each — the flow's trigger jsonb carries
+ *  { kind: "schedule", cron }. Fires runFlow(id, "schedule") in this worker. */
+async function syncFlowCrons() {
+  const rows = await db.select().from(flows).where(eq(flows.enabled, true));
+  const wanted = new Map(
+    rows
+      .filter((f) => f.trigger?.kind === "schedule" && f.trigger.cron)
+      .map((f) => [f.id, f]),
+  );
+
+  for (const [id, cron] of flowCrons) {
+    const f = wanted.get(id);
+    const pattern = f?.trigger?.kind === "schedule" ? f.trigger.cron : undefined;
+    if (!f || pattern !== cron.getPattern()) {
+      cron.stop();
+      flowCrons.delete(id);
+      log(`unscheduled flow ${id}`);
+    }
+  }
+
+  for (const [id, f] of wanted) {
+    if (flowCrons.has(id)) continue;
+    const pattern = f.trigger?.kind === "schedule" ? f.trigger.cron : undefined;
+    if (!pattern) continue;
+    try {
+      const cron = new Cron(pattern, { protect: true }, async () => {
+        log(`flow cron fired → ${f.name}`);
+        await runFlow(id, "schedule").catch((e) => log(`flow ${id} failed: ${e}`));
+      });
+      flowCrons.set(id, cron);
+      log(`scheduled flow "${f.name}" [${pattern}]`);
+    } catch (e) {
+      log(`invalid cron for flow "${f.name}": ${e}`);
+    }
+  }
+}
+
 async function sweepOrphans() {
   const cutoff = new Date(Date.now() - ORPHAN_AFTER_MS);
   // coalesce: queued runs never get a heartbeat — judge them by created_at,
@@ -190,6 +231,7 @@ async function main() {
   await sweepOrphans();
   await syncSchedules();
   await syncRoutineCrons();
+  await syncFlowCrons();
 
   // Module background jobs (e.g. knowledge ingestion, calendar sync).
   const moduleJobs = serverModules.flatMap((m) => m.jobs ?? []);
@@ -236,6 +278,10 @@ async function main() {
       log("routines_changed → resyncing routine crons");
       syncRoutineCrons().catch((e) => log(`routine resync failed: ${e}`));
     });
+    await l.listen("flows_changed", () => {
+      log("flows_changed → resyncing flow crons");
+      syncFlowCrons().catch((e) => log(`flow resync failed: ${e}`));
+    });
     await l.listen("run_requests", (runId) => {
       // NOTIFY payloads are raw text; reject non-uuids so a malformed one fails
       // cleanly rather than corrupting the claim's query parameters.
@@ -280,7 +326,7 @@ async function main() {
   };
 
   let listener = await startListener();
-  log(`listening on ${jobHandlers.size + 6} channel(s)`);
+  log(`listening on ${jobHandlers.size + 7} channel(s)`);
 
   const rebuildListener = async () => {
     try {
@@ -293,6 +339,7 @@ async function main() {
     log("listener rebuilt — catching up (schedules + queued runs)");
     syncSchedules().catch((e) => log(`catch-up resync failed: ${e}`));
     syncRoutineCrons().catch((e) => log(`catch-up routine resync failed: ${e}`));
+    syncFlowCrons().catch((e) => log(`catch-up flow resync failed: ${e}`));
     pickUpQueuedRuns().catch((e) => log(`catch-up queued pickup failed: ${e}`));
   };
   // Heartbeat watchdog: emit a beat every 30s and rebuild if none has come back
@@ -320,6 +367,7 @@ async function main() {
     sweepOrphans().catch((e) => log(`safety-net orphan sweep failed: ${e}`));
     syncSchedules().catch((e) => log(`safety-net schedule sync failed: ${e}`));
     syncRoutineCrons().catch((e) => log(`safety-net routine sync failed: ${e}`));
+    syncFlowCrons().catch((e) => log(`safety-net flow sync failed: ${e}`));
     pickUpQueuedRuns().catch((e) => log(`safety-net queued pickup failed: ${e}`));
   });
 

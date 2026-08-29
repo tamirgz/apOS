@@ -6,8 +6,13 @@ import { Bot, Plus, Trash2, Workflow } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
-import type { AgentOption, FlowCard } from "../queries";
+import type { AgentOption, FlowCard, FlowStats } from "../queries";
 import { createFlow, deleteFlow, importAgentAsFlow } from "../actions";
+
+const fmtMs = (ms: number | null) =>
+  ms == null ? "—" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+const fmtTokens = (t: number) =>
+  t >= 1000 ? `${(t / 1000).toFixed(t >= 10000 ? 0 : 1)}k` : `${t}`;
 
 const RUN_META: Record<string, { label: string; cls: string }> = {
   running: { label: "running", cls: "text-plasma" },
@@ -20,9 +25,11 @@ const RUN_META: Record<string, { label: string; cls: string }> = {
 export function FlowLibrary({
   flows,
   agents,
+  stats,
 }: {
   flows: FlowCard[];
   agents: AgentOption[];
+  stats: Record<string, FlowStats>;
 }) {
   const router = useRouter();
   const search = useSearchParams();
@@ -110,7 +117,12 @@ export function FlowLibrary({
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {flows.map((f) => (
-            <FlowTile key={f.flow.id} card={f} onOpen={() => router.push(`/m/studio/${f.flow.id}`)} />
+            <FlowTile
+              key={f.flow.id}
+              card={f}
+              stats={stats[f.flow.id]}
+              onOpen={() => router.push(`/m/studio/${f.flow.id}`)}
+            />
           ))}
         </div>
       )}
@@ -118,9 +130,19 @@ export function FlowLibrary({
   );
 }
 
-function FlowTile({ card, onOpen }: { card: FlowCard; onOpen: () => void }) {
+function FlowTile({
+  card,
+  stats,
+  onOpen,
+}: {
+  card: FlowCard;
+  stats?: FlowStats;
+  onOpen: () => void;
+}) {
   const [, startDel] = useTransition();
   const run = card.lastRun ? RUN_META[card.lastRun.status] : null;
+  const okRate =
+    stats && stats.runs > 0 ? Math.round((stats.succeeded / stats.runs) * 100) : null;
   return (
     <GlassPanel
       className="group relative flex cursor-pointer flex-col gap-3 p-4 transition hover:glass-edge"
@@ -148,6 +170,16 @@ function FlowTile({ card, onOpen }: { card: FlowCard; onOpen: () => void }) {
         <span>{card.agentCount} agents</span>
         {run && <span className={cn("ml-auto", run.cls)}>{run.label}</span>}
       </div>
+      {stats && stats.runs > 0 && (
+        <div className="flex items-center gap-3 border-t border-ink/5 pt-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+          <span title="total runs">{stats.runs} runs</span>
+          <span title="success rate" className={okRate === 100 ? "text-plasma-dim" : undefined}>
+            {okRate}% ok
+          </span>
+          <span title="avg duration">{fmtMs(stats.avgMs)}</span>
+          {stats.tokens > 0 && <span title="agent tokens">{fmtTokens(stats.tokens)} tok</span>}
+        </div>
+      )}
     </GlassPanel>
   );
 }

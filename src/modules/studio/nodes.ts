@@ -6,6 +6,7 @@ import {
   GitMerge,
   Repeat,
   Split,
+  UserCheck,
   Workflow,
   Zap,
   type LucideIcon,
@@ -37,6 +38,7 @@ const LOGIC = "#d1a02a";
 const OUT = "#16a97a";
 const TRIG = "#d98324";
 const SUB = "#4aa3c9";
+const HUMAN = "#e0708a";
 
 export const KIND_META: Record<string, KindMeta> = {
   trigger: {
@@ -104,6 +106,14 @@ export const KIND_META: Record<string, KindMeta> = {
     hasInput: true,
     outPorts: "single",
   },
+  human: {
+    label: "Human",
+    blurb: "Pause for your approval",
+    color: HUMAN,
+    Icon: UserCheck,
+    hasInput: true,
+    outPorts: "single",
+  },
   output: {
     label: "Output",
     blurb: "Deliver the result (notify)",
@@ -124,6 +134,7 @@ export const PALETTE_KINDS: FlowNodeKind[] = [
   "merge",
   "loop",
   "subroutine",
+  "human",
   "output",
 ];
 

@@ -1,11 +1,12 @@
 "use server";
 
 import { Cron } from "croner";
-import { eq, sql as dsql } from "drizzle-orm";
+import { and, eq, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
 import { agents } from "@/core/db/schema/agents";
 import {
+  flowNodeRuns,
   flowRuns,
   flows,
   type FlowGraph,
@@ -119,4 +120,26 @@ export async function setFlowEnabled(id: string, enabled: boolean): Promise<void
 /** Load one past run's trace for the canvas run-picker. */
 export async function loadRunView(runId: string): Promise<RunView | null> {
   return runView(runId);
+}
+
+/** Approve or reject a paused human node, then NOTIFY the worker to resume the
+ *  run from where it paused. No-op if the node isn't actually waiting. */
+export async function decideFlowStep(
+  flowId: string,
+  flowRunId: string,
+  nodeId: string,
+  approved: boolean,
+): Promise<void> {
+  const [nr] = await db
+    .select()
+    .from(flowNodeRuns)
+    .where(and(eq(flowNodeRuns.flowRunId, flowRunId), eq(flowNodeRuns.nodeId, nodeId)));
+  if (!nr || nr.status !== "paused") return;
+  const sig = (nr.signal as Record<string, unknown> | null) ?? {};
+  await db
+    .update(flowNodeRuns)
+    .set({ signal: { ...sig, decision: approved ? "approved" : "rejected" } })
+    .where(eq(flowNodeRuns.id, nr.id));
+  await sql.notify("flow_resume", flowRunId);
+  revalidatePath(`/m/studio/${flowId}`);
 }

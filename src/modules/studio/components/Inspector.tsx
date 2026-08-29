@@ -112,6 +112,22 @@ export function Inspector({
         </div>
       )}
 
+      {node.kind === "human" && (
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>ask</span>
+          <textarea
+            className={`${fieldCls} min-h-16 resize-y`}
+            value={(cfg.prompt as string) ?? ""}
+            placeholder="Approve the draft before it's sent?"
+            onChange={(e) => setCfg("prompt", e.target.value)}
+          />
+          <span className="text-[11px] text-ink-faint">
+            The flow pauses here until you Approve (continue) or Reject (stop the
+            downstream path) from the run trace.
+          </span>
+        </label>
+      )}
+
       {node.kind === "output" && (
         <label className="flex flex-col gap-1">
           <span className={labelCls}>deliver via</span>

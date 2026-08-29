@@ -121,6 +121,7 @@ export function AnimatedBg() {
       <div aria-hidden className="bg-grid" />
       <div aria-hidden className="bg-grain" />
       <ParticleField />
+      <div aria-hidden className="bg-vignette" />
     </>
   );
 }

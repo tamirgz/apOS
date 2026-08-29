@@ -95,29 +95,52 @@ body {
   inset: -20%;
   z-index: -3;
   pointer-events: none;
-  filter: blur(70px) saturate(120%);
+  filter: blur(72px) saturate(125%);
+  /* Theme-aware: the glows are mixed from the active theme's accent tokens
+     (like .bg-grid / .bg-grain), so the aurora matches every palette instead
+     of staying teal/amber. */
   background:
     radial-gradient(
-      42% 34% at 18% 22%,
-      rgb(0 229 199 / 0.13) 0%,
+      44% 36% at 18% 20%,
+      color-mix(in oklab, var(--color-plasma) 16%, transparent) 0%,
       transparent 70%
     ),
     radial-gradient(
-      38% 30% at 82% 12%,
-      rgb(125 211 252 / 0.09) 0%,
+      40% 32% at 84% 12%,
+      color-mix(in oklab, var(--color-ion) 12%, transparent) 0%,
       transparent 70%
     ),
     radial-gradient(
-      46% 38% at 74% 82%,
-      rgb(255 180 84 / 0.07) 0%,
-      transparent 70%
+      48% 40% at 74% 84%,
+      color-mix(in oklab, var(--color-solar) 9%, transparent) 0%,
+      transparent 72%
     ),
     radial-gradient(
-      30% 26% at 32% 88%,
-      rgb(177 151 252 / 0.06) 0%,
-      transparent 70%
+      32% 28% at 30% 88%,
+      color-mix(in oklab, var(--color-flare) 8%, transparent) 0%,
+      transparent 72%
     );
-  animation: aurora-drift 36s ease-in-out infinite alternate;
+  animation: aurora-drift 40s ease-in-out infinite alternate;
+}
+/* Light theme: soften the glows so they don't muddy a bright ground. */
+[data-theme="daybreak"] .bg-aurora {
+  opacity: 0.55;
+  filter: blur(84px) saturate(112%);
+}
+
+/* Depth vignette — draws the eye inward and lifts the glass panels off the
+   ground. Adapts per theme (darkens toward --color-void on dark, lightens on
+   light) and is a static layer, so it renders in any frame. */
+.bg-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 118% 108% at 50% 38%,
+    transparent 52%,
+    color-mix(in oklab, var(--color-void) 55%, transparent) 100%
+  );
 }
 
 @keyframes aurora-drift {

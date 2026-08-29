@@ -3,7 +3,7 @@
 import { Trash2 } from "lucide-react";
 import type { FlowNode } from "@/modules/flows/schema";
 import { metaFor } from "../nodes";
-import type { AgentOption } from "../queries";
+import type { AgentOption, FlowOption } from "../queries";
 
 type Patch = { name?: string; config?: Record<string, unknown> };
 
@@ -16,11 +16,13 @@ const labelCls =
 export function Inspector({
   node,
   agents,
+  flows,
   onPatch,
   onDelete,
 }: {
   node: FlowNode;
   agents: AgentOption[];
+  flows: FlowOption[];
   onPatch: (patch: Patch) => void;
   onDelete: () => void;
 }) {
@@ -121,6 +123,64 @@ export function Inspector({
             <option value="notify">notify</option>
           </select>
         </label>
+      )}
+
+      {(node.kind === "subroutine" || node.kind === "loop") && (
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>{node.kind === "loop" ? "run per item" : "run flow"}</span>
+          <select
+            className={fieldCls}
+            value={(cfg.flowId as string) ?? ""}
+            onChange={(e) => setCfg("flowId", e.target.value)}
+          >
+            <option value="">— pick a flow —</option>
+            {flows.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+          {!cfg.flowId && (
+            <span className="text-[11px] text-flare">Choose the flow to run.</span>
+          )}
+          {flows.length === 0 && (
+            <span className="text-[11px] text-ink-faint">
+              Create another flow first — it becomes the callable here.
+            </span>
+          )}
+        </label>
+      )}
+
+      {node.kind === "loop" && (
+        <div className="flex gap-2">
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelCls}>items key</span>
+            <input
+              className={fieldCls}
+              value={(cfg.itemsKey as string) ?? ""}
+              placeholder="items"
+              onChange={(e) => setCfg("itemsKey", e.target.value)}
+            />
+          </label>
+          <label className="flex w-20 flex-col gap-1">
+            <span className={labelCls}>max</span>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              className={fieldCls}
+              value={(cfg.maxIterations as number) ?? 10}
+              onChange={(e) => setCfg("maxIterations", Number(e.target.value))}
+            />
+          </label>
+        </div>
+      )}
+
+      {node.kind === "loop" && (
+        <p className="text-[11px] text-ink-faint">
+          Iterates the array at <code>signal.{(cfg.itemsKey as string) || "items"}</code> from
+          the upstream step, running the chosen flow once per item.
+        </p>
       )}
 
       {(node.kind === "fanout" || node.kind === "merge" || node.kind === "trigger") && (

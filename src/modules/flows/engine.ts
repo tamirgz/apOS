@@ -73,13 +73,25 @@ export async function runFlow(
 
 type EdgeS = { status: "pending" | "delivered" | "skipped"; payload?: FlowPayload | null };
 
+/** How deep sub-flows may nest before we call it a runaway recursion. */
+const MAX_DEPTH = 6;
+
 /**
  * Dataflow scheduler. An edge resolves to delivered|skipped; a node is ready
  * once every inbound edge is resolved. If ALL its inbound are skipped the node
  * is skipped and the skip cascades; otherwise it runs on its delivered inputs
  * and emits on the ports its kind selects. Ready nodes run concurrently.
+ *
+ * `seed` is delivered to the root (input-less) nodes — how a sub-flow receives
+ * its caller's payload. Returns the combined output of the terminal (no-outgoing)
+ * nodes, so a sub-routine/loop can read a sub-flow's result.
  */
-async function executeGraph(graph: FlowGraph, flowRunId: string): Promise<void> {
+async function executeGraph(
+  graph: FlowGraph,
+  flowRunId: string,
+  depth = 0,
+  seed: FlowPayload | null = null,
+): Promise<FlowPayload | null> {
   const { nodes } = graph;
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const E = graph.edges
@@ -99,6 +111,7 @@ async function executeGraph(graph: FlowGraph, flowRunId: string): Promise<void> 
   const nstate = new Map<string, "pending" | "done" | "skipped">(
     nodes.map((n) => [n.id, "pending"]),
   );
+  const nodeOutputs = new Map<string, FlowPayload | null>();
   const resolved = (e: (typeof E)[number]) => est.get(e.i)!.status !== "pending";
   const ready = (n: FlowNode) => inE.get(n.id)!.every(resolved);
   const allSkipped = (n: FlowNode) => {
@@ -119,13 +132,15 @@ async function executeGraph(graph: FlowGraph, flowRunId: string): Promise<void> 
           for (const oe of outE.get(n.id)!) est.set(oe.i, { status: "skipped" });
           return;
         }
-        const inputs = inE
-          .get(n.id)!
+        const inbound = inE.get(n.id)!;
+        const inputs = inbound
           .filter((e) => est.get(e.i)!.status === "delivered")
           .map((e) => est.get(e.i)!.payload ?? null);
-        const input = combine(inputs);
-        const { output, ports } = await runNode(n, input, flowRunId);
+        // Root (input-less) nodes receive the caller's seed, if any.
+        const input = inbound.length === 0 && seed ? seed : combine(inputs);
+        const { output, ports } = await runNode(n, input, flowRunId, depth);
         nstate.set(n.id, "done");
+        nodeOutputs.set(n.id, output);
         for (const oe of outE.get(n.id)!) {
           const take =
             ports === null ||
@@ -136,6 +151,12 @@ async function executeGraph(graph: FlowGraph, flowRunId: string): Promise<void> 
       }),
     );
   }
+
+  // The sub-flow's result = the combined output of its terminal (leaf) nodes.
+  const terminals = nodes.filter(
+    (n) => outE.get(n.id)!.length === 0 && nstate.get(n.id) === "done",
+  );
+  return combine(terminals.map((n) => nodeOutputs.get(n.id) ?? null));
 }
 
 /** Merge several inbound payloads into one (report concatenated, signals merged). */
@@ -162,6 +183,7 @@ async function runNode(
   node: FlowNode,
   input: FlowPayload | null,
   flowRunId: string,
+  depth: number,
 ): Promise<{ output: FlowPayload | null; ports: string[] | null }> {
   const [nr] = await db
     .insert(flowNodeRuns)
@@ -180,7 +202,9 @@ async function runNode(
     let ports: string[] | null = null;
 
     if (node.kind === "trigger") {
-      output = { from: node.name ?? "trigger" };
+      // Top-level: no input → just a start marker. Sub-flow: emits the seed
+      // its caller (sub-routine/loop) handed in, so the child sees the payload.
+      output = input ?? { from: node.name ?? "trigger" };
     } else if (node.kind === "agent") {
       output = await runAgentNode(node, input, nr.id);
     } else if (node.kind === "output" || node.kind === "tool") {
@@ -201,8 +225,12 @@ async function runNode(
       const pass = await evalCondition(cond, input);
       ports = pass ? null : []; // pass → all ports; drop → none (skip downstream)
       output = input;
+    } else if (node.kind === "subroutine") {
+      output = await runSubroutineNode(node, input, depth);
+    } else if (node.kind === "loop") {
+      output = await runLoopNode(node, input, depth, nr.id);
     }
-    // fanout / merge / loop / etc. → default: pass through on all ports.
+    // fanout / merge → default: pass through on all ports.
 
     await db
       .update(flowNodeRuns)
@@ -255,6 +283,93 @@ async function runAgentNode(
     report: finished.result ?? "",
     signal: (nr?.signal as Record<string, unknown> | null) ?? null,
     from: node.name ?? "agent",
+  };
+}
+
+/** Run another flow inline as a child run, seeded with `input`; returns its
+ *  terminal output. The depth guard stops runaway sub-flow recursion. */
+async function runSubflow(
+  flowId: string,
+  input: FlowPayload | null,
+  depth: number,
+): Promise<FlowPayload | null> {
+  if (depth > MAX_DEPTH) throw new Error(`sub-flow nesting exceeded ${MAX_DEPTH}`);
+  const [flow] = await db.select().from(flows).where(eq(flows.id, flowId));
+  if (!flow) throw new Error("sub-flow target not found");
+  const [run] = await db
+    .insert(flowRuns)
+    .values({ flowId, trigger: "subroutine", status: "running", startedAt: new Date() })
+    .returning();
+  bump(run.id);
+  try {
+    const out = await executeGraph(flow.graph, run.id, depth, input);
+    await db
+      .update(flowRuns)
+      .set({ status: "succeeded", finishedAt: new Date() })
+      .where(eq(flowRuns.id, run.id));
+    bump(run.id);
+    return out;
+  } catch (e) {
+    await db
+      .update(flowRuns)
+      .set({ status: "failed", error: String(e).slice(0, 500), finishedAt: new Date() })
+      .where(eq(flowRuns.id, run.id));
+    bump(run.id);
+    throw e;
+  }
+}
+
+/** Sub-routine node — run the referenced flow once on the upstream payload. */
+async function runSubroutineNode(
+  node: FlowNode,
+  input: FlowPayload | null,
+  depth: number,
+): Promise<FlowPayload | null> {
+  const flowId = node.config?.flowId as string | undefined;
+  if (!flowId) throw new Error("sub-flow node has no target flow");
+  return runSubflow(flowId, input, depth + 1);
+}
+
+/** Pull the collection a loop iterates: config.items literal, else the named
+ *  key on the upstream signal (default "items"). */
+function loopItems(node: FlowNode, input: FlowPayload | null): unknown[] {
+  const literal = node.config?.items;
+  if (Array.isArray(literal)) return literal;
+  const key = (node.config?.itemsKey as string) || "items";
+  const v = (input?.signal as Record<string, unknown> | undefined)?.[key];
+  return Array.isArray(v) ? v : [];
+}
+
+/** Loop node — run the referenced sub-flow once per item, bounded. Each iteration
+ *  is seeded with { report: <item>, signal: { item, index } }. */
+async function runLoopNode(
+  node: FlowNode,
+  input: FlowPayload | null,
+  depth: number,
+  nodeRunId: string,
+): Promise<FlowPayload | null> {
+  const flowId = node.config?.flowId as string | undefined;
+  if (!flowId) throw new Error("loop node has no sub-flow to run per item");
+  const max = Math.min(Math.max(1, Number(node.config?.maxIterations ?? 10)), 50);
+  const items = loopItems(node, input).slice(0, max);
+  const results: (FlowPayload | null)[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const itemInput: FlowPayload = {
+      report: typeof item === "string" ? item : JSON.stringify(item),
+      signal: { item, index: i },
+      from: node.name ?? "loop",
+    };
+    results.push(await runSubflow(flowId, itemInput, depth + 1));
+  }
+  await db
+    .update(flowNodeRuns)
+    .set({ signal: { iterations: results.length, bounded: loopItems(node, input).length > max } })
+    .where(eq(flowNodeRuns.id, nodeRunId));
+  return {
+    report: results.map((r) => r?.report).filter(Boolean).join("\n\n— — —\n\n"),
+    signal: { count: results.length, results: results.map((r) => r?.signal ?? null) },
+    from: node.name ?? "loop",
   };
 }
 

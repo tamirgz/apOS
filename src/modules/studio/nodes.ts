@@ -4,7 +4,9 @@ import {
   Filter,
   GitBranch,
   GitMerge,
+  Repeat,
   Split,
+  Workflow,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -34,6 +36,7 @@ const AGENT = "#8b6dff";
 const LOGIC = "#d1a02a";
 const OUT = "#16a97a";
 const TRIG = "#d98324";
+const SUB = "#4aa3c9";
 
 export const KIND_META: Record<string, KindMeta> = {
   trigger: {
@@ -85,6 +88,22 @@ export const KIND_META: Record<string, KindMeta> = {
     hasInput: true,
     outPorts: "single",
   },
+  loop: {
+    label: "Loop",
+    blurb: "Run a sub-flow for each item",
+    color: LOGIC,
+    Icon: Repeat,
+    hasInput: true,
+    outPorts: "single",
+  },
+  subroutine: {
+    label: "Sub-flow",
+    blurb: "Run another flow inline",
+    color: SUB,
+    Icon: Workflow,
+    hasInput: true,
+    outPorts: "single",
+  },
   output: {
     label: "Output",
     blurb: "Deliver the result (notify)",
@@ -103,6 +122,8 @@ export const PALETTE_KINDS: FlowNodeKind[] = [
   "filter",
   "fanout",
   "merge",
+  "loop",
+  "subroutine",
   "output",
 ];
 

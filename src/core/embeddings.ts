@@ -63,6 +63,63 @@ async function handleModelSwitch(log: (m: string) => void): Promise<void> {
 const toVec = (e: number[]) => `[${e.join(",")}]`;
 
 /**
+ * Pin the embedding column to the ACTIVE model's dimension and keep an HNSW
+ * index on it. pgvector cannot index a dimension-less column, so every
+ * similarity query — attention dedup, memory recall, Ask retrieval, the
+ * nightly O(n²) memory compaction — was a sequential scan. The dimension is
+ * probed from the live model (one embed call, memoized per model), so
+ * switching models remains a settings flip: the next sweep re-probes, alters
+ * the column, and re-embeds (handleModelSwitch already wiped the vectors).
+ */
+const dimMemo = { model: null as string | null, ensured: false };
+
+async function ensureVectorIndex(log: (m: string) => void): Promise<void> {
+  const model = await getEmbeddingModel();
+  if (dimMemo.ensured && dimMemo.model === model) return;
+  const dim = (await embedText("dimension probe")).length;
+  if (!Number.isInteger(dim) || dim <= 0 || dim > 16000) {
+    throw new Error(`embedding model "${model}" returned an unusable dimension ${dim}`);
+  }
+  const colRows = await db.execute<{ type: string }>(dsql`
+    select format_type(a.atttypid, a.atttypmod) as type
+      from pg_attribute a
+     where a.attrelid = 'search_index'::regclass and a.attname = 'embedding'`);
+  const current = [...colRows][0]?.type ?? "vector";
+  const want = `vector(${dim})`;
+  if (current !== want) {
+    log(`vector column ${current} → ${want} (model ${model})`);
+    await db.execute(dsql`drop index if exists search_index_embedding_hnsw`);
+    try {
+      // Existing vectors are all in the active model's space, so the cast holds.
+      await db.execute(
+        dsql.raw(`alter table search_index alter column embedding type vector(${dim}) using embedding::vector(${dim})`),
+      );
+    } catch {
+      // Mixed/legacy dimensions — wipe and let the sweep re-embed (free, local).
+      await db.execute(dsql`update search_index set embedding = null`);
+      await db.execute(
+        dsql.raw(`alter table search_index alter column embedding type vector(${dim}) using null::vector(${dim})`),
+      );
+    }
+  }
+  // Existence check first — CREATE INDEX IF NOT EXISTS emits a NOTICE that
+  // postgres.js dumps into the worker log at every boot.
+  const idxRowsCheck = await db.execute(dsql`
+    select 1 from pg_indexes
+     where tablename = 'search_index' and indexname = 'search_index_embedding_hnsw'`);
+  if ([...idxRowsCheck].length === 0) {
+    await db.execute(
+      dsql.raw(
+        `create index search_index_embedding_hnsw on search_index using hnsw (embedding vector_cosine_ops)`,
+      ),
+    );
+    log(`created HNSW index on search_index.embedding (${want})`);
+  }
+  dimMemo.model = model;
+  dimMemo.ensured = true;
+}
+
+/**
  * Background sweep (worker, every 2 min): embed any row that doesn't have an
  * embedding yet. Idempotent by construction — only touches NULL embeddings.
  * Local model via Ollama: free, offline, no tokens.
@@ -79,6 +136,13 @@ export async function sweepEmbeddings(
   log: (m: string) => void = () => {},
 ): Promise<number> {
   await handleModelSwitch(log);
+  try {
+    await ensureVectorIndex(log);
+  } catch (e) {
+    // Model server down — the per-row embeds below will surface it; the
+    // column/index ensure retries next tick.
+    log(`vector index ensure skipped: ${String(e).slice(0, 120)}`);
+  }
   let done = 0;
 
   // One corpus, one loop. Every source now lives in `search_index`; the batch

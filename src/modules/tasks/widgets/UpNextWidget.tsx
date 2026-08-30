@@ -33,7 +33,7 @@ export async function UpNextWidget() {
       {rows.map((t) => (
         <Link
           key={t.id}
-          href="/m/tasks"
+          href={`/m/tasks/${t.id}`}
           className="group flex flex-col gap-1.5 bg-abyss/60 p-3 transition hover:bg-white/4"
         >
           <span

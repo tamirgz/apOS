@@ -177,6 +177,24 @@ const UPSERTS = [
       updated_at=now()
     where search_index.content_hash is distinct from excluded.content_hash
        or search_index.href is distinct from excluded.href`,
+  // Notifications — the Daily brief, flow outputs, agent findings. Indexing
+  // them makes past briefs searchable (⌘K + Ask); retention (30d) bounds the
+  // set and the orphan delete follows it.
+  dsql`
+    insert into search_index (kind, source_id, title, snippet, href, content_hash)
+    select 'notification', id::text,
+           coalesce(nullif(title,''),'(notification)'),
+           left(coalesce(body,''), 500),
+           coalesce(href, '/notifications'),
+           md5(coalesce(title,'') || '|' || coalesce(body,''))
+      from notifications
+    on conflict (kind, source_id) do update set
+      title=excluded.title, snippet=excluded.snippet, href=excluded.href,
+      content_hash=excluded.content_hash,
+      embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
 ] as const;
 
 // ── Internal sources (Phase 2) ───────────────────────────────────────────────
@@ -235,7 +253,7 @@ const INTERNAL_SOURCES: InternalSource[] = [
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
       select 'task', id::text, title, left(coalesce(notes, ''), 160),
-             title || E'\n' || coalesce(notes, ''), '/m/tasks',
+             title || E'\n' || coalesce(notes, ''), '/m/tasks/' || id::text,
              md5(title || '|' || coalesce(notes, '') || '|' || coalesce(project_ref, '')),
              ${REFS("project_ref")}
         from tasks where true ${scope}
@@ -406,6 +424,7 @@ const ORPHAN_DELETES = [
   dsql`delete from search_index where kind='workbench' and source_id not in (select id::text from workbench_tasks where status in ('done','review','needs_input') and archived_at is null)`,
   dsql`delete from search_index where kind='ask' and source_id not in (select id::text from ask_history)`,
   dsql`delete from search_index where kind='feature' and source_id not in (select id::text from features)`,
+  dsql`delete from search_index where kind='notification' and source_id not in (select id::text from notifications)`,
 ] as const;
 
 /** Upsert every source into the unified index, then drop orphans. Best-effort. */

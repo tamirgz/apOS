@@ -51,6 +51,7 @@ const KIND_FALLBACK_HREF: Record<string, string> = {
   notion: "/m/notion",
   memory: "/m/settings/memory",
   attention: "/m/today",
+  notification: "/notifications",
 };
 
 /** A real detail route (/m/<mod>/<id>); list-only kinds fall back to the page. */

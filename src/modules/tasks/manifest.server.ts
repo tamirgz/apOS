@@ -2,6 +2,7 @@ import type { ModuleServerManifest } from "@/core/modules/types.server";
 import { tasks } from "./schema";
 import { taskTools } from "./tools";
 import { TasksPage } from "./pages/TasksPage";
+import { TaskDetailPage } from "./pages/TaskDetailPage";
 import { OpenTasksWidget } from "./widgets/OpenTasksWidget";
 import { UpNextWidget } from "./widgets/UpNextWidget";
 import { TaskLoadStat } from "./widgets/TaskLoadStat";
@@ -10,6 +11,7 @@ export const tasksServerManifest: ModuleServerManifest = {
   id: "tasks",
   routes: {
     "": TasksPage,
+    "[id]": TaskDetailPage,
   },
   widgets: [
     {

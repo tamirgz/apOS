@@ -14,9 +14,11 @@ const PRIORITY_STYLE: Record<TaskPriority, string> = {
   low: "text-ink-faint",
 };
 
+/** Local-date input value — toISOString() shifted the day across UTC. */
 function toDateInput(d: Date | string | null): string {
   if (!d) return "";
-  return new Date(d).toISOString().slice(0, 10);
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 }
 
 /**

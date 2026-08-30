@@ -407,12 +407,12 @@ export function CommandBar() {
                     className="mt-1 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-[9px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.25em] [&_[cmdk-group-heading]]:text-ink-faint"
                   >
                     <Command.Item
-                      value="dashboard home deck"
-                      onSelect={() => go("/")}
+                      value="deck dashboard widgets overview"
+                      onSelect={() => go("/deck")}
                       className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink-dim transition data-[selected=true]:bg-white/6 data-[selected=true]:text-ink"
                     >
                       <LayoutGrid className="size-4" />
-                      Dashboard
+                      Deck
                     </Command.Item>
                     {modules.flatMap((m) =>
                       m.commands.map((c) => {

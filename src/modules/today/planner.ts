@@ -67,7 +67,7 @@ export async function planDay(): Promise<{ raised: number; closed: number }> {
       trustProjectRef: true,
       urgency: 55,
       dueAt: t.dueAt,
-      href: "/m/tasks",
+      href: `/m/tasks/${t.id}`,
       source: SOURCE,
     });
   }
@@ -94,9 +94,33 @@ export async function planDay(): Promise<{ raised: number; closed: number }> {
       projectRef: t.projectRef ?? null,
       trustProjectRef: true,
       urgency: 45,
-      href: "/m/tasks",
+      href: `/m/tasks/${t.id}`,
       source: SOURCE,
     });
+  }
+
+  // 4) Email needing attention (the third leg of ONE-STOP §2.3's "one brief"):
+  // unread messages Google marked IMPORTANT or STARRED that have sat for over
+  // a day. One rollup card — never per-mail spam. The count is in the title,
+  // so when it changes the reconcile pass swaps the card; at zero it closes.
+  try {
+    const mailRows = await db.execute<{ n: number }>(dsql`
+      select count(*)::int as n from gmail_messages
+       where unread and received_at < now() - interval '1 day'
+         and labels && array['IMPORTANT','STARRED']`);
+    const n = Number([...mailRows][0]?.n ?? 0);
+    if (n > 0) {
+      desired.push({
+        type: "do",
+        title: `${n} important email${n === 1 ? "" : "s"} waiting`,
+        body: "Unread and marked important/starred for more than a day.",
+        urgency: 40,
+        href: "/m/gmail",
+        source: SOURCE,
+      });
+    }
+  } catch {
+    // gmail table empty/not synced — the planner never fails on mail
   }
 
   // Surface the vital few, most-urgent first.

@@ -35,7 +35,11 @@ export function TopBar() {
   const pathname = usePathname();
   const moduleId = pathname.startsWith("/m/") ? pathname.split("/")[2] : null;
   const mod = moduleId ? getModule(moduleId) : null;
-  const title = mod?.title ?? "Dashboard";
+  const CORE_TITLES: Record<string, string> = {
+    "/deck": "Deck",
+    "/notifications": "Notifications",
+  };
+  const title = mod?.title ?? CORE_TITLES[pathname] ?? "apOS";
 
   return (
     <header className="mb-4 flex items-center justify-between">

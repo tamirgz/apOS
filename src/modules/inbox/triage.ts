@@ -35,9 +35,9 @@ function routeFor(
   const id = r.created?.id ?? r.captured?.id ?? r.updated?.id ?? r.id;
   switch (tool) {
     case "tasks.create":
-      return { kind: "task", label: "Task", href: "/m/tasks" };
+      return { kind: "task", label: "Task", href: id ? `/m/tasks/${id}` : "/m/tasks" };
     case "tasks.setStatus":
-      return { kind: "task", label: "Task updated", href: "/m/tasks" };
+      return { kind: "task", label: "Task updated", href: id ? `/m/tasks/${id}` : "/m/tasks" };
     case "notes.create":
       return { kind: "note", label: "Note", href: id ? `/m/notes/${id}` : "/m/notes" };
     case "knowledge.capture":

@@ -186,11 +186,11 @@ export function Sidebar() {
       {/* nav */}
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
         <NavItem
-          href="/"
-          title="Dashboard"
+          href="/deck"
+          title="Deck"
           accent="var(--color-plasma)"
           icon={LayoutGrid}
-          active={pathname === "/"}
+          active={pathname === "/deck"}
         />
         {core.map((m) => (
           <NavItem

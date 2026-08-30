@@ -21,6 +21,7 @@ import { fireRoutine } from "@/modules/workbench/routines";
 import { routines } from "@/modules/workbench/schema";
 import { runFlow } from "@/modules/flows/engine";
 import { flows } from "@/modules/flows/schema";
+import { shouldRunAgent } from "./agent-gates";
 import { enqueueRun, executeApproval, executeRun } from "./executor";
 import { hasFreshBackup, runBackup } from "./backup";
 
@@ -89,6 +90,22 @@ async function syncSchedules() {
     if (crons.has(id)) continue;
     try {
       const cron = new Cron(agent.schedule!, { protect: true }, async () => {
+        // Pre-flight gate: skip the fire entirely when the agent has nothing
+        // to act on (no run row, no tokens). Manual "Run now" bypasses this —
+        // it arrives via run_requests, not here. Gates fail open.
+        const gate = await shouldRunAgent({ id, name: agent.name });
+        // Record the decision so the Agents page can show "skipped — why"
+        // instead of an agent that just mysteriously didn't run.
+        const { setSetting } = await import("@/core/app-settings");
+        await setSetting(
+          `agent_gate_last:${id}`,
+          JSON.stringify({ at: new Date().toISOString(), run: gate.run, reason: gate.reason }),
+        ).catch(() => {});
+        if (!gate.run) {
+          log(`gate: skipped "${agent.name}" — ${gate.reason}`);
+          await sql.notify("agents_changed", id);
+          return;
+        }
         // enqueueRun only returns null for "a live run exists"; a real DB error
         // (connection blip mid-cron) is logged distinctly — the 5-min safety-net
         // pickUpQueuedRuns/next fire covers the missed period.

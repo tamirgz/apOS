@@ -10,17 +10,30 @@ import {
 export interface AgentWithLatestRun {
   agent: Agent;
   latestRun: AgentRun | null;
+  /** The last cron pre-flight decision (agent-gates) — null before any fire. */
+  gateLast: { at: string; run: boolean; reason: string } | null;
 }
 
 export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
-  // Two queries total regardless of agent count (was one per agent).
-  const [all, latest] = await Promise.all([
+  // Three queries total regardless of agent count (was one per agent).
+  const [all, latest, gateRows] = await Promise.all([
     db.select().from(agents).orderBy(desc(agents.createdAt)),
     db.execute<AgentRun & { agent_id: string }>(
       dsql`select distinct on (agent_id) * from agent_runs
            order by agent_id, created_at desc`,
     ),
+    db.execute<{ key: string; value: string }>(
+      dsql`select key, value from app_settings where key like 'agent_gate_last:%'`,
+    ),
   ]);
+  const gateByAgent = new Map<string, { at: string; run: boolean; reason: string }>();
+  for (const r of gateRows) {
+    try {
+      gateByAgent.set(r.key.slice("agent_gate_last:".length), JSON.parse(r.value));
+    } catch {
+      // malformed trace — ignore
+    }
+  }
   const latestByAgent = new Map(
     [...latest].map((r) => [
       r.agent_id,
@@ -44,6 +57,7 @@ export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
   return all.map((agent) => ({
     agent,
     latestRun: latestByAgent.get(agent.id) ?? null,
+    gateLast: gateByAgent.get(agent.id) ?? null,
   }));
 }
 

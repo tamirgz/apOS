@@ -65,13 +65,21 @@ function RunNowButton({ agentId }: { agentId: string }) {
 function AgentCard({
   agent,
   latestRun,
+  gateLast,
   index,
 }: {
   agent: Agent;
   latestRun: AgentRun | null;
+  gateLast: { at: string; run: boolean; reason: string } | null;
   index: number;
 }) {
   const status = latestRun ? RUN_STATUS_META[latestRun.status] : null;
+  // The most recent cron fire was gate-skipped (nothing to act on) — show
+  // that instead of leaving "it didn't run" looking like a failure.
+  const skipped =
+    gateLast &&
+    !gateLast.run &&
+    (!latestRun?.createdAt || new Date(gateLast.at) > new Date(latestRun.createdAt));
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -104,7 +112,17 @@ function AgentCard({
             <CalendarClock className="size-3" />
             {agent.schedule ?? "manual"}
           </span>
-          {status && (
+          {skipped ? (
+            <span
+              className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint"
+              title={gateLast!.reason}
+            >
+              <span className="dot" />
+              <span className="truncate normal-case tracking-normal">
+                skipped — {gateLast!.reason}
+              </span>
+            </span>
+          ) : status ? (
             <span
               className={cn(
                 "flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest",
@@ -115,7 +133,7 @@ function AgentCard({
               <span className="dot" style={{ color: status.color }} />
               {status.label}
             </span>
-          )}
+          ) : null}
           <span className="ml-auto">
             <RunNowButton agentId={agent.id} />
           </span>
@@ -129,7 +147,11 @@ export function AgentsList({
   items,
   templates,
 }: {
-  items: { agent: Agent; latestRun: AgentRun | null }[];
+  items: {
+    agent: Agent;
+    latestRun: AgentRun | null;
+    gateLast: { at: string; run: boolean; reason: string } | null;
+  }[];
   templates: (AgentTemplate & { moduleId: string })[];
 }) {
   const router = useRouter();
@@ -173,6 +195,7 @@ export function AgentsList({
                 key={it.agent.id}
                 agent={it.agent}
                 latestRun={it.latestRun}
+                gateLast={it.gateLast}
                 index={i}
               />
             ))}

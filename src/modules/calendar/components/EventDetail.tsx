@@ -1,17 +1,125 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
   CalendarDays,
   Clock,
   ExternalLink,
   MapPin,
+  Pencil,
   Trash2,
   Video,
   X,
 } from "lucide-react";
+import { updateEvent } from "../actions";
 import type { AgendaItem } from "../agenda";
+
+/** datetime-local input value in LOCAL time (toISOString would shift to UTC). */
+function toLocalInput(d: Date | string | null): string {
+  if (!d) return "";
+  const x = new Date(d);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}T${pad(x.getHours())}:${pad(x.getMinutes())}`;
+}
+
+/**
+ * Inline edit form for apOS-local events — title, start/end, all-day,
+ * location, notes. Google/ICS events stay read-only (the sync would
+ * overwrite an edit); they link out to Google Calendar instead.
+ */
+function EditForm({
+  item,
+  onDone,
+}: {
+  item: AgendaItem;
+  onDone: () => void;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [title, setTitle] = useState(item.title);
+  const [startAt, setStartAt] = useState(toLocalInput(item.at));
+  const [endAt, setEndAt] = useState(toLocalInput(item.endAt));
+  const [allDay, setAllDay] = useState(item.allDay);
+  const [location, setLocation] = useState(item.location ?? "");
+  const [notes, setNotes] = useState(item.notes ?? "");
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = () => {
+    if (!title.trim() || !startAt) return;
+    setErr(null);
+    start(async () => {
+      try {
+        await updateEvent(item.id, {
+          title,
+          startAt: new Date(startAt),
+          endAt: endAt ? new Date(endAt) : null,
+          allDay,
+          location: location || null,
+          notes: notes || null,
+        });
+        router.refresh();
+        onDone();
+      } catch (e) {
+        setErr(String(e instanceof Error ? e.message : e).replace(/^Error:\s*/, ""));
+      }
+    });
+  };
+
+  const field =
+    "w-full rounded-lg bg-white/5 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint focus:bg-white/8";
+  const label = "mb-1 block font-mono text-[9px] uppercase tracking-[0.25em] text-ink-faint";
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <span className={label}>title</span>
+        <input dir="auto" value={title} onChange={(e) => setTitle(e.target.value)} className={field} autoFocus />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <span className={label}>starts</span>
+          <input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} className={field} />
+        </div>
+        <div>
+          <span className={label}>ends</span>
+          <input type="datetime-local" value={endAt} onChange={(e) => setEndAt(e.target.value)} className={field} />
+        </div>
+      </div>
+      <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-ink-dim">
+        <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} className="accent-[var(--color-plasma)]" />
+        all day
+      </label>
+      <div>
+        <span className={label}>location</span>
+        <input dir="auto" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="where (or a link)" className={field} />
+      </div>
+      <div>
+        <span className={label}>notes</span>
+        <textarea dir="auto" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={`${field} resize-y`} />
+      </div>
+      {err && <p className="font-mono text-xs text-flare">{err}</p>}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-lg px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:text-ink"
+        >
+          cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={pending}
+          className="rounded-lg bg-plasma/15 px-4 py-2 font-mono text-[11px] uppercase tracking-widest text-plasma transition hover:bg-plasma/25 disabled:opacity-40"
+        >
+          {pending ? "saving…" : "save"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const fmtTime = (d: Date) =>
   d.toLocaleTimeString(undefined, {
@@ -112,7 +220,11 @@ export function EventDetail({
   onDelete: (id: string) => void;
   deletePending: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset edit mode when a different event opens
+    setEditing(false);
     if (!item) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -166,6 +278,10 @@ export function EventDetail({
               </button>
             </div>
 
+            {editing && item.deletable ? (
+              <EditForm item={item} onDone={() => setEditing(false)} />
+            ) : (
+              <>
             <div className="flex flex-col gap-3">
               <Row icon={CalendarDays}>
                 {new Date(item.at).toLocaleDateString(undefined, {
@@ -231,17 +347,29 @@ export function EventDetail({
                 </a>
               )}
               {item.deletable && (
-                <button
-                  type="button"
-                  disabled={deletePending}
-                  onClick={() => onDelete(item.id)}
-                  className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:border-flare/30 hover:text-flare disabled:opacity-40"
-                >
-                  <Trash2 className="size-3" />
-                  delete
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:border-plasma/30 hover:text-plasma"
+                  >
+                    <Pencil className="size-3" />
+                    edit
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deletePending}
+                    onClick={() => onDelete(item.id)}
+                    className="flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:border-flare/30 hover:text-flare disabled:opacity-40"
+                  >
+                    <Trash2 className="size-3" />
+                    delete
+                  </button>
+                </>
               )}
             </div>
+              </>
+            )}
           </motion.aside>
         </>
       )}

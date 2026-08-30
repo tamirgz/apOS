@@ -57,19 +57,30 @@ export async function listTransactions(limit = 100) {
     limit ${limit}`;
 }
 
-/** Portfolio value time series (summed across the user's portfolios per day). */
+/**
+ * Portfolio value time series (summed across the user's portfolios per day).
+ * COMPLETE days only: iSentry snapshots only some portfolios on weekends
+ * (measured: Sat/Sun carry 1 of 4), so a naive per-day sum craters to that one
+ * portfolio's value and the series reads like a 96% drawdown. Keep only days
+ * that snapshot the window's full portfolio count.
+ */
 export async function performanceSnapshots(days = 180) {
   const sql = isentrySql();
   return sql`
-    select s.date,
-           sum(s.total_value_usd) as total_value_usd,
-           sum(s.total_value_ils) as total_value_ils,
-           sum(s.total_pnl_usd)   as total_pnl_usd
-    from portfolio_snapshots s
-    join portfolios p on p.id = s.portfolio_id
-    where s.date >= (current_date - ${days}::int) ${userScope(sql)}
-    group by s.date
-    order by s.date`;
+    with daily as (
+      select s.date,
+             count(distinct s.portfolio_id)             as n,
+             sum(s.total_value_usd) as total_value_usd,
+             sum(s.total_value_ils) as total_value_ils,
+             sum(s.total_pnl_usd)   as total_pnl_usd
+      from portfolio_snapshots s
+      join portfolios p on p.id = s.portfolio_id
+      where s.date >= (current_date - ${days}::int) ${userScope(sql)}
+      group by s.date)
+    select date, total_value_usd, total_value_ils, total_pnl_usd
+      from daily
+     where n = (select max(n) from daily)
+     order by date`;
 }
 
 /** One-row roll-up (USD). Market value / unrealized over OPEN positions; realized

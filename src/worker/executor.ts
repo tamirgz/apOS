@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { auditAgent } from "@/core/agent-audit";
 import { db, sql } from "@/core/db/client";
 import { isUniqueViolation } from "@/core/db/errors";
 import {
@@ -183,6 +184,21 @@ export async function executeRun(
     // A node's override wins over the agent's own route, when provided.
     const provider = override?.provider ? providers[override.provider] : routed.provider;
     const model = override?.model || routed.model;
+    // Audit the RESOLVED route — agent_runs never records which model actually
+    // ran, and per-node overrides/flow context make it non-obvious after the fact.
+    await auditAgent({
+      agentId: agent.id,
+      agentName: agent.name,
+      runId,
+      event: "run.started",
+      detail: {
+        trigger: run.trigger,
+        provider: provider.id,
+        model,
+        ...(override ? { override } : {}),
+        ...(run.flowNodeRunId ? { flowNodeRunId: run.flowNodeRunId } : {}),
+      },
+    });
     const ledger = ledgerFor(agent.id, runId);
     // ledger.* and the memory suite are always available, like in chat.
     // Approval-tier tools are wrapped: unattended runs queue the call for the
@@ -370,6 +386,17 @@ export async function executeRun(
         type: "error",
         message: `⚠︎ Cloud model "${model}" failed (${res.errored.slice(0, 120)}). Falling back to local ollama/${agent.fallbackModel}.`,
       });
+      await auditAgent({
+        agentId: agent.id,
+        agentName: agent.name,
+        runId,
+        event: "run.fallback",
+        detail: {
+          from: { provider: provider.id, model },
+          to: { provider: "ollama", model: agent.fallbackModel },
+          error: res.errored.slice(0, 200),
+        },
+      });
       const fb = await attempt(providers.ollama, agent.fallbackModel);
       res = {
         finalText: fb.finalText,
@@ -407,6 +434,19 @@ export async function executeRun(
             tokensOut: res.tokensOut,
           };
     await patchRun(runId, terminal);
+    await auditAgent({
+      agentId: agent.id,
+      agentName: agent.name,
+      runId,
+      event: "run.finished",
+      detail: {
+        status: terminal.status,
+        ...("error" in terminal && terminal.error ? { error: String(terminal.error).slice(0, 300) } : {}),
+        tokensIn: res.tokensIn,
+        tokensOut: res.tokensOut,
+        durationMs: Date.now() - (run.startedAt?.getTime() ?? Date.now()),
+      },
+    });
     // Make failures noisy (transition-based bell + Slack + self-closing card);
     // best-effort, never affects the run's own outcome.
     await reportAgentRunOutcome({
@@ -459,6 +499,13 @@ export async function executeRun(
       status: "failed",
       error: String(e),
       finishedAt: new Date(),
+    });
+    await auditAgent({
+      agentId: agent.id,
+      agentName: agent.name,
+      runId,
+      event: "run.finished",
+      detail: { status: "failed", error: String(e).slice(0, 300) },
     });
     await reportAgentRunOutcome({
       agent: { id: agent.id, name: agent.name },

@@ -22,17 +22,22 @@ export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
       dsql`select distinct on (agent_id) * from agent_runs
            order by agent_id, created_at desc`,
     ),
-    db.execute<{ key: string; value: string }>(
-      dsql`select key, value from app_settings where key like 'agent_gate_last:%'`,
+    // Latest gate verdict per agent — read from the audit trail (the single
+    // source of truth for agent decisions).
+    db.execute<{ agent_id: string; event: string; detail: { reason?: string } | null; created_at: Date }>(
+      dsql`select distinct on (agent_id) agent_id::text, event, detail, created_at
+             from agent_audit
+            where event in ('gate.run','gate.skip') and agent_id is not null
+            order by agent_id, created_at desc`,
     ),
   ]);
   const gateByAgent = new Map<string, { at: string; run: boolean; reason: string }>();
   for (const r of gateRows) {
-    try {
-      gateByAgent.set(r.key.slice("agent_gate_last:".length), JSON.parse(r.value));
-    } catch {
-      // malformed trace — ignore
-    }
+    gateByAgent.set(r.agent_id, {
+      at: new Date(r.created_at).toISOString(),
+      run: r.event === "gate.run",
+      reason: r.detail?.reason ?? "",
+    });
   }
   const latestByAgent = new Map(
     [...latest].map((r) => [
@@ -64,6 +69,16 @@ export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
 export async function getAgent(id: string): Promise<Agent | null> {
   const [row] = await db.select().from(agents).where(eq(agents.id, id));
   return row ?? null;
+}
+
+export async function listAgentAudit(agentId: string, limit = 60) {
+  const { agentAudit } = await import("@/core/db/schema/agents");
+  return db
+    .select()
+    .from(agentAudit)
+    .where(eq(agentAudit.agentId, agentId))
+    .orderBy(desc(agentAudit.createdAt))
+    .limit(limit);
 }
 
 export async function listRuns(agentId: string, limit = 20) {

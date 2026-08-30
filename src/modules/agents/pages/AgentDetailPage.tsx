@@ -3,8 +3,9 @@ import { getAllTools } from "@/core/ai/tool-registry";
 import { resolveRoute } from "@/core/ai/routing";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import { AgentDetail } from "../components/AgentDetail";
+import { AuditTrail } from "../components/AuditTrail";
 import { agentDoc } from "../agent-doc";
-import { getAgent, listRuns } from "../queries";
+import { getAgent, listAgentAudit, listRuns } from "../queries";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -23,10 +24,11 @@ export async function AgentDetailPage({ params }: ModuleRouteProps) {
     );
   }
 
-  const [runs, defaultRoute] = await Promise.all([
+  const [runs, defaultRoute, audit] = await Promise.all([
     listRuns(agent.id),
     // What this agent falls back to when it has no provider/model override.
     resolveRoute("agent.default"),
+    listAgentAudit(agent.id),
   ]);
   const allTools = getAllTools().map((t) => t.name);
   const doc = agentDoc({
@@ -35,12 +37,15 @@ export async function AgentDetailPage({ params }: ModuleRouteProps) {
     prompt: agent.prompt ?? "",
   });
   return (
-    <AgentDetail
-      agent={agent}
-      runs={runs}
-      allTools={allTools}
-      defaultRoute={{ providerId: defaultRoute.providerId, model: defaultRoute.model }}
-      doc={doc}
-    />
+    <>
+      <AgentDetail
+        agent={agent}
+        runs={runs}
+        allTools={allTools}
+        defaultRoute={{ providerId: defaultRoute.providerId, model: defaultRoute.model }}
+        doc={doc}
+      />
+      <AuditTrail rows={audit} />
+    </>
   );
 }

@@ -21,6 +21,7 @@ import { fireRoutine } from "@/modules/workbench/routines";
 import { routines } from "@/modules/workbench/schema";
 import { runFlow } from "@/modules/flows/engine";
 import { flows } from "@/modules/flows/schema";
+import { auditAgent } from "@/core/agent-audit";
 import { shouldRunAgent } from "./agent-gates";
 import { enqueueRun, executeApproval, executeRun } from "./executor";
 import { hasFreshBackup, runBackup } from "./backup";
@@ -94,13 +95,14 @@ async function syncSchedules() {
         // to act on (no run row, no tokens). Manual "Run now" bypasses this —
         // it arrives via run_requests, not here. Gates fail open.
         const gate = await shouldRunAgent({ id, name: agent.name });
-        // Record the decision so the Agents page can show "skipped — why"
-        // instead of an agent that just mysteriously didn't run.
-        const { setSetting } = await import("@/core/app-settings");
-        await setSetting(
-          `agent_gate_last:${id}`,
-          JSON.stringify({ at: new Date().toISOString(), run: gate.run, reason: gate.reason }),
-        ).catch(() => {});
+        // Every gate verdict lands in the audit trail — the Agents page shows
+        // the latest one, the detail page shows the history.
+        await auditAgent({
+          agentId: id,
+          agentName: agent.name,
+          event: gate.run ? "gate.run" : "gate.skip",
+          detail: { reason: gate.reason },
+        });
         if (!gate.run) {
           log(`gate: skipped "${agent.name}" — ${gate.reason}`);
           await sql.notify("agents_changed", id);
@@ -121,6 +123,12 @@ async function syncSchedules() {
           await executeRun(runId);
         } else {
           log(`cron fired but a live run exists — skipped (${agent.name})`);
+          await auditAgent({
+            agentId: id,
+            agentName: agent.name,
+            event: "run.skipped_live",
+            detail: { reason: "a live run already exists (overlap)" },
+          });
         }
       });
       crons.set(id, cron);
@@ -546,7 +554,7 @@ async function main() {
   // gets larger with no bounded steady state.
   new Cron("10 3 * * *", { protect: true }, async () => {
     try {
-      const [t, r, n, l] = await Promise.all([
+      const [t, r, n, l, au] = await Promise.all([
         db.execute(dsql`update agent_runs set transcript='[]'::jsonb
           where finished_at < now() - interval '14 days'
             and transcript <> '[]'::jsonb`),
@@ -556,10 +564,12 @@ async function main() {
           where created_at < now() - interval '30 days'`),
         db.execute(dsql`delete from agent_ledger
           where processed_at < now() - interval '180 days'`),
+        db.execute(dsql`delete from agent_audit
+          where created_at < now() - interval '180 days'`),
       ]);
       const c = (x: unknown) => (x as { count?: number })?.count ?? 0;
       log(
-        `retention: trimmed ${c(t)} transcript(s), deleted ${c(r)} old run(s), ${c(n)} old notification(s), ${c(l)} old ledger row(s)`,
+        `retention: trimmed ${c(t)} transcript(s), deleted ${c(r)} old run(s), ${c(n)} old notification(s), ${c(l)} old ledger row(s), ${c(au)} old audit row(s)`,
       );
     } catch (e) {
       log(`retention sweep failed: ${String(e).slice(0, 120)}`);

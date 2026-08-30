@@ -370,7 +370,11 @@ async function runNode(
       output = input ?? { from: node.name ?? "trigger" };
     } else if (node.kind === "agent") {
       output = await runAgentNode(node, input, nr.id);
-    } else if (node.kind === "output" || node.kind === "tool") {
+    } else if (node.kind === "source") {
+      output = await runSourceNode(node);
+    } else if (node.kind === "tool") {
+      output = await runToolNode(node, input);
+    } else if (node.kind === "output") {
       output = await runOutputNode(node, input);
     } else if (node.kind === "branch") {
       const labels = (node.config?.ports as string[] | undefined) ?? ["true", "false"];
@@ -435,13 +439,17 @@ async function runAgentNode(
 ): Promise<FlowPayload> {
   const agentId = node.config?.agentId as string | undefined;
   if (!agentId)
-    throw new Error("agent node has no agentId (inline agent configs land in a later phase)");
+    throw new Error("agent node has no agentId (pick an agent in the inspector)");
   const [ar] = await db
     .insert(agentRuns)
     .values({ agentId, trigger: "flow", status: "queued", flowNodeRunId: nodeRunId })
     .returning();
   await db.update(flowNodeRuns).set({ agentRunId: ar.id }).where(eq(flowNodeRuns.id, nodeRunId));
-  await executeRun(ar.id);
+  // Per-node model override: this flow can run the agent on a different model
+  // than the agent's own default (Flow A → big model, Flow B → fast local).
+  const provider = (node.config?.provider as string | undefined) || null;
+  const model = (node.config?.model as string | undefined) || null;
+  await executeRun(ar.id, provider || model ? { provider: provider as never, model } : undefined);
   const [finished] = await db.select().from(agentRuns).where(eq(agentRuns.id, ar.id));
   if (finished.status !== "succeeded")
     throw new Error(`agent "${node.name ?? agentId}" ${finished.status}: ${finished.error ?? ""}`);
@@ -541,6 +549,145 @@ async function runLoopNode(
   };
 }
 
+/**
+ * Source node — inject a concrete data source as the flow's seed, so you CONTROL
+ * what a step sees instead of relying on an agent's own tools. No upstream input.
+ *   • text      → a literal string (a fixed brief / instruction)
+ *   • search    → semantic search over the whole corpus (query, limit)
+ *   • knowledge → search scoped to notes / knowledge / vault (query)
+ *   • projects  → your active projects with health + next action
+ *   • people    → people with their open follow-ups
+ */
+async function runSourceNode(node: FlowNode): Promise<FlowPayload> {
+  const type = String(node.config?.sourceType ?? "text");
+
+  if (type === "search" || type === "knowledge") {
+    const query = String(node.config?.query ?? "").trim();
+    if (!query) throw new Error(`${type} source has no query`);
+    const limit = Math.min(Math.max(1, Number(node.config?.limit ?? 8)), 25);
+    const { searchEverything } = await import("@/core/embeddings");
+    let hits = await searchEverything(query, limit * (type === "knowledge" ? 2 : 1));
+    if (type === "knowledge") {
+      hits = hits.filter((h) => ["knowledge", "note", "vault"].includes(h.kind)).slice(0, limit);
+    }
+    const report =
+      hits
+        .map((h, i) => `${i + 1}. [${h.kind}] ${h.title}${h.snippet ? ` — ${h.snippet}` : ""}`)
+        .join("\n") || "(no results)";
+    return {
+      report,
+      signal: { count: hits.length, query, items: hits.map((h) => ({ title: h.title, kind: h.kind, href: h.href })) },
+      from: node.name ?? type,
+    };
+  }
+
+  if (type === "projects") {
+    const { getProjectCockpit } = await import("@/modules/projects/queries");
+    const all = await getProjectCockpit(db);
+    const active = all.filter((p) => p.status === "active");
+    const report =
+      active
+        .map(
+          (p) =>
+            `- ${p.name} — ${p.resolvedHealth.health}${p.nextAction ? ` · next: ${p.nextAction}` : ""}`,
+        )
+        .join("\n") || "(no active projects)";
+    return {
+      report,
+      signal: {
+        count: active.length,
+        projects: active.map((p) => ({ name: p.name, health: p.resolvedHealth.health })),
+      },
+      from: node.name ?? "projects",
+    };
+  }
+
+  if (type === "people") {
+    const { listPeople } = await import("@/modules/people/queries");
+    const people = (await listPeople(db)).filter((p) => p.name?.trim());
+    const report =
+      people
+        .map(
+          (p) =>
+            `- ${p.name}${p.openFollowups ? ` · ${p.openFollowups} open follow-up${p.openFollowups > 1 ? "s" : ""}` : ""}`,
+        )
+        .join("\n") || "(no people)";
+    return {
+      report,
+      signal: { count: people.length },
+      from: node.name ?? "people",
+    };
+  }
+
+  // literal text seed
+  const text = String(node.config?.text ?? "");
+  return { report: text, signal: { text }, from: node.name ?? "source" };
+}
+
+/**
+ * Tool node — run ONE registered tool directly, no agent. Args come from the
+ * node's `args` JSON (with {{report}} / {{signal.x}} interpolation from the
+ * upstream payload). The tool's result flows downstream as report + signal.
+ */
+async function runToolNode(node: FlowNode, input: FlowPayload | null): Promise<FlowPayload> {
+  const toolName = String(node.config?.tool ?? "").trim();
+  if (!toolName) throw new Error("tool node has no tool selected");
+  const { getToolsByNames } = await import("@/core/ai/tool-registry");
+  const [def] = getToolsByNames([toolName]);
+  if (!def) throw new Error(`unknown tool "${toolName}"`);
+  // Interpolate {{report}} and {{signal.key}} from the upstream payload into the
+  // args template, then validate against the tool's own schema.
+  const raw = String(node.config?.args ?? "{}");
+  const signal = (input?.signal as Record<string, unknown>) ?? {};
+  const filled = raw
+    .replace(/\{\{\s*report\s*\}\}/g, () => JSON.stringify(input?.report ?? "").slice(1, -1))
+    .replace(/\{\{\s*signal\.([\w]+)\s*\}\}/g, (_m, k) =>
+      JSON.stringify(signal[k] ?? "").replace(/^"|"$/g, ""),
+    );
+  let args: unknown;
+  try {
+    args = def.input.parse(JSON.parse(filled || "{}"));
+  } catch (e) {
+    throw new Error(`tool "${toolName}" args invalid: ${String(e).slice(0, 160)}`);
+  }
+  const result = await def.execute(args, { db } as never);
+  return {
+    // A readable rendering for delivery / an agent's eyes; the FULL structured
+    // result stays on `signal` for a downstream branch/tool to compute on.
+    report: renderToolResult(result),
+    signal: (result && typeof result === "object" ? (result as Record<string, unknown>) : { result }),
+    from: node.name ?? toolName,
+  };
+}
+
+/** Human-readable rendering of a tool's result — a compact list/summary, not a
+ *  raw JSON wall (which reads terribly when a tool node feeds a Slack/notify). */
+function renderToolResult(result: unknown): string {
+  if (result == null) return "(no result)";
+  if (typeof result === "string") return result;
+  if (typeof result !== "object") return String(result);
+  const line = (o: unknown): string => {
+    if (o == null) return "·";
+    if (typeof o !== "object") return String(o);
+    const r = o as Record<string, unknown>;
+    const label = r.name ?? r.title ?? r.label ?? r.summary ?? r.id;
+    if (label != null) return String(label);
+    // a small scalar object → "k: v" pairs; else compact JSON
+    const scalars = Object.entries(r).filter(([, v]) => v == null || typeof v !== "object");
+    if (scalars.length && scalars.length <= 6) {
+      return scalars.map(([k, v]) => `${k}: ${v ?? "—"}`).join(", ");
+    }
+    return JSON.stringify(r);
+  };
+  if (Array.isArray(result)) {
+    if (result.length === 0) return "(no items)";
+    const shown = result.slice(0, 20).map((x) => `• ${line(x)}`);
+    const more = result.length > 20 ? `\n…and ${result.length - 20} more` : "";
+    return `${result.length} item${result.length > 1 ? "s" : ""}:\n${shown.join("\n")}${more}`;
+  }
+  return line(result);
+}
+
 /** Terminal delivery — write the upstream result to a surface. */
 async function runOutputNode(
   node: FlowNode,
@@ -549,14 +696,25 @@ async function runOutputNode(
   const tool = (node.config?.tool as string) || "notify";
   const report =
     input?.report ?? (typeof input === "string" ? input : JSON.stringify(input ?? {}));
+  const title = node.name || "Flow result";
+  const body = String(report).slice(0, 1500);
   if (tool === "notify") {
     const { notify } = await import("@/core/notify");
-    await notify({
-      title: node.name || "Flow result",
-      body: String(report).slice(0, 1500),
-      source: "flow",
-      level: "info",
-    });
+    await notify({ title, body, source: "flow", level: "info" });
+  } else if (tool === "card") {
+    // Raise a "Needs you" attention card with the flow's result.
+    const { insertAttentionItem } = await import("@/modules/today/core");
+    await insertAttentionItem({ type: "notify", title, body, source: "flow", urgency: 20 });
+  } else if (tool === "slack") {
+    // Deliver through the notification pipeline, which the worker mirrors to
+    // Slack when a webhook is configured (no-op otherwise).
+    const { notify } = await import("@/core/notify");
+    await notify({ title, body, source: "flow", level: "info" });
+  } else if (tool === "cockpit") {
+    // Cockpit brief — post to the dashboard's bell feed tagged as a brief, so
+    // it surfaces alongside the day's cockpit rather than as a to-do.
+    const { notify } = await import("@/core/notify");
+    await notify({ title: `Brief · ${title}`, body, source: "cockpit", level: "info" });
   }
   return input;
 }

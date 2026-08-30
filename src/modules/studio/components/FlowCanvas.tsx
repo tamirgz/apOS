@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as RPointerEvent,
@@ -29,7 +30,9 @@ import type {
 } from "@/modules/flows/schema";
 import {
   decideFlowStep,
+  loadNodeTranscript,
   loadRunView,
+  quickCreateAgent,
   runFlowNow,
   saveFlowGraph,
   renameFlow,
@@ -41,6 +44,7 @@ import type {
   NodeRunView,
   RunMeta,
   RunView,
+  ToolOption,
 } from "../queries";
 import { Inspector } from "./Inspector";
 import { NodePalette } from "./NodePalette";
@@ -92,6 +96,7 @@ export function FlowCanvas({
   flow,
   agents,
   flows,
+  tools,
   stats,
   trace,
   recentRuns,
@@ -105,6 +110,7 @@ export function FlowCanvas({
   };
   agents: AgentOption[];
   flows: FlowOption[];
+  tools: ToolOption[];
   stats: FlowStats;
   trace: RunView | null;
   recentRuns: RunMeta[];
@@ -115,6 +121,13 @@ export function FlowCanvas({
   );
   const [selected, setSelected] = useState<{ kind: "node" | "edge"; id: string } | null>(null);
   const [view, setView] = useState<View>({ x: 40, y: 20, k: 1 });
+  // Agents created inline from the inspector, merged over the server-passed list
+  // so a fresh "+ new agent" is immediately selectable without a round-trip.
+  const [extraAgents, setExtraAgents] = useState<AgentOption[]>([]);
+  const allAgents = useMemo(
+    () => [...agents, ...extraAgents.filter((e) => !agents.some((a) => a.id === e.id))],
+    [agents, extraAgents],
+  );
   const [name, setName] = useState(flow.name);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [wire, setWire] = useState<{ from: string; fromPort: string; x: number; y: number } | null>(null);
@@ -260,24 +273,28 @@ export function FlowCanvas({
     setEdges((es) => es.filter((e) => e.from !== id && e.to !== id));
   };
 
-  const addNode = (kind: FlowNodeKind) => {
+  const addNode = (kind: FlowNodeKind, preset?: Record<string, unknown>) => {
     const el = containerRef.current;
     const rect = el?.getBoundingClientRect();
     const v = viewRef.current;
     const cx = rect ? ((rect.width / 2 - v.x) / v.k) : 200;
     const cy = rect ? ((rect.height / 2 - v.y) / v.k) : 200;
-    const config: Record<string, unknown> =
+    const defaults: Record<string, unknown> =
       kind === "branch"
         ? { ports: ["yes", "no"], condition: "" }
         : kind === "filter"
           ? { condition: "" }
           : kind === "output"
             ? { tool: "notify" }
-            : kind === "loop"
-              ? { itemsKey: "items", maxIterations: 10 }
-              : kind === "human"
-                ? { prompt: "" }
-                : {};
+            : kind === "source"
+              ? { sourceType: "text" }
+              : kind === "loop"
+                ? { itemsKey: "items", maxIterations: 10 }
+                : kind === "human"
+                  ? { prompt: "" }
+                  : {};
+    // A palette preset (e.g. a Source set to "projects") wins over the defaults.
+    const config = { ...defaults, ...(preset ?? {}) };
     const node: FlowNode = {
       id: uid(kind),
       kind,
@@ -475,12 +492,20 @@ export function FlowCanvas({
           <div className="glass rounded-xl p-3">
             <Inspector
               node={selectedNode}
-              agents={agents}
+              agents={allAgents}
               flows={flows}
+              tools={tools}
+              run={statusByNode.get(selectedNode.id) ?? null}
               onPatch={(patch) => patchNode(selectedNode.id, patch)}
               onDelete={() => {
                 removeNode(selectedNode.id);
                 setSelected(null);
+              }}
+              onLoadTranscript={loadNodeTranscript}
+              onCreateAgent={async (name) => {
+                const opt = await quickCreateAgent(name);
+                setExtraAgents((p) => [...p, opt]);
+                return opt;
               }}
             />
           </div>
@@ -556,7 +581,7 @@ export function FlowCanvas({
             <NodeCard
               key={n.id}
               node={n}
-              agents={agents}
+              agents={allAgents}
               flows={flows}
               selected={selected?.kind === "node" && selected.id === n.id}
               status={statusByNode.get(n.id)?.status}

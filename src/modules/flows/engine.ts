@@ -652,10 +652,40 @@ async function runToolNode(node: FlowNode, input: FlowPayload | null): Promise<F
   }
   const result = await def.execute(args, { db } as never);
   return {
-    report: typeof result === "string" ? result : JSON.stringify(result, null, 1),
+    // A readable rendering for delivery / an agent's eyes; the FULL structured
+    // result stays on `signal` for a downstream branch/tool to compute on.
+    report: renderToolResult(result),
     signal: (result && typeof result === "object" ? (result as Record<string, unknown>) : { result }),
     from: node.name ?? toolName,
   };
+}
+
+/** Human-readable rendering of a tool's result — a compact list/summary, not a
+ *  raw JSON wall (which reads terribly when a tool node feeds a Slack/notify). */
+function renderToolResult(result: unknown): string {
+  if (result == null) return "(no result)";
+  if (typeof result === "string") return result;
+  if (typeof result !== "object") return String(result);
+  const line = (o: unknown): string => {
+    if (o == null) return "·";
+    if (typeof o !== "object") return String(o);
+    const r = o as Record<string, unknown>;
+    const label = r.name ?? r.title ?? r.label ?? r.summary ?? r.id;
+    if (label != null) return String(label);
+    // a small scalar object → "k: v" pairs; else compact JSON
+    const scalars = Object.entries(r).filter(([, v]) => v == null || typeof v !== "object");
+    if (scalars.length && scalars.length <= 6) {
+      return scalars.map(([k, v]) => `${k}: ${v ?? "—"}`).join(", ");
+    }
+    return JSON.stringify(r);
+  };
+  if (Array.isArray(result)) {
+    if (result.length === 0) return "(no items)";
+    const shown = result.slice(0, 20).map((x) => `• ${line(x)}`);
+    const more = result.length > 20 ? `\n…and ${result.length - 20} more` : "";
+    return `${result.length} item${result.length > 1 ? "s" : ""}:\n${shown.join("\n")}${more}`;
+  }
+  return line(result);
 }
 
 /** Terminal delivery — write the upstream result to a surface. */

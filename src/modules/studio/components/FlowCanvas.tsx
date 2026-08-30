@@ -480,8 +480,8 @@ export function FlowCanvas({
       </div>
 
       {/* left palette */}
-      <div className="absolute left-3 top-16 z-10">
-        <div className="glass rounded-xl p-2">
+      <div className="absolute left-3 top-16 bottom-3 z-10 flex flex-col">
+        <div className="glass min-h-0 overflow-y-auto rounded-xl p-2">
           <NodePalette onAdd={addNode} />
         </div>
       </div>

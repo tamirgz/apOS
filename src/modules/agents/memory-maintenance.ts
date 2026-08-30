@@ -23,16 +23,19 @@ export const memoryMaintenanceJobs: ModuleJob[] = [
       await compactMemoryEntries();
       const stale = await checkMemoryFreshness();
       if (stale.length) {
-        const { insertAttentionItem } = await import("@/modules/today/core");
-        await insertAttentionItem({
-          type: "notify",
+        // System-health FYI about the memory subsystem itself — belongs in the
+        // bell feed (warn), not "Needs You". `warn` + Slack delivery surfaces it
+        // more reliably than a low-urgency card buried under real to-dos.
+        const { notify } = await import("@/core/notify");
+        await notify({
           title: "Working memory is going stale",
           body:
             `These always-injected memory blocks haven't been refreshed in a while: ` +
             `${stale.map((s) => `${s.label} (${s.ageDays}d)`).join(", ")}. ` +
             `The weekly Memory-consolidation agent may have stopped — check the Agents page.`,
-          source: "system",
-          urgency: 10,
+          level: "warn",
+          source: "memory",
+          href: "/m/agents",
         });
       }
     },

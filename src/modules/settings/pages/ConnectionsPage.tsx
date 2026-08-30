@@ -2,6 +2,7 @@ import { getSetting } from "@/core/app-settings";
 import { DEFAULT_HEALTHCHECK_INTERVAL_MIN } from "@/core/health";
 import { INTEGRATIONS } from "@/core/integrations/registry";
 import { AuthPanel } from "../components/AuthPanel";
+import { GoogleConnectBanner } from "../components/GoogleConnectBanner";
 import { HealthCheckCard } from "../components/HealthCheckCard";
 import { IntegrationsEditor } from "../components/IntegrationsEditor";
 import { SettingsNav } from "../components/SettingsNav";
@@ -44,6 +45,7 @@ export async function ConnectionsPage() {
     <div className="max-w-3xl">
       <SettingsNav />
       <div className="flex flex-col gap-5">
+        <GoogleConnectBanner />
         <AuthPanel />
         <HealthCheckCard interval={healthInterval} initialStatuses={initialStatuses} />
         <IntegrationsEditor values={values} googleConnected={googleConnected} />

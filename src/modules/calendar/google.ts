@@ -331,7 +331,7 @@ export const googleJobs: ModuleJob[] = [
               body: "Google revoked or expired the token (invalid_grant). Reconnect in Settings → Integrations to resume Calendar & Gmail sync.",
               source: "system",
               urgency: 20,
-              href: "/m/settings",
+              href: "/m/settings/connections",
             });
             console.log("google_sync: token invalid — raised a Reconnect Google card");
           }

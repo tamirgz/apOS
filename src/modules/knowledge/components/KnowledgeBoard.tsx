@@ -42,6 +42,13 @@ function CaptureBox() {
         <textarea
           ref={inputRef}
           rows={2}
+          onKeyDown={(e) => {
+            // Paste-and-move-on: Enter submits, Shift+Enter makes a newline.
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
           placeholder="Paste anything — a GitHub repo, Instagram/TikTok link, a quote, an idea…"
           className="min-h-10 flex-1 resize-y bg-transparent text-sm leading-relaxed text-ink outline-none placeholder:text-ink-faint"
           disabled={pending}

@@ -7,6 +7,7 @@ export const notionManifest: ModuleManifest = {
   icon: NotebookText,
   accent: "var(--color-ink-dim)",
   nav: { order: 46, group: "Sources", external: true },
+  searchable: true,
   commands: [
     {
       id: "notion.open",

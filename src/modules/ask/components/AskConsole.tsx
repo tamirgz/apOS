@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { motion } from "motion/react";
 import ReactMarkdown, {
   defaultUrlTransform,
@@ -237,6 +237,21 @@ export function AskConsole({
       clearDraft();
     });
   };
+
+  // Deep-link: /m/ask?q=… fills the box and asks immediately — this is what
+  // "Ask about this project" buttons link to. window.location (not
+  // useSearchParams) avoids the CSR-bailout Suspense requirement.
+  const autoAsked = useRef(false);
+  useEffect(() => {
+    if (autoAsked.current) return;
+    autoAsked.current = true;
+    const q = new URLSearchParams(window.location.search).get("q")?.trim();
+    if (q && inputRef.current) {
+      inputRef.current.value = q;
+      submit();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
 
   // Instant — no retrieval, no LLM call, just the already-computed answer.
   const loadFromHistory = (entry: AskHistoryEntry) => {

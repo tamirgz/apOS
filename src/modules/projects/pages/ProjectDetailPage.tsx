@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Sparkles } from "lucide-react";
 import type { ModuleRouteProps } from "@/core/modules/types.server";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import {
@@ -100,7 +100,15 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
           <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
             {done}/{projectTasks.length} tasks
           </span>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <Link
+              href={`/m/ask?q=${encodeURIComponent(`Everything on ${project.name} — current status, open work, and risks`)}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ion/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/10"
+              title="Cited answer over everything linked to this project"
+            >
+              <Sparkles className="size-3" />
+              ask about this
+            </Link>
             <DeleteProjectButton id={project.id} />
           </div>
         </div>

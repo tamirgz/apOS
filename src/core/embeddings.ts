@@ -102,11 +102,19 @@ async function ensureVectorIndex(log: (m: string) => void): Promise<void> {
       );
     }
   }
-  await db.execute(
-    dsql.raw(
-      `create index if not exists search_index_embedding_hnsw on search_index using hnsw (embedding vector_cosine_ops)`,
-    ),
-  );
+  // Existence check first — CREATE INDEX IF NOT EXISTS emits a NOTICE that
+  // postgres.js dumps into the worker log at every boot.
+  const idxRowsCheck = await db.execute(dsql`
+    select 1 from pg_indexes
+     where tablename = 'search_index' and indexname = 'search_index_embedding_hnsw'`);
+  if ([...idxRowsCheck].length === 0) {
+    await db.execute(
+      dsql.raw(
+        `create index search_index_embedding_hnsw on search_index using hnsw (embedding vector_cosine_ops)`,
+      ),
+    );
+    log(`created HNSW index on search_index.embedding (${want})`);
+  }
   dimMemo.model = model;
   dimMemo.ensured = true;
 }

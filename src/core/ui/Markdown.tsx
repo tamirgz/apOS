@@ -25,9 +25,23 @@ const components: Components = {
       {...props}
     />
   ),
-  p: (props) => (
-    <p className="mb-2 text-sm leading-relaxed text-ink-dim" {...props} />
-  ),
+  p: ({ node, children, ...props }) => {
+    // remark wraps a standalone image line in a <p>, but our chart <img> renders
+    // as a block <div> (ChartEmbed) — illegal inside <p>, which the browser
+    // splits, causing a hydration mismatch. Unwrap a paragraph whose only real
+    // child is an image so the chart renders as a clean block.
+    const kids = (node?.children ?? []).filter(
+      (c) => !(c.type === "text" && !c.value.trim()),
+    );
+    if (kids.length === 1 && kids[0].type === "element" && kids[0].tagName === "img") {
+      return <>{children}</>;
+    }
+    return (
+      <p className="mb-2 text-sm leading-relaxed text-ink-dim" {...props}>
+        {children}
+      </p>
+    );
+  },
   a: (props) => (
     <a
       className="text-plasma underline decoration-plasma/40 underline-offset-2 transition hover:decoration-plasma"

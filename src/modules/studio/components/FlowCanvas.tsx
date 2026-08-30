@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as RPointerEvent,
@@ -29,7 +30,9 @@ import type {
 } from "@/modules/flows/schema";
 import {
   decideFlowStep,
+  loadNodeTranscript,
   loadRunView,
+  quickCreateAgent,
   runFlowNow,
   saveFlowGraph,
   renameFlow,
@@ -115,6 +118,13 @@ export function FlowCanvas({
   );
   const [selected, setSelected] = useState<{ kind: "node" | "edge"; id: string } | null>(null);
   const [view, setView] = useState<View>({ x: 40, y: 20, k: 1 });
+  // Agents created inline from the inspector, merged over the server-passed list
+  // so a fresh "+ new agent" is immediately selectable without a round-trip.
+  const [extraAgents, setExtraAgents] = useState<AgentOption[]>([]);
+  const allAgents = useMemo(
+    () => [...agents, ...extraAgents.filter((e) => !agents.some((a) => a.id === e.id))],
+    [agents, extraAgents],
+  );
   const [name, setName] = useState(flow.name);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [wire, setWire] = useState<{ from: string; fromPort: string; x: number; y: number } | null>(null);
@@ -475,12 +485,19 @@ export function FlowCanvas({
           <div className="glass rounded-xl p-3">
             <Inspector
               node={selectedNode}
-              agents={agents}
+              agents={allAgents}
               flows={flows}
+              run={statusByNode.get(selectedNode.id) ?? null}
               onPatch={(patch) => patchNode(selectedNode.id, patch)}
               onDelete={() => {
                 removeNode(selectedNode.id);
                 setSelected(null);
+              }}
+              onLoadTranscript={loadNodeTranscript}
+              onCreateAgent={async (name) => {
+                const opt = await quickCreateAgent(name);
+                setExtraAgents((p) => [...p, opt]);
+                return opt;
               }}
             />
           </div>
@@ -556,7 +573,7 @@ export function FlowCanvas({
             <NodeCard
               key={n.id}
               node={n}
-              agents={agents}
+              agents={allAgents}
               flows={flows}
               selected={selected?.kind === "node" && selected.id === n.id}
               status={statusByNode.get(n.id)?.status}

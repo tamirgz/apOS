@@ -370,6 +370,8 @@ async function runNode(
       output = input ?? { from: node.name ?? "trigger" };
     } else if (node.kind === "agent") {
       output = await runAgentNode(node, input, nr.id);
+    } else if (node.kind === "source") {
+      output = await runSourceNode(node);
     } else if (node.kind === "output" || node.kind === "tool") {
       output = await runOutputNode(node, input);
     } else if (node.kind === "branch") {
@@ -435,13 +437,17 @@ async function runAgentNode(
 ): Promise<FlowPayload> {
   const agentId = node.config?.agentId as string | undefined;
   if (!agentId)
-    throw new Error("agent node has no agentId (inline agent configs land in a later phase)");
+    throw new Error("agent node has no agentId (pick an agent in the inspector)");
   const [ar] = await db
     .insert(agentRuns)
     .values({ agentId, trigger: "flow", status: "queued", flowNodeRunId: nodeRunId })
     .returning();
   await db.update(flowNodeRuns).set({ agentRunId: ar.id }).where(eq(flowNodeRuns.id, nodeRunId));
-  await executeRun(ar.id);
+  // Per-node model override: this flow can run the agent on a different model
+  // than the agent's own default (Flow A → big model, Flow B → fast local).
+  const provider = (node.config?.provider as string | undefined) || null;
+  const model = (node.config?.model as string | undefined) || null;
+  await executeRun(ar.id, provider || model ? { provider: provider as never, model } : undefined);
   const [finished] = await db.select().from(agentRuns).where(eq(agentRuns.id, ar.id));
   if (finished.status !== "succeeded")
     throw new Error(`agent "${node.name ?? agentId}" ${finished.status}: ${finished.error ?? ""}`);
@@ -541,6 +547,35 @@ async function runLoopNode(
   };
 }
 
+/**
+ * Source node — inject a concrete data source as the flow's seed, so you CONTROL
+ * what an agent sees instead of relying on its own tools. No upstream input.
+ *   • search → semantic search over the whole corpus (query, limit)
+ *   • text   → a literal string (a fixed brief / instruction)
+ */
+async function runSourceNode(node: FlowNode): Promise<FlowPayload> {
+  const type = String(node.config?.sourceType ?? "text");
+  if (type === "search") {
+    const query = String(node.config?.query ?? "").trim();
+    if (!query) throw new Error("search source has no query");
+    const limit = Math.min(Math.max(1, Number(node.config?.limit ?? 8)), 25);
+    const { searchEverything } = await import("@/core/embeddings");
+    const hits = await searchEverything(query, limit);
+    const report =
+      hits
+        .map((h, i) => `${i + 1}. [${h.kind}] ${h.title}${h.snippet ? ` — ${h.snippet}` : ""}`)
+        .join("\n") || "(no results)";
+    return {
+      report,
+      signal: { count: hits.length, query, items: hits.map((h) => ({ title: h.title, kind: h.kind, href: h.href })) },
+      from: node.name ?? "search",
+    };
+  }
+  // literal text seed
+  const text = String(node.config?.text ?? "");
+  return { report: text, signal: { text }, from: node.name ?? "source" };
+}
+
 /** Terminal delivery — write the upstream result to a surface. */
 async function runOutputNode(
   node: FlowNode,
@@ -549,14 +584,20 @@ async function runOutputNode(
   const tool = (node.config?.tool as string) || "notify";
   const report =
     input?.report ?? (typeof input === "string" ? input : JSON.stringify(input ?? {}));
+  const title = node.name || "Flow result";
+  const body = String(report).slice(0, 1500);
   if (tool === "notify") {
     const { notify } = await import("@/core/notify");
-    await notify({
-      title: node.name || "Flow result",
-      body: String(report).slice(0, 1500),
-      source: "flow",
-      level: "info",
-    });
+    await notify({ title, body, source: "flow", level: "info" });
+  } else if (tool === "card") {
+    // Raise a "Needs you" attention card with the flow's result.
+    const { insertAttentionItem } = await import("@/modules/today/core");
+    await insertAttentionItem({ type: "notify", title, body, source: "flow", urgency: 20 });
+  } else if (tool === "slack") {
+    // Deliver through the notification pipeline, which the worker mirrors to
+    // Slack when a webhook is configured (no-op otherwise).
+    const { notify } = await import("@/core/notify");
+    await notify({ title, body, source: "flow", level: "info" });
   }
   return input;
 }

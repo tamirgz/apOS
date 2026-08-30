@@ -1,9 +1,13 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, Loader2, Plus, Trash2, Wrench } from "lucide-react";
 import type { FlowNode } from "@/modules/flows/schema";
+import { AI_PROVIDERS, type AIProviderId } from "@/core/db/schema/ai-routes";
+import { useProviderModels } from "@/core/ui/useProviderModels";
 import { metaFor } from "../nodes";
-import type { AgentOption, FlowOption } from "../queries";
+import type { NodeTranscript } from "../actions";
+import type { AgentOption, FlowOption, NodeRunView } from "../queries";
 
 type Patch = { name?: string; config?: Record<string, unknown> };
 
@@ -12,19 +16,26 @@ const fieldCls =
 const labelCls =
   "block font-mono text-[10px] uppercase tracking-[0.2em] text-ink-faint";
 
-/** Right rail — configure the selected node. */
+/** Right rail — configure the selected node + inspect its last run. */
 export function Inspector({
   node,
   agents,
   flows,
+  run,
   onPatch,
   onDelete,
+  onLoadTranscript,
+  onCreateAgent,
 }: {
   node: FlowNode;
   agents: AgentOption[];
   flows: FlowOption[];
+  /** This node's run in the effective trace (null = it hasn't run in this run). */
+  run?: NodeRunView | null;
   onPatch: (patch: Patch) => void;
   onDelete: () => void;
+  onLoadTranscript?: (agentRunId: string) => Promise<NodeTranscript | null>;
+  onCreateAgent?: (name: string) => Promise<AgentOption | null>;
 }) {
   const meta = metaFor(node.kind);
   const cfg = node.config ?? {};
@@ -32,7 +43,7 @@ export function Inspector({
   const ports = (cfg.ports as string[] | undefined) ?? meta.defaultPorts ?? ["yes", "no"];
 
   return (
-    <div className="flex w-64 flex-col gap-3">
+    <div className="flex max-h-[75vh] w-64 flex-col gap-3 overflow-y-auto">
       <div className="flex items-center gap-2">
         <span
           className="flex h-6 w-6 items-center justify-center rounded-md"
@@ -56,25 +67,16 @@ export function Inspector({
       </label>
 
       {node.kind === "agent" && (
-        <label className="flex flex-col gap-1">
-          <span className={labelCls}>agent</span>
-          <select
-            className={fieldCls}
-            value={(cfg.agentId as string) ?? ""}
-            onChange={(e) => setCfg("agentId", e.target.value)}
-          >
-            <option value="">— pick an agent —</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-          {!cfg.agentId && (
-            <span className="text-[11px] text-flare">Choose an agent to run here.</span>
-          )}
-        </label>
+        <AgentConfig
+          cfg={cfg}
+          agents={agents}
+          setCfg={setCfg}
+          onPatch={onPatch}
+          onCreateAgent={onCreateAgent}
+        />
       )}
+
+      {node.kind === "source" && <SourceConfig cfg={cfg} setCfg={setCfg} />}
 
       {(node.kind === "branch" || node.kind === "filter") && (
         <label className="flex flex-col gap-1">
@@ -136,8 +138,13 @@ export function Inspector({
             value={(cfg.tool as string) ?? "notify"}
             onChange={(e) => setCfg("tool", e.target.value)}
           >
-            <option value="notify">notify</option>
+            <option value="notify">notify (bell feed)</option>
+            <option value="card">card (Needs you)</option>
+            <option value="slack">slack (if configured)</option>
           </select>
+          <span className="text-[11px] text-ink-faint">
+            Where the flow&apos;s final result is delivered.
+          </span>
         </label>
       )}
 
@@ -203,6 +210,8 @@ export function Inspector({
         <p className="text-[11px] text-ink-faint">{meta.blurb}. No configuration needed.</p>
       )}
 
+      {run && <RunDetail run={run} onLoadTranscript={onLoadTranscript} />}
+
       <button
         type="button"
         onClick={onDelete}
@@ -210,6 +219,368 @@ export function Inspector({
       >
         <Trash2 className="h-3.5 w-3.5" /> Delete node
       </button>
+    </div>
+  );
+}
+
+/** Agent node: pick/create the agent, override its model per-flow, see its reach. */
+function AgentConfig({
+  cfg,
+  agents,
+  setCfg,
+  onPatch,
+  onCreateAgent,
+}: {
+  cfg: Record<string, unknown>;
+  agents: AgentOption[];
+  setCfg: (k: string, v: unknown) => void;
+  onPatch: (patch: Patch) => void;
+  onCreateAgent?: (name: string) => Promise<AgentOption | null>;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const selected = agents.find((a) => a.id === cfg.agentId);
+  const provider = (cfg.provider as AIProviderId | "") ?? "";
+  const { models } = useProviderModels(provider);
+  const model = (cfg.model as string) ?? "";
+
+  return (
+    <div className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1">
+        <span className={labelCls}>agent</span>
+        <select
+          className={fieldCls}
+          value={(cfg.agentId as string) ?? ""}
+          onChange={(e) => setCfg("agentId", e.target.value)}
+        >
+          <option value="">— pick an agent —</option>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+        {!cfg.agentId && !creating && (
+          <span className="text-[11px] text-flare">Choose an agent to run here.</span>
+        )}
+        {!creating ? (
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="flex w-fit items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:text-ink"
+          >
+            <Plus className="h-3 w-3" /> new agent
+          </button>
+        ) : (
+          <div className="flex gap-1.5">
+            <input
+              autoFocus
+              className={fieldCls}
+              value={newName}
+              placeholder="agent name…"
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setCreating(false);
+              }}
+            />
+            <button
+              type="button"
+              disabled={busy || !newName.trim() || !onCreateAgent}
+              onClick={async () => {
+                if (!onCreateAgent) return;
+                setBusy(true);
+                const opt = await onCreateAgent(newName.trim());
+                setBusy(false);
+                if (opt) {
+                  setCfg("agentId", opt.id);
+                  setCreating(false);
+                  setNewName("");
+                }
+              }}
+              className="flex items-center rounded-lg bg-ion/15 px-2.5 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/25 disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : "add"}
+            </button>
+          </div>
+        )}
+      </label>
+
+      {/* Per-flow model override — this node can pin a different model than the
+          agent's own default (Flow A → big model, Flow B → fast local). */}
+      <div className="flex flex-col gap-1">
+        <span className={labelCls}>model (this node)</span>
+        <select
+          className={fieldCls}
+          value={provider}
+          onChange={(e) =>
+            // One patch — two setCfg calls would each read the same stale cfg,
+            // so the second (clearing model) would clobber the provider.
+            onPatch({ config: { ...cfg, provider: e.target.value || undefined, model: undefined } })
+          }
+        >
+          <option value="">agent default</option>
+          {AI_PROVIDERS.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+        {provider && (
+          <select
+            className={fieldCls}
+            value={model}
+            onChange={(e) => setCfg("model", e.target.value || undefined)}
+          >
+            {model && !models.includes(model) && <option value={model}>{model}</option>}
+            <option value="">{models.length ? "select model…" : "loading…"}</option>
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        )}
+        {!provider && (
+          <span className="text-[11px] text-ink-faint">
+            Uses the agent&apos;s own model
+            {selected?.model ? ` (${selected.provider ?? "?"}/${selected.model})` : ""}.
+          </span>
+        )}
+      </div>
+
+      {/* Data reach — the agent's allowed tools (its sources & actions). */}
+      {selected && (
+        <div className="flex flex-col gap-1">
+          <span className={labelCls}>data reach ({selected.tools.length} tools)</span>
+          {selected.tools.length ? (
+            <div className="flex flex-wrap gap-1">
+              {selected.tools.map((t) => (
+                <span
+                  key={t}
+                  className="inline-flex items-center gap-1 rounded-md border border-ion/25 bg-ion/8 px-1.5 py-0.5 font-mono text-[9px] text-ion"
+                >
+                  <Wrench className="h-2.5 w-2.5" />
+                  {t}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="text-[11px] text-ink-faint">
+              No tools — reads only its upstream input.
+            </span>
+          )}
+          <span className="text-[10px] text-ink-faint">
+            Edit the agent&apos;s tools on the Agents page.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Source node: inject a concrete data source as the flow's input. */
+function SourceConfig({
+  cfg,
+  setCfg,
+}: {
+  cfg: Record<string, unknown>;
+  setCfg: (k: string, v: unknown) => void;
+}) {
+  const type = (cfg.sourceType as string) ?? "text";
+  return (
+    <div className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1">
+        <span className={labelCls}>source</span>
+        <select
+          className={fieldCls}
+          value={type}
+          onChange={(e) => setCfg("sourceType", e.target.value)}
+        >
+          <option value="text">text (a fixed brief)</option>
+          <option value="search">search (semantic, whole corpus)</option>
+        </select>
+      </label>
+      {type === "search" ? (
+        <div className="flex gap-2">
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelCls}>query</span>
+            <input
+              className={fieldCls}
+              value={(cfg.query as string) ?? ""}
+              placeholder="anti-phishing news"
+              onChange={(e) => setCfg("query", e.target.value)}
+            />
+          </label>
+          <label className="flex w-16 flex-col gap-1">
+            <span className={labelCls}>limit</span>
+            <input
+              type="number"
+              min={1}
+              max={25}
+              className={fieldCls}
+              value={(cfg.limit as number) ?? 8}
+              onChange={(e) => setCfg("limit", Number(e.target.value))}
+            />
+          </label>
+        </div>
+      ) : (
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>text</span>
+          <textarea
+            className={`${fieldCls} min-h-16 resize-y`}
+            value={(cfg.text as string) ?? ""}
+            placeholder="A fixed instruction / context to feed the next step."
+            onChange={(e) => setCfg("text", e.target.value)}
+          />
+        </label>
+      )}
+    </div>
+  );
+}
+
+/** The selected node's last run: status, input, output, signal, transcript. */
+function RunDetail({
+  run,
+  onLoadTranscript,
+}: {
+  run: NodeRunView;
+  onLoadTranscript?: (agentRunId: string) => Promise<NodeTranscript | null>;
+}) {
+  const [tx, setTx] = useState<NodeTranscript | null>(null);
+  const [loading, setLoading] = useState(false);
+  const inReport = run.input?.report;
+  const inSignal = run.input?.signal;
+  const statusColor =
+    run.status === "succeeded"
+      ? "var(--color-plasma)"
+      : run.status === "failed"
+        ? "var(--color-flare)"
+        : "var(--color-ink-faint)";
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
+      <div className="flex items-center gap-2">
+        <span className={labelCls}>last run</span>
+        <span
+          className="font-mono text-[10px] uppercase tracking-widest"
+          style={{ color: statusColor }}
+        >
+          {run.status}
+        </span>
+      </div>
+
+      {inReport && (
+        <Field label="input">
+          <p className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-ink-dim">
+            {String(inReport).slice(0, 600)}
+          </p>
+        </Field>
+      )}
+      {inSignal && Object.keys(inSignal).length > 0 && (
+        <Field label="input signal">
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px] text-ink-faint">
+            {JSON.stringify(inSignal, null, 1)}
+          </pre>
+        </Field>
+      )}
+      {run.report && (
+        <Field label="output">
+          <p className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-ink-dim">
+            {run.report.slice(0, 600)}
+          </p>
+        </Field>
+      )}
+      {run.signal && Object.keys(run.signal).length > 0 && (
+        <Field label="signal">
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px] text-ink-faint">
+            {JSON.stringify(run.signal, null, 1)}
+          </pre>
+        </Field>
+      )}
+      {run.error && (
+        <Field label="error">
+          <p className="font-mono text-[10px] text-flare">{run.error}</p>
+        </Field>
+      )}
+
+      {run.agentRunId && onLoadTranscript && (
+        <>
+          {!tx ? (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={async () => {
+                setLoading(true);
+                setTx(await onLoadTranscript(run.agentRunId!));
+                setLoading(false);
+              }}
+              className="flex w-fit items-center gap-1.5 rounded-lg border border-white/8 px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:text-ink"
+            >
+              {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <ChevronDown className="h-3 w-3" />}
+              show transcript
+            </button>
+          ) : (
+            <Transcript tx={tx} />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="font-mono text-[9px] uppercase tracking-widest text-ink-faint">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/** The agent's step-by-step: tool calls, their results, its text, errors. */
+function Transcript({ tx }: { tx: NodeTranscript }) {
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
+      <span className="font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+        transcript · {tx.tokensIn + tx.tokensOut > 0 ? `${tx.tokensIn}▾ ${tx.tokensOut}▴ tok` : "—"}
+      </span>
+      {tx.events.map((e, i) => {
+        if (e.type === "tool_call") {
+          return (
+            <span
+              key={i}
+              className="inline-flex w-fit items-center gap-1 rounded-md border border-ion/25 bg-ion/8 px-1.5 py-0.5 font-mono text-[9px] text-ion"
+            >
+              <Wrench className="h-2.5 w-2.5" />
+              {e.name}
+            </span>
+          );
+        }
+        if (e.type === "tool_result") {
+          const s = JSON.stringify(e.result ?? "");
+          return (
+            <p key={i} className="font-mono text-[9px] leading-relaxed text-ink-faint">
+              ↳ {s.length > 160 ? s.slice(0, 160) + "…" : s}
+            </p>
+          );
+        }
+        if (e.type === "text" && e.text) {
+          return (
+            <p key={i} className="whitespace-pre-wrap text-[11px] leading-relaxed text-ink-dim">
+              {e.text.slice(0, 500)}
+            </p>
+          );
+        }
+        if (e.type === "error") {
+          return (
+            <p key={i} className="font-mono text-[10px] text-flare">
+              {e.message}
+            </p>
+          );
+        }
+        return null;
+      })}
     </div>
   );
 }

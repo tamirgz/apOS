@@ -9,6 +9,7 @@ import {
 } from "@/core/db/schema/agents";
 import type { AIEvent, AIProvider } from "@/core/ai/provider";
 import { providers, resolveRoute } from "@/core/ai/routing";
+import type { AIProviderId } from "@/core/db/schema/ai-routes";
 import { getToolsByNames } from "@/core/ai/tool-registry";
 import { reportAgentRunOutcome } from "@/core/alerts";
 import type { AiToolDef } from "@/core/modules/types.server";
@@ -101,7 +102,14 @@ export async function enqueueRun(
   }
 }
 
-export async function executeRun(runId: string): Promise<void> {
+export async function executeRun(
+  runId: string,
+  // Per-run model override — a flow's agent NODE can pin a different model than
+  // the agent's own default (e.g. Flow A runs this agent on a big model, Flow B
+  // on a fast local one). Threaded in-process from the flow engine; a normal
+  // worker pickup passes nothing and the agent's own route applies.
+  override?: { provider?: AIProviderId | null; model?: string | null },
+): Promise<void> {
   // Atomic claim: only one caller wins the queued→running transition, so the
   // NOTIFY path and the periodic pick-up sweep can never double-execute.
   const [claimed] = await db
@@ -131,7 +139,10 @@ export async function executeRun(runId: string): Promise<void> {
   }
 
   try {
-    const { provider, model } = await routeFor(agent);
+    const routed = await routeFor(agent);
+    // A node's override wins over the agent's own route, when provided.
+    const provider = override?.provider ? providers[override.provider] : routed.provider;
+    const model = override?.model || routed.model;
     const ledger = ledgerFor(agent.id, runId);
     // ledger.* and the memory suite are always available, like in chat.
     // Approval-tier tools are wrapped: unattended runs queue the call for the

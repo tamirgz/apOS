@@ -1,6 +1,7 @@
 import {
   Bell,
   Bot,
+  Database,
   Filter,
   GitBranch,
   GitMerge,
@@ -39,6 +40,7 @@ const OUT = "#16a97a";
 const TRIG = "#d98324";
 const SUB = "#4aa3c9";
 const HUMAN = "#e0708a";
+const SOURCE = "#3a9ad9";
 
 export const KIND_META: Record<string, KindMeta> = {
   trigger: {
@@ -46,6 +48,14 @@ export const KIND_META: Record<string, KindMeta> = {
     blurb: "Where the flow starts",
     color: TRIG,
     Icon: Zap,
+    hasInput: false,
+    outPorts: "single",
+  },
+  source: {
+    label: "Source",
+    blurb: "Inject data (search / text) as the input",
+    color: SOURCE,
+    Icon: Database,
     hasInput: false,
     outPorts: "single",
   },
@@ -116,7 +126,7 @@ export const KIND_META: Record<string, KindMeta> = {
   },
   output: {
     label: "Output",
-    blurb: "Deliver the result (notify)",
+    blurb: "Deliver the result (notify / card / slack)",
     color: OUT,
     Icon: Bell,
     hasInput: true,
@@ -127,6 +137,7 @@ export const KIND_META: Record<string, KindMeta> = {
 /** Kinds offered in the palette, in display order. */
 export const PALETTE_KINDS: FlowNodeKind[] = [
   "trigger",
+  "source",
   "agent",
   "branch",
   "filter",

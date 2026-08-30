@@ -7,6 +7,7 @@ import {
   flows,
   type Flow,
   type FlowNodeRun,
+  type FlowPayload,
   type FlowRun,
 } from "@/modules/flows/schema";
 
@@ -68,6 +69,10 @@ export interface NodeRunView {
   signal: Record<string, unknown> | null;
   report: string | null;
   error: string | null;
+  /** The payload that arrived on this node's input wire(s). */
+  input: FlowPayload | null;
+  /** The real agent_run this node produced (agent nodes) — for the transcript. */
+  agentRunId: string | null;
 }
 export interface RunView {
   runId: string;
@@ -99,6 +104,8 @@ function toNodeView(n: FlowNodeRun): NodeRunView {
     signal: (n.signal as Record<string, unknown> | null) ?? null,
     report: out?.report ?? null,
     error: n.error ?? null,
+    input: (n.input as FlowPayload | null) ?? null,
+    agentRunId: n.agentRunId ?? null,
   };
 }
 
@@ -153,15 +160,32 @@ export async function listRecentRuns(flowId: string, limit = 8): Promise<RunMeta
 export interface AgentOption {
   id: string;
   name: string;
+  /** The agent's allowed tools — its data reach, shown read-only in the node. */
+  tools: string[];
+  /** The agent's own default model override, if any (shown as the baseline). */
+  provider: string | null;
+  model: string | null;
 }
 
 /** Agents available to drop into an agent node. */
 export async function listAgentOptions(): Promise<AgentOption[]> {
   const rows = await db
-    .select({ id: agents.id, name: agents.name })
+    .select({
+      id: agents.id,
+      name: agents.name,
+      tools: agents.tools,
+      provider: agents.provider,
+      model: agents.model,
+    })
     .from(agents)
     .orderBy(asc(agents.name));
-  return rows;
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    tools: r.tools ?? [],
+    provider: r.provider ?? null,
+    model: r.model ?? null,
+  }));
 }
 
 export interface FlowStats {

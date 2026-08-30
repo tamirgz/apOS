@@ -4,7 +4,7 @@ import { Cron } from "croner";
 import { and, eq, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
-import { agents } from "@/core/db/schema/agents";
+import { agents, agentRuns } from "@/core/db/schema/agents";
 import {
   flowNodeRuns,
   flowRuns,
@@ -12,7 +12,8 @@ import {
   type FlowGraph,
   type FlowTrigger,
 } from "@/modules/flows/schema";
-import { runView, type RunView } from "./queries";
+import { createAgent } from "@/modules/agents/actions";
+import { runView, type AgentOption, type RunView } from "./queries";
 import { sanitizeFlowGraph } from "./graph";
 import { templateById } from "./templates";
 
@@ -147,6 +148,51 @@ export async function setFlowEnabled(id: string, enabled: boolean): Promise<void
 /** Load one past run's trace for the canvas run-picker. */
 export async function loadRunView(runId: string): Promise<RunView | null> {
   return runView(runId);
+}
+
+export interface NodeTranscriptEvent {
+  type: string;
+  text?: string;
+  name?: string;
+  result?: unknown;
+  message?: string;
+}
+export interface NodeTranscript {
+  status: string;
+  result: string | null;
+  error: string | null;
+  tokensIn: number;
+  tokensOut: number;
+  events: NodeTranscriptEvent[];
+}
+
+/** Drill into an agent node's run: the full transcript (tools it called, what
+ *  they returned, its reasoning) — so the Studio shows what the agent DID. */
+export async function loadNodeTranscript(agentRunId: string): Promise<NodeTranscript | null> {
+  const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, agentRunId));
+  if (!run) return null;
+  return {
+    status: run.status,
+    result: run.result ?? null,
+    error: run.error ?? null,
+    tokensIn: run.tokensIn,
+    tokensOut: run.tokensOut,
+    events: ((run.transcript ?? []) as NodeTranscriptEvent[]).filter(
+      (e) => e && ["tool_call", "tool_result", "text", "error"].includes(e.type),
+    ),
+  };
+}
+
+/** Create a bare agent inline from the Studio, so a flow can wire a fresh agent
+ *  without leaving the canvas. Returns the option to select immediately. */
+export async function quickCreateAgent(name: string): Promise<AgentOption> {
+  const row = await createAgent({
+    name: name.trim() || "New agent",
+    prompt:
+      "You are a flow step. Do your task on the input you're given, then write a concise result. Configure your tools and prompt in the Agents page.",
+    tools: [],
+  });
+  return { id: row.id, name: row.name, tools: row.tools ?? [], provider: row.provider ?? null, model: row.model ?? null };
 }
 
 /** Approve or reject a paused human node, then NOTIFY the worker to resume the

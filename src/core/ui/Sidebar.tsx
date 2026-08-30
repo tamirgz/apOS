@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
-import { ArrowUpRight, ChevronRight, LayoutGrid } from "lucide-react";
+import { ArrowUpRight, ChevronRight, LayoutGrid, Menu } from "lucide-react";
 import { navModules } from "@/modules/registry";
 import type { ModuleManifest } from "@/core/modules/types";
 import { getSidebarBadges } from "./sidebar-badges";
@@ -155,6 +155,13 @@ export function Sidebar() {
   const badgeFor = (id: string) =>
     id === "today" ? badges.needsYou : id === "inbox" ? badges.inbox : 0;
 
+  // Mobile: the sidebar becomes a drawer behind a hamburger (the shell had no
+  // responsive mode at all — a fixed w-52 column on every screen).
+  const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => {
+    setMobileOpen(false); // navigating closes the drawer
+  }, [pathname]);
+
   // Core = the always-visible flat list; grouped items go under section labels.
   // Settings is pinned LAST (below the group sections), as convention expects.
   const core = navModules.filter((m) => !m.nav.group && m.id !== "settings");
@@ -166,7 +173,28 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="glass sticky top-3 m-3 mr-0 flex h-[calc(100vh-1.5rem)] w-52 shrink-0 flex-col rounded-(--radius-panel) p-3">
+    <>
+      <button
+        type="button"
+        onClick={() => setMobileOpen(true)}
+        title="Menu"
+        className="glass fixed left-3 top-3 z-40 rounded-lg p-2 text-ink-dim transition hover:text-ink md:hidden"
+      >
+        <Menu className="size-5" />
+      </button>
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-void/60 backdrop-blur-sm md:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+      <aside
+        className={cn(
+          "glass sticky top-3 m-3 mr-0 flex h-[calc(100vh-1.5rem)] w-52 shrink-0 flex-col rounded-(--radius-panel) p-3",
+          "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:m-0 max-md:h-full max-md:rounded-none",
+          !mobileOpen && "max-md:hidden",
+        )}
+      >
       {/* logo */}
       <Link href="/" className="mb-5 flex items-center gap-3 px-2 pt-1">
         <span className="relative flex size-9 items-center justify-center rounded-xl border border-plasma/30 bg-plasma/10">
@@ -223,6 +251,7 @@ export function Sidebar() {
           <span className="normal-case">apOS</span> v0.1 · local
         </p>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

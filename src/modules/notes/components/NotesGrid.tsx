@@ -88,7 +88,7 @@ function NoteCard({
             suppressHydrationWarning
             className="ml-auto font-mono text-[9px] uppercase tracking-widest text-ink-faint"
           >
-            {note.updatedAt.toLocaleDateString("en-US", {
+            {note.updatedAt.toLocaleDateString(undefined, {
               month: "short",
               day: "numeric",
             })}

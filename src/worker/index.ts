@@ -205,6 +205,34 @@ async function syncFlowCrons() {
   }
 }
 
+/**
+ * Event-triggered flows: { kind: "event", channel } — a NOTIFY on that channel
+ * fires the flow, seeded with the payload. This is the consumer the telegram
+ * relevance gate has been NOTIFYing into the void for ("telegram_new_post");
+ * any module NOTIFY channel works. The channel→flows map is loaded here; when
+ * it CHANGES (flows_changed), the LISTEN connection is rebuilt so subscriptions
+ * match. Channels already claimed by the fixed set or a module job are skipped
+ * (double-listen on one connection would clash).
+ */
+let flowEventChannels = new Map<string, { id: string; name: string }[]>();
+
+async function loadFlowEventChannels(): Promise<
+  Map<string, { id: string; name: string }[]>
+> {
+  const rows = await db.select().from(flows).where(eq(flows.enabled, true));
+  const map = new Map<string, { id: string; name: string }[]>();
+  for (const f of rows) {
+    if (f.trigger?.kind !== "event" || !f.trigger.channel) continue;
+    const list = map.get(f.trigger.channel) ?? [];
+    list.push({ id: f.id, name: f.name });
+    map.set(f.trigger.channel, list);
+  }
+  return map;
+}
+
+const eventChannelsKey = (m: Map<string, { id: string; name: string }[]>) =>
+  [...m.keys()].sort().join(",");
+
 async function sweepOrphans() {
   const cutoff = new Date(Date.now() - ORPHAN_AFTER_MS);
   // coalesce: queued runs never get a heartbeat — judge them by created_at,
@@ -317,6 +345,19 @@ async function main() {
   // the real LISTEN path end-to-end — a plain `SELECT 1` would run on a separate
   // pool connection and prove nothing about whether this socket still delivers.
   let lastHeartbeat = Date.now();
+  const FIXED_CHANNELS = new Set([
+    "aios_heartbeat",
+    "agents_changed",
+    "routines_changed",
+    "flows_changed",
+    "run_requests",
+    "approval_decisions",
+    "config_changed",
+    "notifications",
+  ]);
+  // Assigned once rebuildListener exists; flows_changed may fire before that.
+  let requestListenerRebuild: () => void = () => {};
+  flowEventChannels = await loadFlowEventChannels();
   const subscribeAll = async (l: ReturnType<typeof postgres>) => {
     await l.listen("aios_heartbeat", () => {
       lastHeartbeat = Date.now();
@@ -332,6 +373,17 @@ async function main() {
     await l.listen("flows_changed", () => {
       log("flows_changed → resyncing flow crons");
       syncFlowCrons().catch((e) => log(`flow resync failed: ${e}`));
+      // Event-trigger channels are LISTEN subscriptions on THIS connection —
+      // when the set changes, rebuild it so subscriptions match the flows.
+      void (async () => {
+        const next = await loadFlowEventChannels();
+        const changed = eventChannelsKey(next) !== eventChannelsKey(flowEventChannels);
+        flowEventChannels = next;
+        if (changed) {
+          log("flow event channels changed → rebuilding listener");
+          requestListenerRebuild();
+        }
+      })().catch((e) => log(`flow event-channel sync failed: ${e}`));
     });
     await l.listen("run_requests", (runId) => {
       // NOTIFY payloads are raw text; reject non-uuids so a malformed one fails
@@ -363,6 +415,23 @@ async function main() {
         void runJob(channel, () => handle(payload, { db }));
       });
     }
+    // Event-triggered flows (e.g. a flow bound to telegram_new_post).
+    for (const [channel, flowsOnChannel] of flowEventChannels) {
+      if (FIXED_CHANNELS.has(channel) || jobHandlers.has(channel)) {
+        log(`⚠ flow event channel "${channel}" clashes with a core/job channel — skipped`);
+        continue;
+      }
+      await l.listen(channel, (payload) => {
+        for (const f of flowsOnChannel) {
+          log(`event ${channel} → flow "${f.name}"`);
+          runFlow(f.id, "event", {
+            report: `Triggered by NOTIFY on "${channel}"${payload ? ` with payload: ${payload}` : ""}.`,
+            signal: null,
+            from: `event:${channel}`,
+          }).catch((e) => log(`event flow ${f.id} failed: ${e}`));
+        }
+      });
+    }
   };
 
   const startListener = async () => {
@@ -392,6 +461,9 @@ async function main() {
     syncRoutineCrons().catch((e) => log(`catch-up routine resync failed: ${e}`));
     syncFlowCrons().catch((e) => log(`catch-up flow resync failed: ${e}`));
     pickUpQueuedRuns().catch((e) => log(`catch-up queued pickup failed: ${e}`));
+  };
+  requestListenerRebuild = () => {
+    rebuildListener().catch((e) => log(`event-channel listener rebuild failed: ${e}`));
   };
   // Heartbeat watchdog: emit a beat every 30s and rebuild if none has come back
   // for 90s (≈3 missed) — the window that means this socket has gone deaf.

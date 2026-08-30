@@ -3,6 +3,7 @@ import { desc, ilike, or, sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { notifications } from "@/core/db/schema/notifications";
 import { cn } from "@/core/ui/cn";
+import { Markdown } from "@/core/ui/Markdown";
 import { MarkAllReadButton } from "./MarkAllReadButton";
 
 // Live DB data — never prerender.
@@ -136,9 +137,9 @@ export default async function NotificationsPage({
                         </span>
                       </div>
                       {n.body && (
-                        <p className="mt-1 whitespace-pre-wrap pl-4 text-xs leading-relaxed text-ink-dim">
-                          {n.body}
-                        </p>
+                        <div className="mt-1 pl-4 [&_h1]:[unicode-bidi:plaintext] [&_h2]:[unicode-bidi:plaintext] [&_h3]:[unicode-bidi:plaintext] [&_li]:[unicode-bidi:plaintext] [&_p]:[unicode-bidi:plaintext]">
+                          <Markdown>{n.body}</Markdown>
+                        </div>
                       )}
                       <p className="mt-1 pl-4 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
                         {n.source}

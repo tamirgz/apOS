@@ -6,7 +6,7 @@ export const obsidianManifest: ModuleManifest = {
   title: "Obsidian",
   icon: BookOpen,
   accent: "var(--color-violet)",
-  nav: { order: 47, group: "Sources", external: true },
+  nav: { order: 63, group: "Sources", external: true },
   searchable: true,
   commands: [
     {

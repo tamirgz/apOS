@@ -40,6 +40,9 @@ const bump = (flowRunId: string) => {
 export async function runFlow(
   flowId: string,
   trigger = "manual",
+  // Event-triggered fires seed the graph's entry node(s) with what fired them
+  // (e.g. "telegram_new_post: <post id>"), so the first agent can look it up.
+  seed: FlowPayload | null = null,
 ): Promise<string | null> {
   const [flow] = await db.select().from(flows).where(eq(flows.id, flowId));
   if (!flow) return null;
@@ -49,7 +52,7 @@ export async function runFlow(
     .returning();
   log(`▶ "${flow.name}" run ${run.id}`);
   bump(run.id);
-  await settleGraph(flow.name, run.id, () => executeGraph(flow.graph, run.id));
+  await settleGraph(flow.name, run.id, () => executeGraph(flow.graph, run.id, 0, seed));
   return run.id;
 }
 

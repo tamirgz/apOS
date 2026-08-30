@@ -6,7 +6,7 @@ export const telegramManifest: ModuleManifest = {
   title: "Telegram",
   icon: Send,
   accent: "var(--color-ion)",
-  nav: { order: 16, group: "Sources" },
+  nav: { order: 60, group: "Sources" },
   searchable: true, // readable in-app (no ↗)
   commands: [
     {

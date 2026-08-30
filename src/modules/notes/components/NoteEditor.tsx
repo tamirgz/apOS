@@ -58,7 +58,7 @@ export function NoteEditor({
       });
       setStatus("saved");
       setSavedAt(
-        new Date().toLocaleTimeString("en-GB", { hour12: false }),
+        new Date().toLocaleTimeString(undefined, { hour12: false }),
       );
     }, 800);
   };

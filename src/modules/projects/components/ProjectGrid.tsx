@@ -1,5 +1,7 @@
 "use client";
 
+import { lastActiveLabel } from "@/core/ui/time";
+
 import Link from "next/link";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
@@ -11,13 +13,7 @@ import { HealthChip } from "./HealthChip";
 import { STATUS_CHIP } from "./statusStyle";
 import { categoryColor } from "./categoryColor";
 
-function lastActiveLabel(d: Date | null): string {
-  if (!d) return "no activity";
-  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
-  if (days <= 0) return "active today";
-  if (days === 1) return "active yesterday";
-  return `active ${days}d ago`;
-}
+// shared: core/ui/time.ts lastActiveLabel
 
 function NewProjectForm() {
   const [pending, startTransition] = useTransition();
@@ -137,11 +133,9 @@ function ProjectCard({
 }
 
 function ProjectSection({
-  title,
   projects,
   muted,
 }: {
-  title: string;
   projects: ProjectCockpit[];
   muted?: boolean;
 }) {
@@ -181,7 +175,7 @@ function InactiveProjects({ projects }: { projects: ProjectCockpit[] }) {
           )}
         />
       </button>
-      {open && <ProjectSection title="" projects={projects} muted />}
+      {open && <ProjectSection projects={projects} muted />}
     </div>
   );
 }
@@ -217,7 +211,7 @@ function CategoryGroup({ name, items }: { name: string; items: ProjectCockpit[] 
         <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink-dim">{name}</span>
         <span className="font-mono text-xs tabular-nums text-ink-faint">{items.length}</span>
       </div>
-      <ProjectSection title={name} projects={items} />
+      <ProjectSection projects={items} />
     </Reorder.Item>
   );
 }
@@ -283,7 +277,7 @@ export function ProjectGrid({
               label={liveNames.length > 0 ? "uncategorized" : "active"}
               count={uncategorized.length}
             />
-            <ProjectSection title="uncategorized" projects={uncategorized} />
+            <ProjectSection projects={uncategorized} />
           </div>
         )}
 
@@ -298,7 +292,7 @@ export function ProjectGrid({
                 {areas.length}
               </span>
             </div>
-            <ProjectSection title="areas" projects={areas} />
+            <ProjectSection projects={areas} />
           </div>
         )}
       </div>

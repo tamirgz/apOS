@@ -2,6 +2,12 @@ import Link from "next/link";
 import { and, desc, gte, or, ilike } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { notifications } from "@/core/db/schema/notifications";
+import { Markdown } from "@/core/ui/Markdown";
+
+/** Per-block bidi: a Hebrew line aligns right, an English one left — briefs
+ *  mix both. `unicode-bidi: plaintext` is per-element, so target the blocks. */
+const BIDI =
+  "[&_p]:[unicode-bidi:plaintext] [&_li]:[unicode-bidi:plaintext] [&_h1]:[unicode-bidi:plaintext] [&_h2]:[unicode-bidi:plaintext] [&_h3]:[unicode-bidi:plaintext]";
 
 /**
  * Today's briefs, on the morning surface — the Daily brief, Slack-ingested
@@ -53,7 +59,9 @@ export async function TodayBriefs() {
             <details key={n.id} className="group">
               <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 transition hover:bg-white/3 [&::-webkit-details-marker]:hidden">
                 <span className="dot shrink-0 text-ion" />
-                <span className="flex-1 truncate text-sm text-ink">{n.title}</span>
+                <span dir="auto" className="flex-1 truncate text-sm text-ink">
+                  {n.title}
+                </span>
                 <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
                   {n.source}
                 </span>
@@ -61,8 +69,8 @@ export async function TodayBriefs() {
                   ▾
                 </span>
               </summary>
-              <div className="whitespace-pre-wrap px-3 pb-3 pl-7 text-xs leading-relaxed text-ink-dim">
-                {n.body}
+              <div className={`px-3 pb-3 pl-7 ${BIDI}`}>
+                <Markdown>{n.body}</Markdown>
               </div>
             </details>
           ) : (

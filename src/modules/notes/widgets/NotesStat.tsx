@@ -18,7 +18,7 @@ export async function NotesStat() {
       value={Number(c.total)}
       hint={
         latest
-          ? `· ${latest.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+          ? `· ${latest.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
           : undefined
       }
       href="/m/notes"

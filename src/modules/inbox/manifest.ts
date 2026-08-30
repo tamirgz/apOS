@@ -6,7 +6,7 @@ export const inboxManifest: ModuleManifest = {
   title: "Inbox",
   icon: Inbox,
   accent: "var(--color-solar)",
-  nav: { order: 5 },
+  nav: { order: 6 },
   searchable: true,
   commands: [
     {

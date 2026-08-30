@@ -66,6 +66,12 @@ export async function updateKnowledgeNote(id: string, note: string) {
 
 export async function deleteKnowledge(id: string) {
   await db.delete(knowledgeItems).where(eq(knowledgeItems.id, id));
+  // Purge the unified search-index entry in the same breath — it's what powers
+  // semantic search, Orbit nodes and the cross-type "connections", all derived
+  // from these embeddings. Without this the item lingers as a ghost (still
+  // searchable / still an Orbit node / still a related-to edge) until the 2-min
+  // orphan sweep catches up. Delete it now so removal is instant + atomic.
+  await sql`delete from search_index where kind = 'knowledge' and source_id = ${id}`;
   revalidatePath("/");
   revalidatePath("/m/knowledge");
 }

@@ -9,7 +9,7 @@
  * Free/local, idempotent: only rows with a NULL area_ref are classified, in
  * batches; the result is a "projects:<area-uuid>" ref or the literal "none".
  */
-import { eq, sql as dsql } from "drizzle-orm";
+import { sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { projects } from "@/modules/projects/schema";
 import { searchIndex } from "@/core/db/schema/search-index";
@@ -135,14 +135,16 @@ export async function classifyAreas(
       log(`area classify chunk failed: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
-    for (let j = 0; j < chunk.length; j++) {
-      const ref = refForName(areas, map[String(j + 1)] ?? "none");
-      await db
-        .update(searchIndex)
-        .set({ areaRef: ref })
-        .where(eq(searchIndex.id, chunk[j].id));
-      done++;
-    }
+    // One statement per chunk instead of one UPDATE round-trip per row.
+    const pairs = chunk.map((r, j) => ({
+      id: r.id,
+      ref: refForName(areas, map[String(j + 1)] ?? "none"),
+    }));
+    await db.execute(dsql`
+      update search_index si set area_ref = v.ref
+        from jsonb_to_recordset(${JSON.stringify(pairs)}::jsonb) as v(id uuid, ref text)
+       where si.id = v.id`);
+    done += pairs.length;
   }
   if (done > 0) log(`classified ${done} item(s) into area drawers`);
   return done;

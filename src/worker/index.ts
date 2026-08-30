@@ -89,7 +89,16 @@ async function syncSchedules() {
     if (crons.has(id)) continue;
     try {
       const cron = new Cron(agent.schedule!, { protect: true }, async () => {
-        const runId = await enqueueRun(id, "cron");
+        // enqueueRun only returns null for "a live run exists"; a real DB error
+        // (connection blip mid-cron) is logged distinctly — the 5-min safety-net
+        // pickUpQueuedRuns/next fire covers the missed period.
+        let runId: string | null = null;
+        try {
+          runId = await enqueueRun(id, "cron");
+        } catch (e) {
+          log(`cron enqueue failed (${agent.name}): ${e}`);
+          return;
+        }
         if (runId) {
           log(`cron fired → run ${runId} (${agent.name})`);
           await executeRun(runId);
@@ -215,6 +224,30 @@ async function pickUpQueuedRuns() {
   }
 }
 
+/**
+ * Flows execute in-process in THIS worker (single runner via the advisory
+ * lock), so any flow run still queued/running at boot died with the previous
+ * process — without this it sat in "running" forever. Paused runs are left
+ * alone: a human gate legitimately survives restarts and resumes on decision.
+ */
+async function sweepOrphanedFlowRuns() {
+  const orphaned = await db.execute(dsql`
+    update flow_runs
+       set status = 'failed',
+           error = 'orphaned (worker restarted or crashed mid-flow)',
+           finished_at = now()
+     where status in ('queued', 'running')
+     returning id`);
+  const ids = [...orphaned].map((r) => (r as { id: string }).id);
+  if (ids.length === 0) return;
+  await db.execute(dsql`
+    update flow_node_runs
+       set status = 'failed', finished_at = now()
+     where status in ('pending', 'running')
+       and flow_run_id = any(${ids}::uuid[])`);
+  log(`flow orphan sweep: failed ${ids.length} run(s)`);
+}
+
 async function main() {
   // Single-runner guarantee via advisory lock on a dedicated connection.
   const lockConn = postgres(url, { max: 1 });
@@ -229,6 +262,7 @@ async function main() {
   log("advisory lock acquired — single runner confirmed");
 
   await sweepOrphans();
+  await sweepOrphanedFlowRuns().catch((e) => log(`flow orphan sweep failed: ${e}`));
   await syncSchedules();
   await syncRoutineCrons();
   await syncFlowCrons();
@@ -326,7 +360,7 @@ async function main() {
   };
 
   let listener = await startListener();
-  log(`listening on ${jobHandlers.size + 7} channel(s)`);
+  log(`listening on ${jobHandlers.size + 8} channel(s)`);
 
   const rebuildListener = async () => {
     try {
@@ -400,6 +434,12 @@ async function main() {
     } catch (e) {
       log(`embedding sweep failed (ollama down?): ${String(e).slice(0, 120)}`);
     }
+  });
+
+  // Area classification runs on its OWN cron: it calls a local LLM with up to
+  // 5×60s of timeout budget, and sharing a `protect`ed tick with the index
+  // sync meant a slow/missing model silently starved indexing + embedding.
+  new Cron("*/5 * * * *", { protect: true }, async () => {
     // Sort newly-indexed items into their broad "area of development" drawer
     // (local LLM, topic-based). Bounded per tick so it never hogs Ollama.
     try {
@@ -407,6 +447,33 @@ async function main() {
       await classifyAreas(60, log);
     } catch (e) {
       log(`area classify failed: ${String(e).slice(0, 120)}`);
+    }
+  });
+
+  // Nightly retention (03:10, before the 03:30 backup so the dump shrinks too):
+  // the transcript of an old run is debugging material, not knowledge — the
+  // run's `result` (what agents/search actually use) is kept. Without this,
+  // `agent_runs` and `notifications` grow forever and every nightly pg_dump
+  // gets larger with no bounded steady state.
+  new Cron("10 3 * * *", { protect: true }, async () => {
+    try {
+      const [t, r, n, l] = await Promise.all([
+        db.execute(dsql`update agent_runs set transcript='[]'::jsonb
+          where finished_at < now() - interval '14 days'
+            and transcript <> '[]'::jsonb`),
+        db.execute(dsql`delete from agent_runs
+          where finished_at < now() - interval '90 days'`),
+        db.execute(dsql`delete from notifications
+          where created_at < now() - interval '30 days'`),
+        db.execute(dsql`delete from agent_ledger
+          where processed_at < now() - interval '180 days'`),
+      ]);
+      const c = (x: unknown) => (x as { count?: number })?.count ?? 0;
+      log(
+        `retention: trimmed ${c(t)} transcript(s), deleted ${c(r)} old run(s), ${c(n)} old notification(s), ${c(l)} old ledger row(s)`,
+      );
+    } catch (e) {
+      log(`retention sweep failed: ${String(e).slice(0, 120)}`);
     }
   });
 

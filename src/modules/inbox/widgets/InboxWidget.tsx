@@ -1,13 +1,15 @@
 import Link from "next/link";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, inArray, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { inboxItems } from "../schema";
 
 export async function InboxWidget() {
+  // "failed" is the live failure status; "error" is the legacy marker — the
+  // widget counted only the legacy one, so failed triage never showed here.
   const [pendingCount] = await db
     .select({ n: sql<number>`count(*)` })
     .from(inboxItems)
-    .where(eq(inboxItems.status, "error"));
+    .where(inArray(inboxItems.status, ["failed", "error"]));
   const recent = await db
     .select()
     .from(inboxItems)

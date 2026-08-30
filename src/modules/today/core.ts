@@ -6,6 +6,7 @@
  */
 import { and, eq, sql as dsql } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
+import { isUniqueViolation } from "@/core/db/errors";
 import { embedText, groundProjectRef } from "@/core/embeddings";
 import { indexRow } from "@/core/search-index";
 import { attentionItems, type AttentionType } from "./schema";
@@ -75,17 +76,6 @@ export function deriveDedupeKey(input: {
   const person = input.personRef ?? "-";
   const title = input.title.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 160);
   return `auto:${proj}:${person}:${title}`;
-}
-
-// Postgres unique-violation SQLSTATE. drizzle wraps the driver error in a
-// DrizzleQueryError, so the code lives on `.cause` (the postgres.js error),
-// not the top-level object — check both.
-function isUniqueViolation(e: unknown): boolean {
-  const code = (x: unknown) =>
-    typeof x === "object" && x !== null
-      ? (x as { code?: string }).code
-      : undefined;
-  return code(e) === "23505" || code((e as { cause?: unknown })?.cause) === "23505";
 }
 
 /**

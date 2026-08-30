@@ -40,7 +40,11 @@ export async function isGoogleConnected(): Promise<boolean> {
   return !!(await getSetting(GOOGLE_KEYS.refreshToken));
 }
 
-export function buildAuthUrl(clientId: string, origin: string): string {
+export function buildAuthUrl(
+  clientId: string,
+  origin: string,
+  state?: string,
+): string {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: origin + GOOGLE_REDIRECT_PATH,
@@ -48,6 +52,7 @@ export function buildAuthUrl(clientId: string, origin: string): string {
     scope: SCOPE,
     access_type: "offline",
     prompt: "consent",
+    ...(state ? { state } : {}),
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }

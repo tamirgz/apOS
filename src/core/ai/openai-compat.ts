@@ -57,6 +57,9 @@ export async function* runOpenAICompatible(
   let nudged = false;
   const TOOL_CALL_CAP = 10;
 
+  // True when every turn ended in tool calls — i.e. the loop stopped because
+  // the budget ran out, not because the model finished its answer.
+  let exhausted = true;
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       const forceAnswer = totalToolCalls >= TOOL_CALL_CAP;
@@ -133,7 +136,10 @@ export async function* runOpenAICompatible(
       if (turnText) finalText = turnText;
 
       const calls = [...toolCallAcc.values()].filter((c) => c.name);
-      if (calls.length === 0) break;
+      if (calls.length === 0) {
+        exhausted = false;
+        break;
+      }
 
       messages.push({
         role: "assistant",
@@ -194,6 +200,16 @@ export async function* runOpenAICompatible(
     }
 
     yield { type: "usage", inputTokens, outputTokens };
+    // Running out of turns mid-tool-loop with NOTHING written is a truncated
+    // run, not a success — report it as such instead of a silent empty "done".
+    // (With partial text we still finish: a partial answer is usually usable.)
+    if (exhausted && !finalText) {
+      yield {
+        type: "error",
+        message: `hit the ${maxTurns}-turn budget while still calling tools, with no final answer — raise the agent's turn budget or narrow its task`,
+      };
+      return;
+    }
     yield { type: "done", text: finalText };
   } catch (e) {
     yield { type: "error", message: String(e) };

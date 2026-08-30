@@ -56,9 +56,19 @@ export async function ingestChannel(channelId: string): Promise<void> {
   // instead of re-scanning the whole window next run (the state-ledger rule).
   let cursor = ch.lastSeenId ?? 0;
   let processed = 0;
+  // A failed post PINS the cursor — advancing past it would permanently drop
+  // it (a 10-min Ollama outage used to lose every post in the window). The
+  // next run re-fetches from the pinned cursor; already-stored posts are
+  // skipped by the `existing` set + unique index, so the retry is idempotent.
+  let stalled = false;
+  const advance = (postId: number) => {
+    if (!stalled) cursor = Math.max(cursor, postId);
+  };
   for (const p of posts) {
-    cursor = Math.max(cursor, p.postId);
-    if (existing.has(p.postId)) continue;
+    if (existing.has(p.postId)) {
+      advance(p.postId);
+      continue;
+    }
     try {
       // Enrich with the first link's readable text (ift.tt → real article).
       const linkedText = p.urls[0] ? await fetchUrlText(p.urls[0]) : "";
@@ -91,10 +101,13 @@ export async function ingestChannel(channelId: string): Promise<void> {
         // runs on this post. Nothing listens yet; harmless until then.
         await sql.notify("telegram_new_post", row.id);
       }
+      advance(p.postId);
     } catch (e) {
       // One bad post (a hung link fetch, a gate hiccup) must not abort the
-      // whole channel's ingest — skip it and keep going.
-      log(`${ch.username} post ${p.postId} skipped: ${String(e).slice(0, 120)}`);
+      // whole channel's ingest — keep going, but pin the cursor so the next
+      // run retries this post instead of silently dropping it.
+      stalled = true;
+      log(`${ch.username} post ${p.postId} failed (cursor pinned): ${String(e).slice(0, 120)}`);
     }
     // Checkpoint every 10 new posts so progress survives an interruption.
     if (++processed % 10 === 0) {
@@ -118,8 +131,20 @@ export async function ingestAll(): Promise<void> {
     .select({ id: telegramChannels.id })
     .from(telegramChannels)
     .where(eq(telegramChannels.enabled, "true"));
+  let failed = 0;
+  let lastError: unknown = null;
   for (const c of chans) {
-    await ingestChannel(c.id).catch((e) => log(`ingest ${c.id} failed: ${e}`));
+    await ingestChannel(c.id).catch((e) => {
+      failed++;
+      lastError = e;
+      log(`ingest ${c.id} failed: ${e}`);
+    });
+  }
+  // One flaky channel shouldn't page — but EVERY channel failing means Telegram
+  // (or the relevance model) is down, and swallowing that kept the job
+  // permanently "healthy" while producing nothing. Rethrow so runJob alerts.
+  if (chans.length > 0 && failed === chans.length) {
+    throw new Error(`all ${chans.length} telegram channel(s) failed: ${String(lastError).slice(0, 200)}`);
   }
 }
 

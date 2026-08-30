@@ -1,9 +1,10 @@
 "use server";
 
 import { Cron } from "croner";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
+import { isUniqueViolation } from "@/core/db/errors";
 import {
   agentLedger,
   agentRuns,
@@ -120,13 +121,18 @@ export async function deleteAgent(id: string) {
 
 export async function decideApproval(id: string, approved: boolean) {
   const { approvals } = await import("@/core/db/schema/approvals");
-  await db
+  // Guard on status='pending': a double click (or a replayed NOTIFY) on an
+  // already-executed approval must never flip it back to 'approved' and
+  // re-execute the side-effecting tool.
+  const rows = await db
     .update(approvals)
     .set({
       status: approved ? "approved" : "rejected",
       decidedAt: new Date(),
     })
-    .where(eq(approvals.id, id));
+    .where(and(eq(approvals.id, id), eq(approvals.status, "pending")))
+    .returning({ id: approvals.id });
+  if (rows.length === 0) return;
   await sql.notify("approvals_changed", id);
   if (approved) await sql.notify("approval_decisions", id);
   revalidatePath("/m/agents");
@@ -144,7 +150,8 @@ export async function requestRun(
     revalidatePath("/m/agents");
     revalidatePath(`/m/agents/${agentId}`);
     return { runId: row.id };
-  } catch {
-    return { alreadyRunning: true };
+  } catch (e) {
+    if (isUniqueViolation(e)) return { alreadyRunning: true };
+    throw e;
   }
 }

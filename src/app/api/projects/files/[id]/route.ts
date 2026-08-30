@@ -8,6 +8,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  // A non-uuid segment would otherwise become a Postgres cast error → 500.
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("not found", { status: 404 });
   const [row] = await db
     .select({
       filename: projectFiles.filename,
@@ -19,10 +21,15 @@ export async function GET(
 
   if (!row) return new Response("not found", { status: 404 });
 
+  // Active content (HTML/SVG/XML/JS) served inline same-origin would execute as
+  // stored XSS against the app — force those to download as opaque bytes.
+  const mime = row.mimeType || "application/octet-stream";
+  const active = /html|svg|xml|javascript/i.test(mime);
   return new Response(new Uint8Array(row.content), {
     headers: {
-      "Content-Type": row.mimeType || "application/octet-stream",
-      "Content-Disposition": `inline; filename="${encodeURIComponent(row.filename)}"`,
+      "Content-Type": active ? "application/octet-stream" : mime,
+      "Content-Disposition": `${active ? "attachment" : "inline"}; filename="${encodeURIComponent(row.filename)}"`,
+      "X-Content-Type-Options": "nosniff",
       "Cache-Control": "private, max-age=3600",
     },
   });

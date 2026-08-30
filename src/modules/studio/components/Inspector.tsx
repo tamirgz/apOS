@@ -7,7 +7,7 @@ import { AI_PROVIDERS, type AIProviderId } from "@/core/db/schema/ai-routes";
 import { useProviderModels } from "@/core/ui/useProviderModels";
 import { metaFor } from "../nodes";
 import type { NodeTranscript } from "../actions";
-import type { AgentOption, FlowOption, NodeRunView } from "../queries";
+import type { AgentOption, FlowOption, NodeRunView, ToolOption } from "../queries";
 
 type Patch = { name?: string; config?: Record<string, unknown> };
 
@@ -21,6 +21,7 @@ export function Inspector({
   node,
   agents,
   flows,
+  tools,
   run,
   onPatch,
   onDelete,
@@ -30,6 +31,7 @@ export function Inspector({
   node: FlowNode;
   agents: AgentOption[];
   flows: FlowOption[];
+  tools: ToolOption[];
   /** This node's run in the effective trace (null = it hasn't run in this run). */
   run?: NodeRunView | null;
   onPatch: (patch: Patch) => void;
@@ -78,20 +80,10 @@ export function Inspector({
 
       {node.kind === "source" && <SourceConfig cfg={cfg} setCfg={setCfg} />}
 
+      {node.kind === "tool" && <ToolConfig cfg={cfg} setCfg={setCfg} tools={tools} />}
+
       {(node.kind === "branch" || node.kind === "filter") && (
-        <label className="flex flex-col gap-1">
-          <span className={labelCls}>condition</span>
-          <input
-            className={fieldCls}
-            value={(cfg.condition as string) ?? ""}
-            placeholder="decision == escalate"
-            onChange={(e) => setCfg("condition", e.target.value)}
-          />
-          <span className="text-[11px] text-ink-faint">
-            Reads the upstream signal (e.g. <code>score &gt;= 7</code>); free text
-            falls back to a local yes/no judge.
-          </span>
-        </label>
+        <ConditionField cfg={cfg} setCfg={setCfg} />
       )}
 
       {node.kind === "branch" && (
@@ -138,9 +130,10 @@ export function Inspector({
             value={(cfg.tool as string) ?? "notify"}
             onChange={(e) => setCfg("tool", e.target.value)}
           >
-            <option value="notify">notify (bell feed)</option>
-            <option value="card">card (Needs you)</option>
-            <option value="slack">slack (if configured)</option>
+            <option value="notify">Bell + Slack</option>
+            <option value="card">Needs-you card</option>
+            <option value="slack">Slack (if configured)</option>
+            <option value="cockpit">Cockpit brief</option>
           </select>
           <span className="text-[11px] text-ink-faint">
             Where the flow&apos;s final result is delivered.
@@ -388,6 +381,7 @@ function SourceConfig({
   setCfg: (k: string, v: unknown) => void;
 }) {
   const type = (cfg.sourceType as string) ?? "text";
+  const needsQuery = type === "search" || type === "knowledge";
   return (
     <div className="flex flex-col gap-3">
       <label className="flex flex-col gap-1">
@@ -397,11 +391,14 @@ function SourceConfig({
           value={type}
           onChange={(e) => setCfg("sourceType", e.target.value)}
         >
-          <option value="text">text (a fixed brief)</option>
-          <option value="search">search (semantic, whole corpus)</option>
+          <option value="text">Text — a fixed brief</option>
+          <option value="search">Semantic search — whole corpus</option>
+          <option value="knowledge">Knowledge / vault — notes & vault</option>
+          <option value="projects">Projects — active + health</option>
+          <option value="people">People & meetings — follow-ups</option>
         </select>
       </label>
-      {type === "search" ? (
+      {needsQuery && (
         <div className="flex gap-2">
           <label className="flex flex-1 flex-col gap-1">
             <span className={labelCls}>query</span>
@@ -424,7 +421,8 @@ function SourceConfig({
             />
           </label>
         </div>
-      ) : (
+      )}
+      {type === "text" && (
         <label className="flex flex-col gap-1">
           <span className={labelCls}>text</span>
           <textarea
@@ -435,6 +433,150 @@ function SourceConfig({
           />
         </label>
       )}
+      {(type === "projects" || type === "people") && (
+        <span className="text-[11px] text-ink-faint">
+          Pulls your {type === "projects" ? "active projects with their health & next action" : "people with their open follow-ups"} as the input. No configuration needed.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Common signal keys agents/branches emit — the condition builder's presets. */
+const COND_FIELDS = ["state", "score", "decision", "approved", "count", "priority", "health", "pass"];
+const COND_OPS = ["==", "!=", ">=", "<=", ">", "<", "contains"];
+const COND_RE = /^\s*([\w.]+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$/i;
+
+/** Filter/Branch condition — a field/op/value builder with preset choices AND a
+ *  free-text escape for a natural-language condition (the local yes/no judge). */
+function ConditionField({
+  cfg,
+  setCfg,
+}: {
+  cfg: Record<string, unknown>;
+  setCfg: (k: string, v: unknown) => void;
+}) {
+  const cond = (cfg.condition as string) ?? "";
+  const parsed = cond.match(COND_RE);
+  // Free-text mode when there's a condition that ISN'T a simple field/op/value.
+  const [free, setFree] = useState(() => cond.trim() !== "" && !parsed);
+  const field = parsed?.[1] ?? "";
+  const op = parsed?.[2] ?? "==";
+  const value = parsed?.[3] ?? "";
+  const setPart = (f: string, o: string, v: string) =>
+    setCfg("condition", `${f || "state"} ${o} ${v}`.trim());
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span className={labelCls}>condition</span>
+        <button
+          type="button"
+          onClick={() => setFree((f) => !f)}
+          className="font-mono text-[9px] uppercase tracking-widest text-ion transition hover:text-ink"
+        >
+          {free ? "use builder" : "free text"}
+        </button>
+      </div>
+      {free ? (
+        <>
+          <textarea
+            className={`${fieldCls} min-h-14 resize-y`}
+            value={cond}
+            placeholder="the report recommends escalating to a person"
+            onChange={(e) => setCfg("condition", e.target.value)}
+          />
+          <span className="text-[11px] text-ink-faint">
+            Natural-language → a local yes/no judge decides on the upstream report.
+          </span>
+        </>
+      ) : (
+        <>
+          <div className="flex gap-1.5">
+            <input
+              list="cond-fields"
+              className={`${fieldCls} flex-1`}
+              value={field}
+              placeholder="field"
+              onChange={(e) => setPart(e.target.value, op, value)}
+            />
+            <select
+              className={`${fieldCls} w-20`}
+              value={op}
+              onChange={(e) => setPart(field, e.target.value, value)}
+            >
+              {COND_OPS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
+          <datalist id="cond-fields">
+            {COND_FIELDS.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
+          <input
+            className={fieldCls}
+            value={value}
+            placeholder="value (e.g. escalate, 7, true)"
+            onChange={(e) => setPart(field, op, e.target.value)}
+          />
+          <span className="text-[11px] text-ink-faint">
+            Reads the upstream <code>signal</code>. Pick a field or type your own.
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Tool/action node — run one registered tool directly, args from a JSON
+ *  template that can interpolate {{report}} / {{signal.key}} from upstream. */
+function ToolConfig({
+  cfg,
+  setCfg,
+  tools,
+}: {
+  cfg: Record<string, unknown>;
+  setCfg: (k: string, v: unknown) => void;
+  tools: ToolOption[];
+}) {
+  const selected = (cfg.tool as string) ?? "";
+  const def = tools.find((t) => t.name === selected);
+  return (
+    <div className="flex flex-col gap-2.5">
+      <label className="flex flex-col gap-1">
+        <span className={labelCls}>tool</span>
+        <select
+          className={fieldCls}
+          value={selected}
+          onChange={(e) => setCfg("tool", e.target.value)}
+        >
+          <option value="">— pick a tool —</option>
+          {tools.map((t) => (
+            <option key={t.name} value={t.name}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+        {!selected && <span className="text-[11px] text-flare">Choose a tool to run.</span>}
+        {def && <span className="text-[11px] text-ink-faint">{def.description}</span>}
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className={labelCls}>args (JSON)</span>
+        <textarea
+          className={`${fieldCls} min-h-16 resize-y font-mono text-[11px]`}
+          value={(cfg.args as string) ?? ""}
+          placeholder={'{ "title": "{{report}}" }'}
+          onChange={(e) => setCfg("args", e.target.value)}
+        />
+        <span className="text-[11px] text-ink-faint">
+          Interpolate <code>{"{{report}}"}</code> / <code>{"{{signal.key}}"}</code> from the
+          upstream step.
+        </span>
+      </label>
     </div>
   );
 }

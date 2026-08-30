@@ -44,6 +44,7 @@ import type {
   NodeRunView,
   RunMeta,
   RunView,
+  ToolOption,
 } from "../queries";
 import { Inspector } from "./Inspector";
 import { NodePalette } from "./NodePalette";
@@ -95,6 +96,7 @@ export function FlowCanvas({
   flow,
   agents,
   flows,
+  tools,
   stats,
   trace,
   recentRuns,
@@ -108,6 +110,7 @@ export function FlowCanvas({
   };
   agents: AgentOption[];
   flows: FlowOption[];
+  tools: ToolOption[];
   stats: FlowStats;
   trace: RunView | null;
   recentRuns: RunMeta[];
@@ -270,24 +273,28 @@ export function FlowCanvas({
     setEdges((es) => es.filter((e) => e.from !== id && e.to !== id));
   };
 
-  const addNode = (kind: FlowNodeKind) => {
+  const addNode = (kind: FlowNodeKind, preset?: Record<string, unknown>) => {
     const el = containerRef.current;
     const rect = el?.getBoundingClientRect();
     const v = viewRef.current;
     const cx = rect ? ((rect.width / 2 - v.x) / v.k) : 200;
     const cy = rect ? ((rect.height / 2 - v.y) / v.k) : 200;
-    const config: Record<string, unknown> =
+    const defaults: Record<string, unknown> =
       kind === "branch"
         ? { ports: ["yes", "no"], condition: "" }
         : kind === "filter"
           ? { condition: "" }
           : kind === "output"
             ? { tool: "notify" }
-            : kind === "loop"
-              ? { itemsKey: "items", maxIterations: 10 }
-              : kind === "human"
-                ? { prompt: "" }
-                : {};
+            : kind === "source"
+              ? { sourceType: "text" }
+              : kind === "loop"
+                ? { itemsKey: "items", maxIterations: 10 }
+                : kind === "human"
+                  ? { prompt: "" }
+                  : {};
+    // A palette preset (e.g. a Source set to "projects") wins over the defaults.
+    const config = { ...defaults, ...(preset ?? {}) };
     const node: FlowNode = {
       id: uid(kind),
       kind,
@@ -487,6 +494,7 @@ export function FlowCanvas({
               node={selectedNode}
               agents={allAgents}
               flows={flows}
+              tools={tools}
               run={statusByNode.get(selectedNode.id) ?? null}
               onPatch={(patch) => patchNode(selectedNode.id, patch)}
               onDelete={() => {

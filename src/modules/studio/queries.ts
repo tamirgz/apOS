@@ -246,6 +246,19 @@ export async function flowStats(flowId: string): Promise<FlowStats> {
   return toStats([...runs][0], Number([...toks][0]?.tokens ?? 0));
 }
 
+export interface ToolOption {
+  name: string;
+  description: string;
+}
+
+/** Every registered tool, for the Tool/action node's picker. */
+export async function listToolOptions(): Promise<ToolOption[]> {
+  const { getAllTools } = await import("@/core/ai/tool-registry");
+  return getAllTools()
+    .map((t) => ({ name: t.name, description: t.description }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export interface FlowOption {
   id: string;
   name: string;

@@ -9,6 +9,7 @@ import {
   listAgentOptions,
   listFlowOptions,
   listRecentRuns,
+  listToolOptions,
 } from "../queries";
 
 const UUID_RE =
@@ -34,12 +35,13 @@ export async function FlowEditorPage({ params }: ModuleRouteProps) {
     );
   }
 
-  const [agents, flowOptions, trace, recentRuns, stats] = await Promise.all([
+  const [agents, flowOptions, trace, recentRuns, stats, tools] = await Promise.all([
     listAgentOptions(),
     listFlowOptions(flow.id),
     latestRunView(flow.id),
     listRecentRuns(flow.id, 30),
     flowStats(flow.id),
+    listToolOptions(),
   ]);
   return (
     <FlowCanvas
@@ -52,6 +54,7 @@ export async function FlowEditorPage({ params }: ModuleRouteProps) {
       }}
       agents={agents}
       flows={flowOptions}
+      tools={tools}
       stats={stats}
       trace={trace}
       recentRuns={recentRuns}

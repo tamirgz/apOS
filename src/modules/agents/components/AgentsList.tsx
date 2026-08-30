@@ -85,20 +85,27 @@ function AgentCard({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 380, damping: 32, delay: index * 0.04 }}
+      className={cn(
+        "glass relative rounded-xl p-4 transition hover:bg-white/4",
+        !agent.enabled && "opacity-60",
+      )}
     >
+      {/* Stretched link — the whole card navigates, but as a SIBLING of the
+          controls (not their parent), so no <button> is nested inside an <a>. */}
       <Link
         href={`/m/agents/${agent.id}`}
-        className={cn(
-          "glass block rounded-xl p-4 transition hover:bg-white/4",
-          !agent.enabled && "opacity-60",
-        )}
-      >
+        aria-label={`Open ${agent.name}`}
+        className="absolute inset-0 z-0 rounded-xl"
+      />
+      {/* Content sits above the stretched link; its non-interactive parts pass
+          clicks through, while the toggle + run button re-enable pointer events. */}
+      <div className="pointer-events-none relative z-10">
         <div className="mb-2 flex items-center gap-3">
           <Bot className="size-4.5 text-flare" />
           <h3 className="font-display text-base font-medium text-ink">
             {agent.name}
           </h3>
-          <span className="ml-auto" onClick={(e) => e.preventDefault()}>
+          <span className="pointer-events-auto ml-auto">
             <EnabledSwitch agent={agent} />
           </span>
         </div>
@@ -134,11 +141,11 @@ function AgentCard({
               {status.label}
             </span>
           ) : null}
-          <span className="ml-auto">
+          <span className="pointer-events-auto ml-auto">
             <RunNowButton agentId={agent.id} />
           </span>
         </div>
-      </Link>
+      </div>
     </motion.div>
   );
 }

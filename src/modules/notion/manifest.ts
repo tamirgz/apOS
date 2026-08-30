@@ -6,7 +6,7 @@ export const notionManifest: ModuleManifest = {
   title: "Notion",
   icon: NotebookText,
   accent: "var(--color-ink-dim)",
-  nav: { order: 46, group: "Sources", external: true },
+  nav: { order: 62, group: "Sources", external: true },
   searchable: true,
   commands: [
     {

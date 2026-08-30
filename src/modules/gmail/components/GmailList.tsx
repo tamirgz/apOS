@@ -1,5 +1,7 @@
 "use client";
 
+import { timeAgo } from "@/core/ui/time";
+
 import Link from "next/link";
 import { useTransition } from "react";
 import { AnimatePresence, motion } from "motion/react";
@@ -8,13 +10,7 @@ import { cn } from "@/core/ui/cn";
 import { resyncGmail } from "../actions";
 import type { GmailMessage } from "../schema";
 
-function ago(d: Date | null): string {
-  if (!d) return "";
-  const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
-  if (s < 3600) return `${Math.max(1, Math.floor(s / 60))}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  return `${Math.floor(s / 86400)}d`;
-}
+const ago = (d: Date | null) => timeAgo(d, { compact: true });
 
 export function GmailList({
   messages,

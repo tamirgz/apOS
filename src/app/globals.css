@@ -605,3 +605,27 @@ body {
     linear-gradient(rgb(245 197 66 / 0.045) 1px, transparent 1px),
     linear-gradient(90deg, rgb(245 197 66 / 0.045) 1px, transparent 1px);
 }
+
+/* ── Accessibility ──────────────────────────────────────────────────────────
+   Keyboard focus: the app zeroes outlines on ~50 inputs, which made tabbing
+   invisible everywhere. :focus-visible only fires for keyboard focus, so
+   mouse users see no change. */
+:focus-visible {
+  outline: 2px solid var(--color-plasma);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Reduced motion: collapse CSS animations/transitions to near-instant.
+   (AnimatedBg already bails on its canvas; framer-motion springs are inline
+   styles CSS can't reach — this covers the aurora drift, pulses, entrances.) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

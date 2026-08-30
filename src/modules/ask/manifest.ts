@@ -6,7 +6,7 @@ export const askManifest: ModuleManifest = {
   title: "Ask",
   icon: Sparkles,
   accent: "var(--color-plasma)",
-  nav: { order: 6 },
+  nav: { order: 7 },
   searchable: true, // right after Today — it's a primary surface
   commands: [
     {

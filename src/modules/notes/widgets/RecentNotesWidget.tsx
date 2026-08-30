@@ -31,7 +31,7 @@ export async function RecentNotesWidget() {
               {n.title}
             </span>
             <span className="font-mono text-[9px] uppercase tracking-widest text-ink-faint">
-              {n.updatedAt.toLocaleDateString("en-US", {
+              {n.updatedAt.toLocaleDateString(undefined, {
                 month: "short",
                 day: "numeric",
               })}

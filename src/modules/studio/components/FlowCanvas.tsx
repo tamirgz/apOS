@@ -1,5 +1,7 @@
 "use client";
 
+import { timeAgo } from "@/core/ui/time";
+
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -74,13 +76,7 @@ const fmtMs = (ms: number | null) =>
   ms == null ? "—" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 const fmtTokens = (t: number) =>
   t >= 1000 ? `${(t / 1000).toFixed(t >= 10000 ? 0 : 1)}k` : `${t}`;
-const relTime = (ms: number): string => {
-  const s = Math.round((Date.now() - ms) / 1000);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-};
+const relTime = (ms: number): string => timeAgo(ms);
 
 const inPos = (n: FlowNode) => ({ x: (n.x ?? 0), y: (n.y ?? 0) + NODE_H / 2 });
 const outPos = (n: FlowNode, i: number, count: number) => ({

@@ -343,18 +343,28 @@ export async function pruneMemoryEntries(): Promise<{ pruned: number }> {
  * the index sync's own orphan pass.
  */
 export async function compactMemoryEntries(): Promise<{ merged: number }> {
+  // Per-row nearest neighbor via LATERAL, so the HNSW index does the work —
+  // the old full self-join was O(n²) distance computations every night.
+  // Equivalent verdict: if the NEAREST other memory isn't within 0.10, no
+  // other can be. (In a cluster of 3+ near-duplicates this trims one layer
+  // per night and converges — fine for a janitor.)
   const rows = await db.execute<{ id: string }>(dsql`
     delete from memory_entries where id in (
       select ma.id
         from search_index sa
-        join search_index sb
-          on sb.kind = 'memory' and sa.kind = 'memory'
-         and sa.source_id <> sb.source_id
-         and sa.embedding is not null and sb.embedding is not null
-         and (sa.embedding <=> sb.embedding) < 0.10
         join memory_entries ma on ma.id::text = sa.source_id
-        join memory_entries mb on mb.id::text = sb.source_id
-       where ma.created_at < mb.created_at
+        cross join lateral (
+          select sb.source_id, (sb.embedding <=> sa.embedding) as d
+            from search_index sb
+           where sb.kind = 'memory' and sb.embedding is not null
+             and sb.source_id <> sa.source_id
+           order by sb.embedding <=> sa.embedding
+           limit 1
+        ) nn
+        join memory_entries mb on mb.id::text = nn.source_id
+       where sa.kind = 'memory' and sa.embedding is not null
+         and nn.d < 0.10
+         and ma.created_at < mb.created_at
          and ma.kind not in ('decision', 'lesson')
     )
     returning id`);

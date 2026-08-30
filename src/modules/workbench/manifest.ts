@@ -6,7 +6,7 @@ export const workbenchManifest: ModuleManifest = {
   title: "Workbench",
   icon: Hammer,
   accent: "var(--color-plasma)",
-  nav: { order: 15 },
+  nav: { order: 16 },
   searchable: true,
   commands: [
     {

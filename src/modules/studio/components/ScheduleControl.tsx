@@ -37,6 +37,9 @@ export function ScheduleControl({
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<FlowTrigger["kind"]>(trigger.kind);
   const [cron, setCron] = useState(trigger.kind === "schedule" ? trigger.cron : "0 8 * * *");
+  const [channel, setChannel] = useState(
+    trigger.kind === "event" ? trigger.channel : "telegram_new_post",
+  );
   const [isEnabled, setIsEnabled] = useState(enabled);
   const [err, setErr] = useState<string | null>(null);
   const [, start] = useTransition();
@@ -56,7 +59,11 @@ export function ScheduleControl({
   const apply = (nextKind: FlowTrigger["kind"]) => {
     setKind(nextKind);
     const next: FlowTrigger =
-      nextKind === "schedule" ? { kind: "schedule", cron } : { kind: "manual" };
+      nextKind === "schedule"
+        ? { kind: "schedule", cron }
+        : nextKind === "event"
+          ? { kind: "event", channel: channel.trim() }
+          : { kind: "manual" };
     persist(next, nextKind === "manual" ? false : isEnabled);
     if (nextKind === "manual") setIsEnabled(false);
   };
@@ -86,7 +93,7 @@ export function ScheduleControl({
             <div className="flex flex-col gap-1">
               <span className={labelCls}>trigger</span>
               <div className="flex gap-1">
-                {(["manual", "schedule"] as const).map((k) => (
+                {(["manual", "schedule", "event"] as const).map((k) => (
                   <button
                     key={k}
                     type="button"
@@ -130,6 +137,25 @@ export function ScheduleControl({
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {kind === "event" && (
+              <div className="flex flex-col gap-1.5">
+                <span className={labelCls}>notify channel</span>
+                <input
+                  className={fieldCls}
+                  value={channel}
+                  onChange={(e) => setChannel(e.target.value)}
+                  onBlur={() => apply("event")}
+                  placeholder="telegram_new_post"
+                />
+                <p className="text-[10px] leading-relaxed text-ink-faint">
+                  Fires on a Postgres NOTIFY — e.g.{" "}
+                  <code className="text-ion">telegram_new_post</code> (each
+                  relevance-gated Telegram post). The payload seeds the flow&apos;s
+                  first step.
+                </p>
               </div>
             )}
 

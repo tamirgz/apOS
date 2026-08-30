@@ -1,5 +1,7 @@
 "use client";
 
+import { dayAgo } from "@/core/ui/time";
+
 import Link from "next/link";
 import { useTransition } from "react";
 import { AnimatePresence, motion } from "motion/react";
@@ -8,14 +10,7 @@ import { cn } from "@/core/ui/cn";
 import { resyncPeople } from "../actions";
 import type { PersonWithFollowups } from "../queries";
 
-function lastMet(d: Date | null): string {
-  if (!d) return "—";
-  const days = Math.floor((Date.now() - new Date(d).getTime()) / 86_400_000);
-  if (days <= 0) return "today";
-  if (days === 1) return "yesterday";
-  if (days < 30) return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
-}
+const lastMet = (d: Date | null) => dayAgo(d);
 
 function initials(name: string): string {
   return name

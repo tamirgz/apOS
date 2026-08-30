@@ -135,6 +135,12 @@ export async function setFlowTrigger(id: string, trigger: FlowTrigger): Promise<
       throw new Error(`invalid cron pattern: "${trigger.cron}"`);
     }
   }
+  if (trigger.kind === "event") {
+    // A LISTEN channel name — same charset Postgres identifiers allow.
+    if (!/^[a-z_][a-z0-9_]*$/i.test(trigger.channel ?? "")) {
+      throw new Error(`invalid event channel: "${trigger.channel}"`);
+    }
+  }
   await db.update(flows).set({ trigger, updatedAt: new Date() }).where(eq(flows.id, id));
   await touched(id);
 }

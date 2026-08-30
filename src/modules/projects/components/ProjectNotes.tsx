@@ -66,7 +66,7 @@ export function ProjectNotes({
                 suppressHydrationWarning
                 className="font-mono text-[9px] uppercase tracking-widest text-ink-faint"
               >
-                {n.updatedAt.toLocaleDateString("en-US", {
+                {n.updatedAt.toLocaleDateString(undefined, {
                   month: "short",
                   day: "numeric",
                 })}

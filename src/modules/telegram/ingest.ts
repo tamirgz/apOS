@@ -97,8 +97,9 @@ export async function ingestChannel(channelId: string): Promise<void> {
         .returning();
       if (verdict.relevant && row) {
         relevantCount++;
-        // Fires the (Phase-2) source trigger — a routine bound to this channel
-        // runs on this post. Nothing listens yet; harmless until then.
+        // Fires the source trigger: any enabled flow with
+        // { kind: "event", channel: "telegram_new_post" } runs on this post,
+        // seeded with its id (worker LISTEN → runFlow).
         await sql.notify("telegram_new_post", row.id);
       }
       advance(p.postId);

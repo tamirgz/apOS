@@ -1,3 +1,4 @@
+import { lastActiveLabel } from "@/core/ui/time";
 import Link from "next/link";
 import { ArrowLeft, Sparkles } from "lucide-react";
 import type { ModuleRouteProps } from "@/core/modules/types.server";
@@ -28,13 +29,7 @@ import { listProjectFeatures } from "../features-actions";
 import { featureRefOf } from "../schema";
 import { ProjectFeatures } from "../components/ProjectFeatures";
 
-function lastActiveLabel(d: Date | null): string {
-  if (!d) return "no activity";
-  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
-  if (days <= 0) return "active today";
-  if (days === 1) return "active yesterday";
-  return `active ${days}d ago`;
-}
+// shared: core/ui/time.ts lastActiveLabel
 
 export async function ProjectDetailPage({ params }: ModuleRouteProps) {
   const [id] = params;

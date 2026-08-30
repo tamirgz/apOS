@@ -117,10 +117,19 @@ export function NotificationsBell() {
                         {n.title}
                       </p>
                       <span className="shrink-0 font-mono text-[9px] text-ink-faint">
-                        {new Date(n.createdAt).toLocaleTimeString(undefined, {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        {/* Older-than-today shows its date — a 3-day-old
+                            notification used to be indistinguishable from
+                            one from an hour ago. */}
+                        {(() => {
+                          const d = new Date(n.createdAt);
+                          const time = d.toLocaleTimeString(undefined, {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          });
+                          return d.toDateString() === new Date().toDateString()
+                            ? time
+                            : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`;
+                        })()}
                       </span>
                     </div>
                     {n.body && (

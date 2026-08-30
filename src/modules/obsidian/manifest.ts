@@ -7,6 +7,7 @@ export const obsidianManifest: ModuleManifest = {
   icon: BookOpen,
   accent: "var(--color-violet)",
   nav: { order: 47, group: "Sources", external: true },
+  searchable: true,
   commands: [
     {
       id: "vault.open",

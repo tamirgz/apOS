@@ -40,7 +40,7 @@ export function GmailList({
             : "Connect your Google account to mirror recent mail (read-only)."}
         </p>
         <Link
-          href="/m/settings"
+          href="/m/settings/connections"
           className="mt-1 rounded-lg border border-flare/30 px-4 py-2 font-mono text-xs uppercase tracking-widest text-flare transition hover:bg-flare/10"
         >
           {connected ? "reconnect in Settings" : "connect in Settings"}
@@ -73,9 +73,9 @@ export function GmailList({
             <motion.a
               key={m.id}
               layout
-              href={m.link ?? "#"}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={m.link ?? undefined}
+              target={m.link ? "_blank" : undefined}
+              rel={m.link ? "noopener noreferrer" : undefined}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}

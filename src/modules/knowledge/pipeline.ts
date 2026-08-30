@@ -53,6 +53,22 @@ export async function processKnowledgeItem(itemId: string): Promise<void> {
     });
   } catch (e) {
     await setStatus(itemId, "error", { statusDetail: String(e).slice(0, 500) });
+    // An errored item never reaches the search index — surface it instead of
+    // letting the capture silently vanish until the user opens Knowledge.
+    try {
+      const { insertAttentionItem } = await import("@/modules/today/core");
+      await insertAttentionItem({
+        type: "do",
+        title: `Knowledge capture failed to enrich: “${(item.title ?? item.input ?? item.url ?? "").slice(0, 80)}”`,
+        body: `${String(e).slice(0, 200)}. Retry it from the Knowledge page.`,
+        source: "knowledge",
+        urgency: 12,
+        href: "/m/knowledge",
+        dedupeKey: "knowledge:failed-enrichment",
+      });
+    } catch {
+      // surfacing is best-effort
+    }
   }
 }
 

@@ -16,13 +16,36 @@ import { modules } from "@/modules/registry";
 import { captureToInbox } from "@/modules/inbox/actions";
 import { createTask } from "@/modules/tasks/actions";
 import { createNote } from "@/modules/notes/actions";
-import { searchModule } from "@/core/search/commandSearch";
+import { searchEverywhere, searchModule } from "@/core/search/commandSearch";
 import type { CommandSearchHit } from "@/core/search/types";
 import { ChatMessages, useChat } from "./chat";
 import { cn } from "./cn";
 
 /** Deterministic fast path: recognized prefixes skip the LLM and hit CRUD
  *  server actions directly — sub-second, zero tokens. */
+/** Which module's icon/accent represents each index kind in the palette. */
+const KIND_MODULE: Record<string, string> = {
+  task: "tasks",
+  note: "notes",
+  idea: "ideas",
+  project: "projects",
+  feature: "projects",
+  file: "projects",
+  person: "people",
+  knowledge: "knowledge",
+  inbox: "inbox",
+  workbench: "workbench",
+  event: "calendar",
+  ask: "ask",
+  report: "agents",
+  telegram: "telegram",
+  mail: "gmail",
+  vault: "vault",
+  notion: "notion",
+  memory: "settings",
+  attention: "today",
+};
+
 function parseFastPath(search: string) {
   const task = search.match(/^(?:task|todo|t):\s*(.+)$/i);
   if (task) return { kind: "task" as const, text: task[1].trim() };
@@ -105,6 +128,9 @@ export function CommandBar() {
   const [mode, setMode] = useState<"commands" | "chat">("commands");
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<CommandSearchHit[]>([]);
+  const [everywhere, setEverywhere] = useState<
+    (CommandSearchHit & { kind: string })[]
+  >([]);
   const router = useRouter();
   const pathname = usePathname();
   const chat = useChat();
@@ -118,17 +144,23 @@ export function CommandBar() {
 
   useEffect(() => {
     const term = search.trim();
-    if (!open || !activeModule || !term) {
+    if (!open || !term) {
       setResults([]);
+      setEverywhere([]);
       return;
     }
-    const id = activeModule.id;
+    const id = activeModule?.id;
     const t = setTimeout(async () => {
-      try {
-        setResults(await searchModule(id, term));
-      } catch {
-        setResults([]);
-      }
+      // Module-scoped hits first (when on a searchable module page), plus the
+      // whole corpus — so ⌘K finds things from the dashboard/Today/settings too.
+      const [mod, all] = await Promise.all([
+        id ? searchModule(id, term).catch(() => []) : Promise.resolve([]),
+        searchEverywhere(term).catch(() => []),
+      ]);
+      setResults(mod);
+      // Don't repeat what the module section already shows.
+      const seen = new Set(mod.map((r) => r.id));
+      setEverywhere(all.filter((r) => !seen.has(r.id)).slice(0, 6));
     }, 180);
     return () => clearTimeout(t);
   }, [open, activeModule, search]);
@@ -321,6 +353,48 @@ export function CommandBar() {
                                   {r.subtitle}
                                 </span>
                               )}
+                            </span>
+                          </Command.Item>
+                        );
+                      })}
+                    </>
+                  )}
+
+                  {/* Same top-level-item rule as the module section above. */}
+                  {everywhere.length > 0 && (
+                    <>
+                      <div className="mt-1 px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.25em] text-ink-faint">
+                        Everywhere
+                      </div>
+                      {everywhere.map((r) => {
+                        const mod = modules.find(
+                          (m) => m.id === KIND_MODULE[r.kind],
+                        );
+                        const Icon = mod?.icon ?? LayoutGrid;
+                        return (
+                          <Command.Item
+                            key={`ev-${r.kind}-${r.id}`}
+                            value={`${search} ${r.title} ${r.kind} ${r.id}`}
+                            forceMount
+                            onSelect={() => go(r.href)}
+                            className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink-dim transition data-[selected=true]:bg-white/6 data-[selected=true]:text-ink"
+                          >
+                            <Icon
+                              className="size-4 shrink-0"
+                              style={mod ? { color: mod.accent } : undefined}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-ink">
+                                {r.title}
+                              </span>
+                              {r.subtitle && (
+                                <span className="block truncate text-xs text-ink-faint">
+                                  {r.subtitle}
+                                </span>
+                              )}
+                            </span>
+                            <span className="ml-auto shrink-0 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+                              {r.kind}
                             </span>
                           </Command.Item>
                         );

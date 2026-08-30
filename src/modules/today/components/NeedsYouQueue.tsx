@@ -1,18 +1,22 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Bell,
   Check,
+  ChevronDown,
   CircleHelp,
   Clock,
   Eye,
+  FolderKanban,
   ShieldCheck,
   Sparkles,
+  User,
   X,
 } from "lucide-react";
+import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { decideApproval } from "@/modules/agents/actions";
 import { doneAttention, dismissAttention, snoozeAttention } from "../actions";
@@ -32,6 +36,7 @@ const TYPE_META: Record<
 
 function Row({ item }: { item: NeedsYouItem }) {
   const [pending, start] = useTransition();
+  const [expanded, setExpanded] = useState(false);
   const meta = TYPE_META[item.type];
   const Icon = meta.icon;
   // Attention items resolve inline (done/snooze/dismiss); approvals resolve
@@ -39,6 +44,9 @@ function Row({ item }: { item: NeedsYouItem }) {
   // Workbench tasks are acted on where they live (linked via href).
   const inline = item.kind === "attention";
   const isApproval = item.kind === "approval";
+  // A long body (the weekly review, a synthesis) expands in place — clamped to
+  // two lines it was permanently unreadable.
+  const expandable = (item.body?.length ?? 0) > 160;
 
   const body = (
     <div className="flex items-start gap-3">
@@ -46,16 +54,55 @@ function Row({ item }: { item: NeedsYouItem }) {
       <div className="min-w-0 flex-1">
         <p className="text-sm leading-snug text-ink">{item.title}</p>
         {item.body && (
-          <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-ink-dim">
+          <p
+            className={cn(
+              "mt-0.5 whitespace-pre-wrap text-xs leading-relaxed text-ink-dim",
+              !expanded && "line-clamp-2",
+            )}
+          >
             {item.body}
           </p>
         )}
-        <div className="mt-1.5 flex items-center gap-2 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
-          <span style={{ color: meta.color }}>{meta.label}</span>
-          <span>·</span>
-          <span>{item.source}</span>
-        </div>
       </div>
+    </div>
+  );
+
+  // Rendered OUTSIDE the card's own link (chips are links themselves).
+  const metaRow = (
+    <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-7 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+      <span style={{ color: meta.color }}>{meta.label}</span>
+      <span>·</span>
+      <span>{item.source}</span>
+      {item.project && (
+        <Link
+          href={`/m/projects/${item.project.id}`}
+          className="inline-flex items-center gap-1 rounded-md border border-white/10 px-1.5 py-0.5 normal-case tracking-normal text-ink-dim transition hover:border-solar/40 hover:text-solar"
+        >
+          <FolderKanban className="size-2.5" />
+          {item.project.name}
+        </Link>
+      )}
+      {item.person && (
+        <Link
+          href={`/m/people/${item.person.id}`}
+          className="inline-flex items-center gap-1 rounded-md border border-white/10 px-1.5 py-0.5 normal-case tracking-normal text-ink-dim transition hover:border-ion/40 hover:text-ion"
+        >
+          <User className="size-2.5" />
+          {item.person.name}
+        </Link>
+      )}
+      {expandable && (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-ink-faint transition hover:text-ink"
+        >
+          <ChevronDown
+            className={cn("size-3 transition-transform", expanded && "rotate-180")}
+          />
+          {expanded ? "less" : "more"}
+        </button>
+      )}
     </div>
   );
 
@@ -142,6 +189,7 @@ function Row({ item }: { item: NeedsYouItem }) {
           </div>
         )}
       </div>
+      {metaRow}
     </motion.div>
   );
 }

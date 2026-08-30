@@ -59,6 +59,13 @@ function CaptureBox() {
         ref={ref}
         rows={1}
         autoFocus
+        onKeyDown={(e) => {
+          // Dump-and-move-on: Enter submits, Shift+Enter makes a newline.
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            e.currentTarget.form?.requestSubmit();
+          }
+        }}
         placeholder="Dump anything — a to-do, an idea, a link, 'call dan tuesday 3pm'… AI files it for you."
         className="min-h-10 flex-1 resize-y bg-transparent text-sm leading-relaxed text-ink outline-none placeholder:text-ink-faint"
         disabled={pending}

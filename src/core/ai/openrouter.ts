@@ -50,23 +50,35 @@ export const openrouterProvider: AIProvider = {
 
   async listModels() {
     try {
-      const key = await apiKey();
+      // OpenRouter's /models is PUBLIC — list the full catalogue even before a
+      // key is set (a key is only needed to RUN a model). Without this, no key
+      // meant falling back to 4 hardcoded ids while the live tier has dozens.
+      const key =
+        (await getSetting("openrouter_api_key").catch(() => null))?.trim() ||
+        process.env.OPENROUTER_API_KEY?.trim();
       const res = await fetch(`${OPENROUTER_BASE}/models`, {
-        headers: { Authorization: `Bearer ${key}` },
-        signal: AbortSignal.timeout(4000),
+        headers: key ? { Authorization: `Bearer ${key}` } : undefined,
+        signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) return FALLBACK_MODELS;
       const data = (await res.json()) as { data?: OpenRouterModel[] };
-      // apOS routes are tool-driven, so only surface models that advertise tool
-      // support — a user picking a non-tool model would just hit a runtime error.
-      const toolCapable = (data.data ?? []).filter((m) =>
-        m.supported_parameters?.includes("tools"),
-      );
-      // Free models first (the cloud-brain audience), then the rest — each sorted.
-      const ids = toolCapable.map((m) => m.id);
-      const free = ids.filter((id) => id.endsWith(":free")).sort();
-      const paid = ids.filter((id) => !id.endsWith(":free")).sort();
-      const ordered = [...free, ...paid];
+      // Present EVERY model — the whole free tier, not just the tool-capable
+      // subset (chat / Ask need no tools). We only ORDER by usefulness: free
+      // before paid, and within each tier tool-capable first (agents need tools,
+      // so the sensible agent picks stay at the top) — then sorted by id.
+      const models = (data.data ?? []).map((m) => ({
+        id: m.id,
+        tools: !!m.supported_parameters?.includes("tools"),
+        free: m.id.endsWith(":free"),
+      }));
+      const tier = (free: boolean) => {
+        const g = models.filter((m) => m.free === free);
+        return [
+          ...g.filter((m) => m.tools).map((m) => m.id).sort(),
+          ...g.filter((m) => !m.tools).map((m) => m.id).sort(),
+        ];
+      };
+      const ordered = [...tier(true), ...tier(false)];
       return ordered.length ? ordered : FALLBACK_MODELS;
     } catch {
       // No key yet or the list call failed — offer the known-good free defaults

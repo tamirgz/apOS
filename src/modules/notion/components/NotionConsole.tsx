@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { ExternalLink, FileText, Plus, Plug, RefreshCw, X } from "lucide-react";
+import { ExternalLink, FileText, Plus, Plug, RefreshCw, Search, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { addNotionWorkspace, removeNotionWorkspace, resyncNotion } from "../actions";
 
@@ -75,6 +75,7 @@ export function NotionConsole({
   pages: PageRow[];
 }) {
   const [pending, start] = useTransition();
+  const [q, setQ] = useState("");
 
   if (workspaces.length === 0) {
     return (
@@ -158,12 +159,44 @@ export function NotionConsole({
         </button>
       </div>
 
+      {pages.length > 8 && (
+        <div className="glass mb-3 flex items-center gap-2 rounded-xl px-3 py-1.5">
+          <Search className="size-3.5 shrink-0 text-ink-faint" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Filter pages…"
+            className="h-6 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
+          />
+          {q && (
+            <button type="button" onClick={() => setQ("")} className="text-ink-faint hover:text-ink">
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
       <p className="mb-3 px-1 font-mono text-[11px] uppercase tracking-widest text-ink-faint">
-        {pages.length} pages indexed · read-only
+        {(() => {
+          const shown = pages.filter((p) =>
+            q.trim()
+              ? `${p.title} ${p.workspace ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())
+              : true,
+          ).length;
+          return q.trim()
+            ? `${shown} of ${pages.length} pages · read-only`
+            : `${pages.length} pages indexed · read-only`;
+        })()}
       </p>
 
       <div className="flex flex-col gap-1.5">
-        {pages.map((p) => (
+        {pages
+          .filter((p) =>
+            q.trim()
+              ? `${p.title} ${p.workspace ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())
+              : true,
+          )
+          .map((p) => (
           <a
             key={p.id}
             href={p.url ?? undefined}

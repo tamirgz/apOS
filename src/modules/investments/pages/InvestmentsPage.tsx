@@ -1,6 +1,7 @@
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import { isentryConfigured } from "../db";
 import { InvestmentsChat } from "../components/InvestmentsChat";
+import { PortfolioOverview } from "../components/PortfolioOverview";
 import { ReportButton } from "../components/ReportButton";
 
 /**
@@ -13,17 +14,19 @@ export async function InvestmentsPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg text-ink">Investments</h1>
         <div className="flex items-center gap-3">
           {connected && <ReportButton />}
           <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-ink-faint">
-            {connected ? "connected to iSentry" : "not connected"}
+            {connected ? "connected to iSentry · read-only" : "not connected"}
           </span>
         </div>
       </div>
 
       {connected ? (
-        <InvestmentsChat />
+        <>
+          <PortfolioOverview />
+          <InvestmentsChat />
+        </>
       ) : (
         <GlassPanel className="px-8 py-16 text-center">
           <p className="font-mono text-[11px] uppercase tracking-[0.35em] text-flare">

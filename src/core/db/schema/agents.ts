@@ -117,5 +117,35 @@ export const agentLedger = pgTable(
   (t) => [uniqueIndex("agent_ledger_unique_item").on(t.agentId, t.itemKey)],
 );
 
+/**
+ * Append-only audit of every agent-related decision, so the system's behavior
+ * is traceable after the fact: gate verdicts (run/skip + why), run lifecycle
+ * with the RESOLVED provider/model (agent_runs never recorded which model a
+ * run actually used), fallback switches, approval decisions, and config
+ * changes (enable/disable/edit/delete). Pruned by the nightly retention job.
+ */
+export const agentAudit = pgTable(
+  "agent_audit",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** Nullable: survives the agent's deletion — the trail outlives the config. */
+    agentId: uuid("agent_id"),
+    agentName: text("agent_name").notNull(),
+    runId: uuid("run_id"),
+    /** e.g. gate.run / gate.skip / run.started / run.fallback / run.finished /
+     *  approval.decided / config.updated / config.deleted */
+    event: text("event").notNull(),
+    detail: jsonb("detail").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("agent_audit_agent_created").on(t.agentId, t.createdAt),
+    index("agent_audit_created").on(t.createdAt),
+  ],
+);
+
 export type Agent = typeof agents.$inferSelect;
 export type AgentRun = typeof agentRuns.$inferSelect;
+export type AgentAuditRow = typeof agentAudit.$inferSelect;

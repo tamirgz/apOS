@@ -3,6 +3,7 @@
 import { Cron } from "croner";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { auditAgent } from "@/core/agent-audit";
 import { db, sql } from "@/core/db/client";
 import { isUniqueViolation } from "@/core/db/errors";
 import {
@@ -62,6 +63,12 @@ export async function createAgent(input: {
       isolated: input.isolated ?? false,
     })
     .returning();
+  await auditAgent({
+    agentId: row.id,
+    agentName: row.name,
+    event: "config.created",
+    detail: { schedule: row.schedule, provider: row.provider, model: row.model },
+  });
   await notifyChanged(row.id);
   return row;
 }
@@ -108,14 +115,30 @@ export async function updateAgent(
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(agents.id, id))
     .returning();
+  if (row) {
+    // The changed VALUES are auditable, not just "something changed" — an
+    // enable/disable or model swap should be reconstructable later.
+    await auditAgent({
+      agentId: id,
+      agentName: row.name,
+      event: "config.updated",
+      detail: { changed: patch as Record<string, unknown> },
+    });
+  }
   await notifyChanged(id);
   return row;
 }
 
 export async function deleteAgent(id: string) {
+  const [row] = await db.select({ name: agents.name }).from(agents).where(eq(agents.id, id));
   await db.delete(agentRuns).where(eq(agentRuns.agentId, id));
   await db.delete(agentLedger).where(eq(agentLedger.agentId, id));
   await db.delete(agents).where(eq(agents.id, id));
+  await auditAgent({
+    agentId: id,
+    agentName: row?.name ?? "(unknown)",
+    event: "config.deleted",
+  });
   await notifyChanged(id);
 }
 
@@ -131,8 +154,21 @@ export async function decideApproval(id: string, approved: boolean) {
       decidedAt: new Date(),
     })
     .where(and(eq(approvals.id, id), eq(approvals.status, "pending")))
-    .returning({ id: approvals.id });
+    .returning({
+      id: approvals.id,
+      agentId: approvals.agentId,
+      agentName: approvals.agentName,
+      toolName: approvals.toolName,
+      runId: approvals.runId,
+    });
   if (rows.length === 0) return;
+  await auditAgent({
+    agentId: rows[0].agentId,
+    agentName: rows[0].agentName,
+    runId: rows[0].runId,
+    event: "approval.decided",
+    detail: { approved, toolName: rows[0].toolName, approvalId: id },
+  });
   await sql.notify("approvals_changed", id);
   if (approved) await sql.notify("approval_decisions", id);
   revalidatePath("/m/agents");
@@ -146,6 +182,14 @@ export async function requestRun(
       .insert(agentRuns)
       .values({ agentId, trigger: "manual", status: "queued" })
       .returning({ id: agentRuns.id });
+    const [a] = await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+    await auditAgent({
+      agentId,
+      agentName: a?.name ?? "(unknown)",
+      runId: row.id,
+      event: "run.requested",
+      detail: { trigger: "manual", note: "bypasses the pre-flight gate" },
+    });
     await sql.notify("run_requests", row.id);
     revalidatePath("/m/agents");
     revalidatePath(`/m/agents/${agentId}`);

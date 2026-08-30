@@ -75,7 +75,7 @@ export async function syncVault(
         body: `The configured vault path does not exist or is not readable:\n${root}`,
         level: "warn",
         source: "vault",
-        href: "/m/settings",
+        href: "/m/settings/connections",
       });
     }
     return null;

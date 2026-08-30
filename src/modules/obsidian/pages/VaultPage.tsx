@@ -28,7 +28,7 @@ export async function VaultPage() {
         </h2>
         <p className="max-w-md text-sm text-ink-dim">
           Set your Obsidian vault folder in{" "}
-          <Link href="/m/settings" className="text-plasma hover:underline">
+          <Link href="/m/settings/connections" className="text-plasma hover:underline">
             Settings → integrations
           </Link>{" "}
           (the folder that contains your .md notes). apOS indexes it read-only

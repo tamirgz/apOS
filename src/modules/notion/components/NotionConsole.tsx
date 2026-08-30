@@ -166,9 +166,9 @@ export function NotionConsole({
         {pages.map((p) => (
           <a
             key={p.id}
-            href={p.url ?? "#"}
-            target="_blank"
-            rel="noopener noreferrer"
+            href={p.url ?? undefined}
+            target={p.url ? "_blank" : undefined}
+            rel={p.url ? "noopener noreferrer" : undefined}
             className="glass group flex items-center gap-3 rounded-xl p-3 transition hover:bg-white/4"
           >
             <FileText className="size-4 shrink-0 text-ink-faint" />

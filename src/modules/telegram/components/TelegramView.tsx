@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Send, Plus, RefreshCw, Trash2, Check, X, SlidersHorizontal, Search } from "lucide-react";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
@@ -125,7 +126,13 @@ export function TelegramView({
                     title={on ? "enabled" : "paused"}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-ink">@{c.username}</p>
+                    <Link
+                      href={`/m/telegram/${encodeURIComponent(c.username)}`}
+                      className={`text-sm transition hover:text-ion ${c.username === activeUsername ? "text-ion" : "text-ink"}`}
+                      title="Show this channel's feed"
+                    >
+                      @{c.username}
+                    </Link>
                     <p className="truncate font-mono text-[9px] uppercase tracking-widest text-ink-faint">
                       cursor {c.lastSeenId ?? "—"} · {c.lastRunAt ? new Date(c.lastRunAt).toLocaleString() : "never run"}
                     </p>

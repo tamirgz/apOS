@@ -24,6 +24,9 @@ export interface NeedsYouItem {
   /** Only for kind === "attention" — enables done/dismiss/snooze inline. */
   attentionType?: AttentionType;
   payload?: Record<string, unknown>;
+  /** One-click traversal: the card's grounded anchors, resolved to names. */
+  project?: { id: string; name: string } | null;
+  person?: { id: string; name: string } | null;
 }
 
 /** Higher first, then newest. Approvals and needs_input outrank FYIs. */
@@ -67,21 +70,46 @@ export async function listNeedsYou(): Promise<NeedsYouItem[]> {
     })(),
   ]);
 
+  // Resolve the cards' project/person anchors to names, so each card renders
+  // clickable chips (insertAttentionItem grounds these refs; they were being
+  // dropped on the floor here).
+  const refId = (ref: string | null) => ref?.split(":")[1] ?? null;
+  const projectIds = [...new Set(items.map((a) => refId(a.projectRef)).filter((x): x is string => !!x))];
+  const personIds = [...new Set(items.map((a) => refId(a.personRef)).filter((x): x is string => !!x))];
+  const [projectRows, personRows] = await Promise.all([
+    projectIds.length
+      ? db.select({ id: projects.id, name: projects.name }).from(projects).where(inArray(projects.id, projectIds))
+      : Promise.resolve([]),
+    (async () => {
+      if (!personIds.length) return [];
+      const { people } = await import("@/modules/people/schema");
+      return db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, personIds));
+    })(),
+  ]);
+  const projectName = new Map(projectRows.map((p) => [p.id, p.name]));
+  const personName = new Map(personRows.map((p) => [p.id, p.name]));
+
   const rows: NeedsYouItem[] = [
-    ...items.map((a) => ({
-      id: a.id,
-      kind: "attention" as const,
-      type: a.type,
-      title: a.title,
-      body: a.body,
-      source: a.source,
-      // FYIs sit below anything actionable unless explicitly urgent.
-      urgency: a.urgency + (a.type === "notify" ? 0 : 10),
-      href: a.href,
-      createdAt: a.createdAt,
-      attentionType: a.type,
-      payload: (a.payload ?? {}) as Record<string, unknown>,
-    })),
+    ...items.map((a) => {
+      const pid = refId(a.projectRef);
+      const hid = refId(a.personRef);
+      return {
+        id: a.id,
+        kind: "attention" as const,
+        type: a.type,
+        title: a.title,
+        body: a.body,
+        source: a.source,
+        // FYIs sit below anything actionable unless explicitly urgent.
+        urgency: a.urgency + (a.type === "notify" ? 0 : 10),
+        href: a.href,
+        createdAt: a.createdAt,
+        attentionType: a.type,
+        payload: (a.payload ?? {}) as Record<string, unknown>,
+        project: pid && projectName.has(pid) ? { id: pid, name: projectName.get(pid)! } : null,
+        person: hid && personName.has(hid) ? { id: hid, name: personName.get(hid)! } : null,
+      };
+    }),
     ...pendingApprovals.map((p) => ({
       id: p.id,
       kind: "approval" as const,

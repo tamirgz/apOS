@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+/* eslint-disable react-hooks/set-state-in-effect -- the group-open sync and
+   badge load are deliberate post-render effects keyed on route/SSE changes. */
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
 import { ArrowUpRight, ChevronRight, LayoutGrid } from "lucide-react";
 import { navModules } from "@/modules/registry";
 import type { ModuleManifest } from "@/core/modules/types";
+import { getSidebarBadges } from "./sidebar-badges";
+import { useLiveEvents } from "./useLiveEvents";
 import { cn } from "./cn";
 
 function NavItem({
@@ -16,6 +20,7 @@ function NavItem({
   icon: Icon,
   active,
   external = false,
+  badge = 0,
 }: {
   href: string;
   title: string;
@@ -24,6 +29,8 @@ function NavItem({
   active: boolean;
   /** A pointer-out (opens the real app) — shows an ↗ cue. */
   external?: boolean;
+  /** Items waiting inside — rendered as a small count on the right. */
+  badge?: number;
 }) {
   return (
     <Link href={href} className="group relative block">
@@ -45,7 +52,11 @@ function NavItem({
           style={active ? { color: accent, filter: `drop-shadow(0 0 6px ${accent})` } : undefined}
         />
         <span className="font-display tracking-wide">{title}</span>
-        {external ? (
+        {badge > 0 ? (
+          <span className="ml-auto rounded-md bg-solar/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums leading-none text-solar">
+            {badge > 99 ? "99+" : badge}
+          </span>
+        ) : external ? (
           <ArrowUpRight className="ml-auto size-3.5 shrink-0 text-ink-faint transition group-hover:text-ink-dim" />
         ) : active ? (
           <span className="dot ml-auto animate-pulse-soft" style={{ color: accent }} />
@@ -77,7 +88,16 @@ function NavGroup({
   pathname: string;
 }) {
   const activeInside = items.some((m) => isActiveModule(pathname, m.id));
-  const [open, setOpen] = useState(false); // collapsed by default, every load
+  // Collapsed by default — but when the current route already lives inside the
+  // group, start open so the sidebar shows where you are. The header toggle
+  // still rules after that.
+  const [open, setOpen] = useState(activeInside);
+  // Navigating INTO the group (sidebar persists across routes) opens it once;
+  // collapsing it again while inside is respected — this only fires on the
+  // outside→inside transition.
+  useEffect(() => {
+    if (activeInside) setOpen(true);
+  }, [activeInside]);
 
   return (
     <div className="mt-2">
@@ -118,6 +138,22 @@ function NavGroup({
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [badges, setBadges] = useState<{ needsYou: number; inbox: number }>({
+    needsYou: 0,
+    inbox: 0,
+  });
+  const loadBadges = useCallback(() => {
+    getSidebarBadges()
+      .then(setBadges)
+      .catch(() => {});
+  }, []);
+  useEffect(loadBadges, [loadBadges]);
+  useLiveEvents(
+    ["attention_changed", "approvals_changed", "workbench_changed", "inbox_changed"],
+    loadBadges,
+  );
+  const badgeFor = (id: string) =>
+    id === "today" ? badges.needsYou : id === "inbox" ? badges.inbox : 0;
 
   // Core = the always-visible flat list; grouped items go under section labels.
   // Settings is pinned LAST (below the group sections), as convention expects.
@@ -164,6 +200,7 @@ export function Sidebar() {
             accent={m.accent}
             icon={m.icon}
             active={isActiveModule(pathname, m.id)}
+            badge={badgeFor(m.id)}
           />
         ))}
         {[...groups.entries()].map(([label, items]) => (

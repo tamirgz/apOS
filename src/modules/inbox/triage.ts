@@ -143,9 +143,30 @@ export async function triageInboxItem(itemId: string): Promise<void> {
       status: verified.ok ? "completed" : "failed",
       triage: { ...triageData, verified },
     });
+    if (!verified.ok) await raiseFailedCaptureCard(item.input);
   } catch (e) {
     // A triage crash is itself a handling failure.
     await set({ status: "failed", error: String(e).slice(0, 400) });
+    await raiseFailedCaptureCard(item.input);
+  }
+}
+
+/** A capture that failed to file must not sit silent until the user happens to
+ *  open Inbox — raise ONE self-deduping "Needs you" card pointing there. */
+async function raiseFailedCaptureCard(input: string): Promise<void> {
+  try {
+    const { insertAttentionItem } = await import("@/modules/today/core");
+    await insertAttentionItem({
+      type: "do",
+      title: `Capture didn't file: “${input.slice(0, 80)}${input.length > 80 ? "…" : ""}”`,
+      body: "The AI triage couldn't route this capture. Retry it (or file it by hand) in the Inbox.",
+      source: "inbox",
+      urgency: 12,
+      href: "/m/inbox",
+      dedupeKey: "inbox:failed-captures",
+    });
+  } catch {
+    // surfacing is best-effort — the item itself is already marked failed
   }
 }
 

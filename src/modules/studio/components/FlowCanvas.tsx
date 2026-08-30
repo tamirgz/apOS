@@ -581,7 +581,9 @@ export function FlowCanvas({
                 onChange={(e) => pickRun(e.target.value)}
               >
                 {recentRuns.map((r, i) => (
-                  <option key={r.id} value={r.id}>
+                  // relTime ("56s ago") ticks between SSR and hydration — the
+                  // text legitimately differs, so suppress the mismatch warning.
+                  <option key={r.id} value={r.id} suppressHydrationWarning>
                     {i === 0 ? "latest · " : ""}
                     {relTime(r.createdAt)} · {r.status}
                     {r.trigger !== "manual" ? ` · ${r.trigger}` : ""}
@@ -622,7 +624,7 @@ export function FlowCanvas({
                         className="h-2 w-2 shrink-0 rounded-full"
                         style={{ background: STATUS_RING[r.status] ?? "var(--color-ink-faint)" }}
                       />
-                      <span className="flex-1 truncate text-xs text-ink-dim">{relTime(r.createdAt)}</span>
+                      <span suppressHydrationWarning className="flex-1 truncate text-xs text-ink-dim">{relTime(r.createdAt)}</span>
                       <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
                         {fmtDur(r.startedAt, r.finishedAt) || r.status}
                       </span>

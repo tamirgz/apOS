@@ -144,19 +144,21 @@ export async function distillMemory(): Promise<{ policies: number; facts: number
     }
   }
   // Surface each genuinely-new rule so a learned policy is never injected into
-  // every agent silently — you see what the system decided to believe. (The
-  // rule still takes effect now; this is visibility, not a gate — for now.)
+  // every agent silently — you see what the system decided to believe. This is
+  // a system-wide FYI (nothing to do or approve), so it belongs in the bell
+  // feed, NOT "Needs You" — that queue is for what actually needs the user, and
+  // an attention card would also get mis-grounded to a random project by title.
   if (newRules.length) {
     try {
-      const { insertAttentionItem } = await import("@/modules/today/core");
-      await insertAttentionItem({
-        type: "notify",
+      const { notify } = await import("@/core/notify");
+      await notify({
         title: `Memory learned ${newRules.length} new operating rule${newRules.length > 1 ? "s" : ""}`,
         body:
           newRules.map((r) => `• ${r}`).join("\n") +
           "\n\nThese now guide every agent run. Review or edit them in Settings → Memory.",
-        source: "system",
-        urgency: 5,
+        level: "info",
+        source: "memory",
+        href: "/m/settings/memory",
       });
     } catch {
       // surfacing is best-effort

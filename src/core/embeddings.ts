@@ -67,6 +67,14 @@ const toVec = (e: number[]) => `[${e.join(",")}]`;
  * embedding yet. Idempotent by construction — only touches NULL embeddings.
  * Local model via Ollama: free, offline, no tokens.
  */
+// Per-row failure backoff: a single row whose text makes the embedding model
+// choke must not stall the whole corpus (the old loop aborted on the first
+// throw and retried the same unordered batch forever). Rows back off
+// exponentially (10 min → 24 h) and everything else keeps embedding.
+const embedFailures = new Map<string, { fails: number; until: number }>();
+const BACKOFF_BASE_MS = 10 * 60 * 1000;
+const BACKOFF_MAX_MS = 24 * 60 * 60 * 1000;
+
 export async function sweepEmbeddings(
   log: (m: string) => void = () => {},
 ): Promise<number> {
@@ -78,6 +86,7 @@ export async function sweepEmbeddings(
   // corpus to embed, and each row is a single local Ollama call — free, offline.
   // Embed the RICH `embed_text` (full body/excerpt/linked-work) when present,
   // else the short title+snippet (external sources that never set embed_text).
+  // Freshest content first — updated_at only moves on real content changes.
   const idxRows = await db
     .select({
       id: searchIndex.id,
@@ -87,14 +96,33 @@ export async function sweepEmbeddings(
     })
     .from(searchIndex)
     .where(isNull(searchIndex.embedding))
+    .orderBy(dsql`${searchIndex.updatedAt} desc`)
     .limit(80);
+  const now = Date.now();
+  let consecutiveFails = 0;
   for (const r of idxRows) {
-    const e = await embedText(r.embedText ?? `${r.title}\n${r.snippet ?? ""}`);
-    await db
-      .update(searchIndex)
-      .set({ embedding: dsql`${toVec(e)}::vector` })
-      .where(dsql`${searchIndex.id} = ${r.id}`);
-    done++;
+    const backoff = embedFailures.get(r.id);
+    if (backoff && backoff.until > now) continue;
+    try {
+      const e = await embedText(r.embedText ?? `${r.title}\n${r.snippet ?? ""}`);
+      await db
+        .update(searchIndex)
+        .set({ embedding: dsql`${toVec(e)}::vector` })
+        .where(dsql`${searchIndex.id} = ${r.id}`);
+      embedFailures.delete(r.id);
+      done++;
+      consecutiveFails = 0;
+    } catch (e) {
+      const fails = (backoff?.fails ?? 0) + 1;
+      embedFailures.set(r.id, {
+        fails,
+        until: now + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS),
+      });
+      log(`embed failed (attempt ${fails}) for row ${r.id}: ${String(e).slice(0, 120)}`);
+      // 3 failures in a row = the model server itself is down, not a bad row —
+      // stop hammering it and let the next tick retry.
+      if (++consecutiveFails >= 3) throw e;
+    }
   }
 
   // Tell open pages that search/connections just got fresher data, so a note
@@ -152,8 +180,12 @@ function hitHref(kind: string, id: string): string {
       return `/api/projects/files/${id}`;
     case "memory":
       return "/m/settings/memory";
-    default:
+    case "task":
       return "/m/tasks";
+    default:
+      // External kinds (mail/event/telegram/…) always carry an explicit href in
+      // the index; an unknown new kind lands on the dashboard, not on Tasks.
+      return "/";
   }
 }
 

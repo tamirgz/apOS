@@ -9,22 +9,88 @@ const url =
  * SSE stream of Postgres NOTIFY events (agent_runs, agents_changed,
  * knowledge_changed). The worker NOTIFYs on every status transition; the UI
  * invalidates queries on message.
+ *
+ * ONE shared LISTEN connection serves every open tab — the old
+ * connection-per-request design meant a handful of tabs (plus dev HMR reloads)
+ * could exhaust the Postgres connection budget. Subscribers fan out in-process;
+ * postgres.js re-subscribes the shared connection on reconnect.
  */
+const CHANNELS = [
+  "agent_runs",
+  "agents_changed",
+  "knowledge_changed",
+  "notifications",
+  "calendar_changed",
+  "inbox_changed",
+  "approvals_changed",
+  "obsidian_changed",
+  "external_reports",
+  "ideas_changed",
+  "embeddings_updated",
+  "attention_changed",
+  "project_files_changed",
+  "projects_changed",
+  "workbench_changed",
+  "routines_changed",
+  "telegram_changed",
+  "flow_runs",
+  "flows_changed",
+] as const;
+
+type Subscriber = (channel: string, payload: string) => void;
+
+interface SseHub {
+  subscribers: Set<Subscriber>;
+  ready: Promise<void> | null;
+}
+
+// globalThis-cached so dev HMR reuses the connection instead of leaking one
+// per reload (same pattern as the db client).
+const g = globalThis as unknown as { __aiosSseHub?: SseHub };
+const hub: SseHub = (g.__aiosSseHub ??= { subscribers: new Set(), ready: null });
+
+function ensureListener(): Promise<void> {
+  if (hub.ready) return hub.ready;
+  hub.ready = (async () => {
+    const listener = postgres(url, {
+      max: 1,
+      connection: { application_name: "aios-web-sse" },
+    });
+    for (const channel of CHANNELS) {
+      await listener.listen(channel, (payload) => {
+        for (const s of hub.subscribers) s(channel, payload ?? "");
+      });
+    }
+  })().catch((e) => {
+    hub.ready = null; // let the next request retry the connection
+    throw e;
+  });
+  return hub.ready;
+}
+
 export async function GET(req: Request) {
-  const listener = postgres(url, { max: 1 });
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
-      // Register cleanup BEFORE any await: AbortSignal fires "abort" only
-      // once, and a client that disconnects during LISTEN setup would
-      // otherwise leak this dedicated Postgres connection forever.
+      // Register cleanup BEFORE any await: AbortSignal fires "abort" only once,
+      // and a client that disconnects during setup would otherwise leak its
+      // subscriber + keepalive forever.
       let closed = false;
+      const send: Subscriber = (channel, payload) => {
+        try {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ channel, payload })}\n\n`),
+          );
+        } catch {
+          cleanup(); // stream already closed
+        }
+      };
       const cleanup = () => {
         if (closed) return;
         closed = true;
         clearInterval(keepalive);
-        listener.end({ timeout: 1 }).catch(() => {});
+        hub.subscribers.delete(send);
         try {
           controller.close();
         } catch {
@@ -44,44 +110,14 @@ export async function GET(req: Request) {
         return;
       }
 
-      const send = (channel: string, payload: string) => {
-        try {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ channel, payload })}\n\n`,
-            ),
-          );
-        } catch {
-          // stream already closed
-        }
-      };
-
-      for (const channel of [
-        "agent_runs",
-        "agents_changed",
-        "knowledge_changed",
-        "notifications",
-        "calendar_changed",
-        "inbox_changed",
-        "approvals_changed",
-        "obsidian_changed",
-        "external_reports",
-        "ideas_changed",
-        "embeddings_updated",
-        "attention_changed",
-        "project_files_changed",
-        "projects_changed",
-        "workbench_changed",
-        "routines_changed",
-        "telegram_changed",
-        "flow_runs",
-        "flows_changed",
-      ]) {
-        if (closed) return;
-        await listener.listen(channel, (payload) =>
-          send(channel, payload ?? ""),
-        );
+      try {
+        await ensureListener();
+      } catch {
+        cleanup();
+        return;
       }
+      if (closed) return;
+      hub.subscribers.add(send);
       send("hello", "connected");
     },
   });

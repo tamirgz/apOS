@@ -16,6 +16,7 @@
  */
 import { eq } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
+import { isUniqueViolation } from "@/core/db/errors";
 import { agentRuns } from "@/core/db/schema/agents";
 import { executeRun } from "@/worker/executor";
 import {
@@ -440,10 +441,29 @@ async function runAgentNode(
   const agentId = node.config?.agentId as string | undefined;
   if (!agentId)
     throw new Error("agent node has no agentId (pick an agent in the inspector)");
-  const [ar] = await db
-    .insert(agentRuns)
-    .values({ agentId, trigger: "flow", status: "queued", flowNodeRunId: nodeRunId })
-    .returning();
+  // The partial unique index allows ONE live run per agent — an agent that is
+  // also on a cron (or in a concurrently-running flow) makes this insert
+  // conflict. Instead of failing the whole flow, wait for the live run to
+  // clear (bounded), then claim the slot.
+  const AGENT_BUSY_WAIT_MS = 3 * 60 * 1000;
+  const started = Date.now();
+  let ar: typeof agentRuns.$inferSelect | undefined;
+  for (;;) {
+    try {
+      [ar] = await db
+        .insert(agentRuns)
+        .values({ agentId, trigger: "flow", status: "queued", flowNodeRunId: nodeRunId })
+        .returning();
+      break;
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e;
+      if (Date.now() - started > AGENT_BUSY_WAIT_MS)
+        throw new Error(
+          `agent "${node.name ?? agentId}" already has a live run (cron overlap?) and it didn't finish within ${AGENT_BUSY_WAIT_MS / 60000} min`,
+        );
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
+  }
   await db.update(flowNodeRuns).set({ agentRunId: ar.id }).where(eq(flowNodeRuns.id, nodeRunId));
   // Per-node model override: this flow can run the agent on a different model
   // than the agent's own default (Flow A → big model, Flow B → fast local).
@@ -451,6 +471,8 @@ async function runAgentNode(
   const model = (node.config?.model as string | undefined) || null;
   await executeRun(ar.id, provider || model ? { provider: provider as never, model } : undefined);
   const [finished] = await db.select().from(agentRuns).where(eq(agentRuns.id, ar.id));
+  if (!finished)
+    throw new Error(`agent "${node.name ?? agentId}" run ${ar.id} vanished mid-flow`);
   if (finished.status !== "succeeded")
     throw new Error(`agent "${node.name ?? agentId}" ${finished.status}: ${finished.error ?? ""}`);
   const [nr] = await db.select().from(flowNodeRuns).where(eq(flowNodeRuns.id, nodeRunId));

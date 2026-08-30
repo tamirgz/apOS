@@ -11,6 +11,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  // A non-uuid segment would otherwise become a Postgres cast error → 500.
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("not found", { status: 404 });
   const [row] = await db
     .select()
     .from(askHistory)

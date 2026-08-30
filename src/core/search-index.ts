@@ -26,14 +26,16 @@ const UPSERTS = [
     select 'mail', id,
            coalesce(nullif(subject,''),'(no subject)'),
            left(coalesce(from_name, from_email, '') || ' — ' || coalesce(snippet,''), 500),
-           '/m/mail',
+           '/m/gmail',
            md5(coalesce(subject,'') || '|' || coalesce(snippet,''))
       from gmail_messages
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-      updated_at=now()`,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
   // Calendar events — title + when/where + notes.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
@@ -41,13 +43,15 @@ const UPSERTS = [
            coalesce(nullif(title,''),'(untitled event)'),
            left(to_char(start_at,'YYYY-MM-DD HH24:MI') || '  ' || coalesce(location,'') || '  ' || coalesce(notes,''), 500),
            '/m/calendar',
-           md5(coalesce(title,'') || '|' || coalesce(notes,'') || '|' || coalesce(start_at::text,''))
+           md5(coalesce(title,'') || '|' || coalesce(notes,'') || '|' || coalesce(start_at::text,'') || '|' || coalesce(location,''))
       from calendar_events
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-      updated_at=now()`,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
   // Telegram posts — channel + text (+ any linked article text). For a foreign
   // post we embed its English gloss (text_en) so an English semantic query finds
   // it; the displayed snippet keeps the original text.
@@ -65,7 +69,9 @@ const UPSERTS = [
       title=excluded.title, snippet=excluded.snippet, embed_text=excluded.embed_text, href=excluded.href,
       content_hash=excluded.content_hash,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-      updated_at=now()`,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
   // External reports (Slack-ingested etc.).
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
@@ -79,7 +85,9 @@ const UPSERTS = [
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-      updated_at=now()`,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
   // People — name + role/notes + meeting count.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
@@ -87,13 +95,15 @@ const UPSERTS = [
            coalesce(nullif(name,''), email, '(person)'),
            left(coalesce(last_event_title,'') || '  ' || coalesce(notes,'') || '  (' || coalesce(meeting_count::text,'0') || ' meetings)', 400),
            '/m/people',
-           md5(coalesce(name,'') || '|' || coalesce(notes,'') || '|' || coalesce(last_event_title,''))
+           md5(coalesce(name,'') || '|' || coalesce(notes,'') || '|' || coalesce(last_event_title,'') || '|' || coalesce(meeting_count::text,'0'))
       from people
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-      updated_at=now()`,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
   // Inbox captures.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
@@ -107,7 +117,9 @@ const UPSERTS = [
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-      updated_at=now()`,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
   // Workbench results — the finished analysis IS knowledge worth finding later.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash, project_refs)
@@ -115,7 +127,7 @@ const UPSERTS = [
            coalesce(nullif(t.title,''),'(task)'),
            left(coalesce(a.result, t.summary, t.prompt), 1000),
            '/m/workbench/' || t.id::text,
-           md5(coalesce(a.result, t.summary, t.prompt, '')),
+           md5(coalesce(t.title,'') || '|' || coalesce(a.result, t.summary, t.prompt, '') || '|' || coalesce(t.project_refs::text,'[]')),
            t.project_refs
       from workbench_tasks t
       left join lateral (
@@ -128,7 +140,9 @@ const UPSERTS = [
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash, project_refs=excluded.project_refs,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-      updated_at=now()`,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
   // Project features — user-authored specs, already tied to their project.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash, project_refs)
@@ -136,14 +150,16 @@ const UPSERTS = [
            coalesce(nullif(name,''),'(feature)'),
            left(coalesce(description,''), 500),
            '/m/projects/' || project_id::text,
-           md5(coalesce(name,'') || '|' || coalesce(description,'')),
+           md5(coalesce(name,'') || '|' || coalesce(description,'') || '|' || project_id::text),
            jsonb_build_array('projects:' || project_id::text)
       from features
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash, project_refs=excluded.project_refs,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-      updated_at=now()`,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
   // Ask answers.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash, project_refs)
@@ -151,14 +167,16 @@ const UPSERTS = [
            coalesce(nullif(title,''), left(query, 80)),
            left(coalesce(answer,''), 1000),
            '/m/ask',
-           md5(coalesce(answer,'')),
+           md5(coalesce(title,'') || '|' || coalesce(answer,'') || '|' || coalesce(project_refs::text,'[]')),
            project_refs
       from ask_history
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash, project_refs=excluded.project_refs,
       embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-      updated_at=now()`,
+      updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`,
 ] as const;
 
 // ── Internal sources (Phase 2) ───────────────────────────────────────────────
@@ -179,7 +197,9 @@ const ON_CONFLICT = dsql.raw(`on conflict (kind, source_id) do update set
     title=excluded.title, snippet=excluded.snippet, embed_text=excluded.embed_text,
     href=excluded.href, content_hash=excluded.content_hash, project_refs=excluded.project_refs,
     embedding = case when search_index.content_hash <> excluded.content_hash then null else search_index.embedding end,
-    updated_at=now()`);
+    updated_at=now()
+    where search_index.content_hash is distinct from excluded.content_hash
+       or search_index.href is distinct from excluded.href`);
 
 /** A single project_ref text column → the jsonb array the index expects. */
 const REFS = (col: string) =>
@@ -248,7 +268,7 @@ const INTERNAL_SOURCES: InternalSource[] = [
                (select string_agg(v, ' ') from jsonb_array_elements_text(insight->'keyIdeas') v),
                (select string_agg(v, ' ') from jsonb_array_elements_text(insight->'tags') v)),
              '/m/knowledge/' || id::text,
-             md5(coalesce(title,'') || '|' || coalesce(note,'') || '|' || coalesce(insight->>'summary','')),
+             md5(coalesce(title,'') || '|' || coalesce(note,'') || '|' || coalesce(insight::text,'')),
              '[]'::jsonb
         from knowledge_items where status = 'ready' ${scope}
       ${ON_CONFLICT}`,

@@ -24,12 +24,23 @@ export async function processProjectFile(fileId: string): Promise<void> {
     .where(eq(projectFiles.id, fileId));
   if (!row || row.status !== "processing") return;
 
-  const result = await extractText(row.filename, row.mimeType, row.content);
-  await setStatus(fileId, {
-    status: result.status,
-    statusDetail: result.detail ?? null,
-    extractedText: result.text,
-  });
+  try {
+    const result = await extractText(row.filename, row.mimeType, row.content);
+    await setStatus(fileId, {
+      status: result.status,
+      statusDetail: result.detail ?? null,
+      extractedText: result.text,
+    });
+  } catch (e) {
+    // A parser throw (corrupt PDF etc.) must land in 'error', not stay in
+    // 'processing' — the reconcile job would otherwise re-queue the same
+    // poison file every 10 minutes forever (knowledge pipeline parity).
+    await setStatus(fileId, {
+      status: "error",
+      statusDetail: String(e).slice(0, 300),
+      extractedText: null,
+    });
+  }
 }
 
 export const projectFilesJobs: ModuleJob[] = [

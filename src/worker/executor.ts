@@ -1,6 +1,7 @@
-import { and, eq, sql as dsql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, sql } from "@/core/db/client";
+import { isUniqueViolation } from "@/core/db/errors";
 import {
   agentLedger,
   agentRuns,
@@ -74,15 +75,52 @@ async function patchRun(runId: string, patch: Record<string, unknown>) {
   await sql.notify("agent_runs", runId);
 }
 
-async function appendEvent(runId: string, event: AIEvent) {
-  await db
-    .update(agentRuns)
-    .set({
-      transcript: dsql`${agentRuns.transcript} || ${JSON.stringify([event])}::jsonb`,
-      heartbeatAt: new Date(),
-    })
-    .where(eq(agentRuns.id, runId));
-  await sql.notify("agent_runs", runId);
+const TRANSCRIPT_FLUSH_MS = 1500;
+
+/**
+ * Buffered transcript writer. The OpenAI-compatible providers yield one
+ * CUMULATIVE "text"/"reasoning" snapshot per streaming delta, so appending each
+ * event rewrote an ever-growing jsonb array once per token — O(tokens²) bytes
+ * written — and fired a NOTIFY per token at every open SSE client. Instead:
+ * consecutive same-type streaming snapshots collapse into one event (which is
+ * also what the transcript UI should show), and the transcript is flushed at
+ * most every TRANSCRIPT_FLUSH_MS — immediately for discrete events (tool
+ * calls/results, errors, done).
+ */
+class TranscriptWriter {
+  private events: AIEvent[] = [];
+  private lastFlush = 0;
+  private dirty = false;
+  constructor(private runId: string) {}
+
+  async push(event: AIEvent) {
+    const last = this.events[this.events.length - 1];
+    const streaming = event.type === "text" || event.type === "reasoning";
+    if (streaming && last?.type === event.type) {
+      this.events[this.events.length - 1] = event;
+    } else {
+      this.events.push(event);
+    }
+    this.dirty = true;
+    if (!streaming || Date.now() - this.lastFlush >= TRANSCRIPT_FLUSH_MS) {
+      await this.flush();
+    }
+  }
+
+  async flush() {
+    if (!this.dirty) return;
+    this.dirty = false;
+    this.lastFlush = Date.now();
+    try {
+      await db
+        .update(agentRuns)
+        .set({ transcript: this.events, heartbeatAt: new Date() })
+        .where(eq(agentRuns.id, this.runId));
+      await sql.notify("agent_runs", this.runId);
+    } catch {
+      this.dirty = true; // retry on the next push/flush
+    }
+  }
 }
 
 /** Insert a queued run; returns null if one is already live (unique index). */
@@ -97,8 +135,9 @@ export async function enqueueRun(
       .returning({ id: agentRuns.id });
     await sql.notify("agent_runs", row.id);
     return row.id;
-  } catch {
-    return null; // live run exists — skip (croner overrun / double click)
+  } catch (e) {
+    if (isUniqueViolation(e)) return null; // live run exists — skip (croner overrun / double click)
+    throw e; // anything else (connection blip etc.) must surface, not silently drop the run
   }
 }
 
@@ -138,6 +177,7 @@ export async function executeRun(
     return;
   }
 
+  const transcript = new TranscriptWriter(runId);
   try {
     const routed = await routeFor(agent);
     // A node's override wins over the agent's own route, when provided.
@@ -291,7 +331,7 @@ export async function executeRun(
           maxTurns: agent.turnBudget ?? undefined,
           signal: controller.signal,
         })) {
-          await appendEvent(runId, event);
+          await transcript.push(event);
           if (event.type === "done") finalText = event.text;
           if (event.type === "error") errored = event.message;
           if (
@@ -310,6 +350,7 @@ export async function executeRun(
       } finally {
         clearTimeout(timeout);
         clearInterval(heartbeat);
+        await transcript.flush();
       }
       return { finalText, tokensIn, tokensOut, errored, okTools, aborted: controller.signal.aborted };
     };
@@ -325,9 +366,9 @@ export async function executeRun(
       (provider.id === "nvidia" || provider.id === "mlx") &&
       agent.fallbackModel
     ) {
-      await appendEvent(runId, {
-        type: "text",
-        text: `⚠︎ Cloud model "${model}" failed (${res.errored.slice(0, 120)}). Falling back to local ollama/${agent.fallbackModel}.`,
+      await transcript.push({
+        type: "error",
+        message: `⚠︎ Cloud model "${model}" failed (${res.errored.slice(0, 120)}). Falling back to local ollama/${agent.fallbackModel}.`,
       });
       const fb = await attempt(providers.ollama, agent.fallbackModel);
       res = {

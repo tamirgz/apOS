@@ -153,6 +153,8 @@ export async function scanSlackReports(
     .filter(Boolean);
 
   let fresh = 0;
+  let failedChannels = 0;
+  let lastError: unknown = null;
   for (const channel of channels) {
     try {
       // Resolve a display name once per channel (best-effort).
@@ -232,8 +234,16 @@ export async function scanSlackReports(
       const newest = messages.at(-1)?.ts;
       if (newest) await setSetting(cursorKey, newest);
     } catch (e) {
+      failedChannels++;
+      lastError = e;
       log(`slack intake ${channel} failed: ${String(e).slice(0, 160)}`);
     }
+  }
+
+  // Every configured channel failing = the token/Slack is broken, not one flaky
+  // channel — surface it through runJob's alerting instead of staying "healthy".
+  if (channels.length > 0 && failedChannels === channels.length) {
+    throw new Error(`all ${channels.length} slack intake channel(s) failed: ${String(lastError).slice(0, 200)}`);
   }
 
   if (fresh > 0) {

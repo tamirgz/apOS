@@ -50,11 +50,23 @@ function analyzeRequest(msg: string): {
 }
 
 export async function POST(req: Request) {
-  const { messages, route: routeKey } = (await req.json()) as {
-    messages: ChatMessage[];
-    route?: string;
-  };
-  if (!messages?.length) {
+  let body: { messages?: ChatMessage[]; route?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return Response.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+  const { messages, route: routeKey } = body;
+  if (
+    !Array.isArray(messages) ||
+    !messages.length ||
+    !messages.every(
+      (m) =>
+        m &&
+        (m.role === "user" || m.role === "assistant") &&
+        typeof m.content === "string",
+    )
+  ) {
     return Response.json({ error: "messages required" }, { status: 400 });
   }
 
@@ -196,7 +208,9 @@ export async function POST(req: Request) {
       };
 
       try {
-        let { calls, text, err } = await runOnce(strategyDirective);
+        const first = await runOnce(strategyDirective);
+        const err = first.err;
+        let { calls, text } = first;
 
         if (verify && !err) {
           // 1) The analysis must be scoped to the strategy — force byStrategy.

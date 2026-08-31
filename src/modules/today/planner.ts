@@ -99,29 +99,11 @@ export async function planDay(): Promise<{ raised: number; closed: number }> {
     });
   }
 
-  // 4) Email needing attention (the third leg of ONE-STOP §2.3's "one brief"):
-  // unread messages Google marked IMPORTANT or STARRED that have sat for over
-  // a day. One rollup card — never per-mail spam. The count is in the title,
-  // so when it changes the reconcile pass swaps the card; at zero it closes.
-  try {
-    const mailRows = await db.execute<{ n: number }>(dsql`
-      select count(*)::int as n from gmail_messages
-       where unread and received_at < now() - interval '1 day'
-         and labels && array['IMPORTANT','STARRED']`);
-    const n = Number([...mailRows][0]?.n ?? 0);
-    if (n > 0) {
-      desired.push({
-        type: "do",
-        title: `${n} important email${n === 1 ? "" : "s"} waiting`,
-        body: "Unread and marked important/starred for more than a day.",
-        urgency: 40,
-        href: "/m/gmail",
-        source: SOURCE,
-      });
-    }
-  } catch {
-    // gmail table empty/not synced — the planner never fails on mail
-  }
+  // NOTE: no email-rollup card. A "N important emails waiting" card was dropped
+  // — it counted Gmail's ALGORITHMIC "important" label (mostly noise, not mail
+  // actually awaiting the user) and, carrying no project, got mis-grounded onto
+  // a random project by insertAttentionItem's semantic grounding. "Needs you" is
+  // for real project/task work; the inbox lives on its own page.
 
   // Surface the vital few, most-urgent first.
   desired.sort((a, b) => (b.urgency ?? 0) - (a.urgency ?? 0));

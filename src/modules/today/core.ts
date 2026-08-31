@@ -89,14 +89,23 @@ export function deriveDedupeKey(input: {
  */
 export async function insertAttentionItem(input: RaiseInput) {
   const source = input.source ?? "system";
-  // Ground the agent-supplied project anchor against the item's own text — a
+  // Ground the AGENT-supplied project anchor against the item's own text — a
   // weak model tends to stamp the week's dominant project on everything, so
   // drop/correct an anchor the content doesn't actually support before it's
   // persisted (and before it feeds the dedupe key).
+  //
+  // Grounding applies ONLY to agent-raised cards, because that's the only place
+  // a wrong anchor comes from. SYSTEM cards (today-plan, alerts, flow, cockpit,
+  // connection-health…) are deterministic: they pass the right project or none
+  // at all — so grounding a project-LESS system card just mis-pins it onto a
+  // random project by title similarity (the "N emails waiting → NoClick" bug).
+  // For those, use the ref as given (null stays null).
   const normalizedProjectRef = normalizeRef(input.projectRef, "projects");
-  const projectRef = input.trustProjectRef
-    ? normalizedProjectRef
-    : await groundProjectRef(normalizedProjectRef, input.title);
+  const isAgentRaised = source.startsWith("agent");
+  const projectRef =
+    input.trustProjectRef || !isAgentRaised
+      ? normalizedProjectRef
+      : await groundProjectRef(normalizedProjectRef, input.title);
   const personRef = normalizeRef(input.personRef, "people");
   // Content key off the NORMALIZED refs — so "projects:<id>" and a bare "<id>"
   // from an inconsistent agent collapse to one key.

@@ -44,6 +44,13 @@
   color-scheme: dark;
 }
 
+html {
+  /* The page must never scroll sideways — wide content uses its own
+     overflow-x:auto container. Clipping here (not just on body) stops a fixed
+     decorative layer or a rogue 100vw element from rubber-banding on mobile. */
+  overflow-x: hidden;
+}
+
 body {
   background: var(--color-void);
   color: var(--color-ink);

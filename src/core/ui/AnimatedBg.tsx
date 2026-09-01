@@ -49,8 +49,12 @@ function ParticleField() {
     const resize = () => {
       readColors();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      width = window.innerWidth;
-      height = window.innerHeight;
+      // clientWidth excludes the scrollbar; innerWidth includes it, which made
+      // the canvas ~24px wider than the layout viewport → horizontal page scroll
+      // on mobile (and a stray gap on desktop).
+      const doc = document.documentElement;
+      width = doc.clientWidth || window.innerWidth;
+      height = doc.clientHeight || window.innerHeight;
       canvas.width = width * dpr;
       canvas.height = height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

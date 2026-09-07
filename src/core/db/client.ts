@@ -37,10 +37,22 @@ export const PG_SSL: SslPolicy = resolveSsl();
 // it via AIOS_PG_POOL_MAX on cloud so the two process pools + singletons fit.
 const POOL_MAX = Math.max(1, Number(process.env.AIOS_PG_POOL_MAX ?? 10));
 
+// On a hosted DB, RELEASE idle pool connections instead of holding `max` open
+// forever. This keeps the resting footprint tiny (just the persistent
+// lock/listener/SSE singletons) so a low connection cap isn't exhausted — and,
+// crucially, so restart churn can't accumulate: a killed daemon's idle backends
+// are what clogged the Aiven free 20-slot cap. Locally it's a harmless no-op
+// (unlimited connections). idle_timeout/max_lifetime are in SECONDS.
+const idleOpts =
+  PG_SSL === false
+    ? {}
+    : { idle_timeout: 20, max_lifetime: 60 * 30, connect_timeout: 30 };
+
 // Cache the connection across Next.js HMR reloads.
 const g = globalThis as unknown as { __aiosSql?: ReturnType<typeof postgres> };
 
-export const sql = g.__aiosSql ?? postgres(url, { max: POOL_MAX, ssl: PG_SSL });
+export const sql =
+  g.__aiosSql ?? postgres(url, { max: POOL_MAX, ssl: PG_SSL, ...idleOpts });
 if (process.env.NODE_ENV !== "production") g.__aiosSql = sql;
 
 export const db = drizzle(sql);

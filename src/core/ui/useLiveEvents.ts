@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { startTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 type Listener = (channel: string, payload: string) => void;
@@ -49,7 +49,12 @@ export function useLiveEvents(
 ) {
   const router = useRouter();
   const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
+  // Keep the latest callback without re-subscribing — written in an effect,
+  // not during render (a render-phase ref write trips react-hooks and can
+  // desync under concurrent features).
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  });
   const channelsKey = channels.join(",");
 
   useEffect(() => {
@@ -60,7 +65,14 @@ export function useLiveEvents(
       if (!wanted.has(channel)) return;
       onEventRef.current?.(channel, payload);
       if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => router.refresh(), 350);
+      // Refresh INSIDE a transition. A bare router.refresh() re-suspends the
+      // whole route segment, so React drops to the nearest Suspense fallback —
+      // the shell's loading.tsx skeleton — and the template.tsx entrance
+      // animation replays: the "loading…" flicker on every live event (which,
+      // during an active run, fires ~every 1.5s). In a transition React keeps
+      // the current content on screen and swaps it only once the new tree is
+      // ready, so live updates arrive seamlessly with no fallback flash.
+      refreshTimer = setTimeout(() => startTransition(() => router.refresh()), 350);
     };
 
     listeners.add(listener);

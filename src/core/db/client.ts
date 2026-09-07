@@ -1,17 +1,35 @@
 // Shared by the Next.js server AND the agent worker — do not import the
 // `server-only` package here (it throws under plain Node/tsx).
+import { readFileSync } from "node:fs";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
 const url =
   process.env.DATABASE_URL ?? "postgres://aios:aios@localhost:5544/aios";
 
-// A local DB speaks plaintext; a hosted one (Aiven/Supabase/etc.) requires TLS.
-// Auto-detect from the host so the same code serves both without a flag — the
-// dev container stays plaintext, a cloud URL gets `ssl: "require"` (TLS without
-// CA verification, i.e. sslmode=require — no CA file needed).
+// TLS policy, resolved once:
+//  • local DB  → plaintext (dev container on localhost).
+//  • cloud DB  → TLS. With AIOS_DB_CA_FILE set, verify the server's cert chain
+//    AND hostname against that CA (verify-full) — protects against MITM, not
+//    just passive snooping. Without a CA file, fall back to `require` (encrypt
+//    only). A CA path that can't be read degrades to `require` with a warning
+//    rather than hard-crashing the whole app on a missing file.
 const isLocalDb = /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url);
-export const PG_SSL: false | "require" = isLocalDb ? false : "require";
+type SslPolicy = false | "require" | { ca: string; rejectUnauthorized: true };
+function resolveSsl(): SslPolicy {
+  if (isLocalDb) return false;
+  const caFile = process.env.AIOS_DB_CA_FILE;
+  if (!caFile) return "require";
+  try {
+    return { ca: readFileSync(caFile, "utf8"), rejectUnauthorized: true };
+  } catch (e) {
+    console.warn(
+      `[db] AIOS_DB_CA_FILE set but unreadable (${caFile}): ${String(e)} — falling back to ssl:require (encrypted, unverified)`,
+    );
+    return "require";
+  }
+}
+export const PG_SSL: SslPolicy = resolveSsl();
 
 // Pool size. Default 10 is fine for a local Postgres (max_connections≈100), but
 // a small hosted node has a tight cap (Aiven free = 20, shared across the web

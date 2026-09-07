@@ -5,8 +5,9 @@
  *
  * Start with: pnpm worker
  */
-import { config } from "dotenv";
-config({ path: ".env.local" });
+// MUST be the first import: loads .env.local before the db client (or anything
+// else) evaluates and snapshots DATABASE_URL / PG_SSL. See ./env for why.
+import "./env";
 
 import { Cron } from "croner";
 import { and, eq, lt, sql as dsql } from "drizzle-orm";

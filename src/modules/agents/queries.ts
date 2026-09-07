@@ -1,5 +1,5 @@
 import { Cron } from "croner";
-import { desc, eq, sql as dsql } from "drizzle-orm";
+import { asc, desc, eq, inArray, sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import {
   agentRuns,
@@ -7,6 +7,7 @@ import {
   type Agent,
   type AgentRun,
 } from "@/core/db/schema/agents";
+import { RUN_CONCURRENCY } from "@/worker/run-queue";
 
 export interface AgentWithLatestRun {
   agent: Agent;
@@ -79,6 +80,60 @@ export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
     gateLast: gateByAgent.get(agent.id) ?? null,
     nextRunAt: nextFire(agent.schedule, agent.enabled),
   }));
+}
+
+export interface RunQueueEntry {
+  runId: string;
+  agentId: string;
+  agentName: string;
+  status: "running" | "queued";
+  trigger: string;
+  createdAt: string;
+  startedAt: string | null;
+}
+
+export interface RunQueueState {
+  /** Admission cap (AIOS_AGENT_RUN_CONCURRENCY) — the governance policy. */
+  capacity: number;
+  /** In-flight runs: `running` = admitted + executing, `queued` = waiting for a
+   *  slot (or not yet picked up). Running first, then queued FIFO. */
+  entries: RunQueueEntry[];
+}
+
+/**
+ * The live admission queue, as the DB mirrors it. The worker's semaphore is
+ * in-memory (another process), but its rule — acquire the slot BEFORE the
+ * queued→running claim — means `agent_runs.status` is an accurate reflection:
+ * at most `capacity` rows are `running`, the rest wait as `queued`.
+ */
+export async function getRunQueue(): Promise<RunQueueState> {
+  const rows = await db
+    .select({
+      runId: agentRuns.id,
+      agentId: agentRuns.agentId,
+      agentName: agents.name,
+      status: agentRuns.status,
+      trigger: agentRuns.trigger,
+      createdAt: agentRuns.createdAt,
+      startedAt: agentRuns.startedAt,
+    })
+    .from(agentRuns)
+    .innerJoin(agents, eq(agents.id, agentRuns.agentId))
+    .where(inArray(agentRuns.status, ["running", "queued"]))
+    // Running rows first, then queued in the order they'll be admitted (FIFO).
+    .orderBy(dsql`case when ${agentRuns.status} = 'running' then 0 else 1 end`, asc(agentRuns.createdAt));
+  return {
+    capacity: RUN_CONCURRENCY,
+    entries: rows.map((r) => ({
+      runId: r.runId,
+      agentId: r.agentId,
+      agentName: r.agentName,
+      status: r.status as "running" | "queued",
+      trigger: r.trigger,
+      createdAt: new Date(r.createdAt).toISOString(),
+      startedAt: r.startedAt ? new Date(r.startedAt).toISOString() : null,
+    })),
+  };
 }
 
 export async function getAgent(id: string): Promise<Agent | null> {

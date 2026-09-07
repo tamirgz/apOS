@@ -25,6 +25,13 @@ const LIMIT = Math.max(
   Number(process.env.AIOS_AGENT_RUN_CONCURRENCY ?? 1),
 );
 
+/**
+ * The admission cap, exported so the web can SHOW the governance policy
+ * ("N runs at a time") without duplicating the env read. Read from the same
+ * env in the web process; unset → 1 in both, so they never drift.
+ */
+export const RUN_CONCURRENCY = LIMIT;
+
 let active = 0;
 const waiters: Array<() => void> = [];
 

@@ -5,13 +5,15 @@ import { serverModules } from "@/modules/registry.server";
 import { AgentsList } from "../components/AgentsList";
 import { ApprovalsPanel } from "../components/ApprovalsPanel";
 import { ExternalReports } from "../components/ExternalReports";
+import { RunQueuePanel } from "../components/RunQueuePanel";
 import { externalReports } from "../schema";
 import { getReportsDir } from "../external";
-import { listAgentsWithLatestRun } from "../queries";
+import { getRunQueue, listAgentsWithLatestRun } from "../queries";
 
 export async function AgentsPage() {
-  const [items, pending, reports, dropboxDir] = await Promise.all([
+  const [items, queue, pending, reports, dropboxDir] = await Promise.all([
     listAgentsWithLatestRun(),
+    getRunQueue(),
     db
       .select()
       .from(approvals)
@@ -30,6 +32,7 @@ export async function AgentsPage() {
   return (
     <>
       <ApprovalsPanel pending={pending} />
+      <RunQueuePanel state={queue} />
       <AgentsList items={items} templates={templates} />
       <ExternalReports reports={reports} dropboxDir={dropboxDir} />
     </>

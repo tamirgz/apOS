@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { PG_SSL } from "@/core/db/client";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +55,7 @@ function ensureListener(): Promise<void> {
   hub.ready = (async () => {
     const listener = postgres(url, {
       max: 1,
+      ssl: PG_SSL,
       connection: { application_name: "aios-web-sse" },
     });
     for (const channel of CHANNELS) {

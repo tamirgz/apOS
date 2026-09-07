@@ -11,7 +11,7 @@ config({ path: ".env.local" });
 import { Cron } from "croner";
 import { and, eq, lt, sql as dsql } from "drizzle-orm";
 import postgres from "postgres";
-import { db, sql } from "@/core/db/client";
+import { db, sql, PG_SSL } from "@/core/db/client";
 import { agentRuns, agents, type Agent } from "@/core/db/schema/agents";
 import { notifications } from "@/core/db/schema/notifications";
 import { getSetting, SETTING_KEYS } from "@/core/app-settings";
@@ -304,7 +304,7 @@ async function sweepOrphanedFlowRuns() {
 
 async function main() {
   // Single-runner guarantee via advisory lock on a dedicated connection.
-  const lockConn = postgres(url, { max: 1 });
+  const lockConn = postgres(url, { max: 1, ssl: PG_SSL });
   const [{ locked }] = await lockConn`
     select pg_try_advisory_lock(${ADVISORY_LOCK_KEY}) as locked`;
   if (!locked) {
@@ -448,6 +448,7 @@ async function main() {
     // observable). max:1 — one dedicated connection carries every LISTEN.
     const l = postgres(url, {
       max: 1,
+      ssl: PG_SSL,
       connection: { application_name: "aios-worker-listener" },
     });
     await subscribeAll(l);

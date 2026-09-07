@@ -24,6 +24,7 @@ import { flows } from "@/modules/flows/schema";
 import { auditAgent } from "@/core/agent-audit";
 import { shouldRunAgent } from "./agent-gates";
 import { enqueueRun, executeApproval, executeRun } from "./executor";
+import { activeRunCount } from "./run-queue";
 import { hasFreshBackup, runBackup } from "./backup";
 
 async function deliverToSlack(notificationId: string) {
@@ -518,18 +519,27 @@ async function main() {
   // Calendar, Telegram, reports, People, Inbox, Workbench results, Ask answers),
   // then embed everything still missing a vector.
   new Cron("*/2 * * * *", { protect: true }, async () => {
+    // Index refresh is cheap SQL (pulls rows that don't own an embedding column
+    // into search_index) — always run it so search/gates stay fresh.
     try {
       const { syncSearchIndex } = await import("@/core/search-index");
       await syncSearchIndex(log);
     } catch (e) {
       log(`search-index sync failed: ${String(e).slice(0, 120)}`);
     }
-    try {
-      const { sweepEmbeddings } = await import("@/core/embeddings");
-      const n = await sweepEmbeddings(log);
-      if (n > 0) log(`embedded ${n} row(s)`);
-    } catch (e) {
-      log(`embedding sweep failed (ollama down?): ${String(e).slice(0, 120)}`);
+    // The embed sweep hits the local GPU. Yield it to any live agent run — the
+    // sweep is idempotent and `*/2`, so skipping a tick just defers work to the
+    // next one, instead of starving a long 30B run turn-by-turn for the slot.
+    if (activeRunCount() > 0) {
+      log("embedding sweep: skipped — an agent run is active (yielding the GPU)");
+    } else {
+      try {
+        const { sweepEmbeddings } = await import("@/core/embeddings");
+        const n = await sweepEmbeddings(log);
+        if (n > 0) log(`embedded ${n} row(s)`);
+      } catch (e) {
+        log(`embedding sweep failed (ollama down?): ${String(e).slice(0, 120)}`);
+      }
     }
   });
 
@@ -538,7 +548,12 @@ async function main() {
   // sync meant a slow/missing model silently starved indexing + embedding.
   new Cron("*/5 * * * *", { protect: true }, async () => {
     // Sort newly-indexed items into their broad "area of development" drawer
-    // (local LLM, topic-based). Bounded per tick so it never hogs Ollama.
+    // (local LLM, topic-based). Bounded per tick so it never hogs Ollama — and
+    // yielded entirely while an agent run holds the GPU (idempotent, catches up).
+    if (activeRunCount() > 0) {
+      log("area classify: skipped — an agent run is active (yielding the GPU)");
+      return;
+    }
     try {
       const { classifyAreas } = await import("@/core/area-classify");
       await classifyAreas(60, log);

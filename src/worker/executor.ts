@@ -15,6 +15,7 @@ import type { AIProviderId } from "@/core/db/schema/ai-routes";
 import { getToolsByNames } from "@/core/ai/tool-registry";
 import { reportAgentRunOutcome } from "@/core/alerts";
 import type { AiToolDef } from "@/core/modules/types.server";
+import { withRunSlot } from "./run-queue";
 
 const RUN_TIMEOUT_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 15 * 1000;
@@ -148,6 +149,18 @@ export async function executeRun(
   // the agent's own default (e.g. Flow A runs this agent on a big model, Flow B
   // on a fast local one). Threaded in-process from the flow engine; a normal
   // worker pickup passes nothing and the agent's own route applies.
+  override?: { provider?: AIProviderId | null; model?: string | null },
+): Promise<void> {
+  // Admission gate: hold a run slot for the WHOLE run so the machine executes at
+  // most AIOS_AGENT_RUN_CONCURRENCY (default 1) agent runs at once. Acquired
+  // BEFORE the claim below, so a waiting run stays `queued` — the orphan sweep
+  // (running + stale heartbeat) can't touch it and its timeout clock, armed
+  // inside attempt(), doesn't start until it actually reaches the model.
+  return withRunSlot(() => runClaimed(runId, override));
+}
+
+async function runClaimed(
+  runId: string,
   override?: { provider?: AIProviderId | null; model?: string | null },
 ): Promise<void> {
   // Atomic claim: only one caller wins the queued→running transition, so the

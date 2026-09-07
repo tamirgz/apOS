@@ -49,7 +49,7 @@ export const projectsServerManifest: ModuleServerManifest = {
         "attention.list",
         "attention.resolve",
       ],
-      defaultSchedule: "0 7 * * 1-5", // 07:00 weekdays — before the 07:30 planner
+      defaultSchedule: "10 7 * * 1-5", // 07:10 weekdays — staggered off Daily brief (07:00)
       // FREE local model — the heartbeat never bills (ONE-STOP §4). Chosen by a
       // 12-model bench of this exact task (2026-07-23): qwen3-coder:30b was the
       // only model that, across repeated runs, set correct health on every

@@ -63,7 +63,7 @@ export const peopleServerManifest: ModuleServerManifest = {
         "attention.list",
         "attention.resolve",
       ],
-      defaultSchedule: "0 8 * * 1,4", // Mon & Thu mornings
+      defaultSchedule: "20 8 * * 1,4", // Mon & Thu 08:20 — staggered off Task triage (08:00)
       defaultProvider: "ollama",
       defaultModel: "qwen3-coder:30b",
     },

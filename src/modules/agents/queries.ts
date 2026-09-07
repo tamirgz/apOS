@@ -1,3 +1,4 @@
+import { Cron } from "croner";
 import { desc, eq, sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import {
@@ -12,6 +13,19 @@ export interface AgentWithLatestRun {
   latestRun: AgentRun | null;
   /** The last cron pre-flight decision (agent-gates) — null before any fire. */
   gateLast: { at: string; run: boolean; reason: string } | null;
+  /** Next scheduled fire (ISO), from the cron pattern. Null = manual-only,
+   *  disabled, or an unparseable schedule. */
+  nextRunAt: string | null;
+}
+
+/** Next fire of a cron pattern as ISO, or null (manual/disabled/invalid). */
+function nextFire(schedule: string | null, enabled: boolean): string | null {
+  if (!schedule || !enabled) return null;
+  try {
+    return new Cron(schedule).nextRun()?.toISOString() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
@@ -63,6 +77,7 @@ export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
     agent,
     latestRun: latestByAgent.get(agent.id) ?? null,
     gateLast: gateByAgent.get(agent.id) ?? null,
+    nextRunAt: nextFire(agent.schedule, agent.enabled),
   }));
 }
 

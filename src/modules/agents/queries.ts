@@ -8,6 +8,7 @@ import {
   type AgentRun,
 } from "@/core/db/schema/agents";
 import { chatRuns } from "@/core/db/schema/chat-runs";
+import { knowledgeItems } from "@/modules/knowledge/schema";
 import { RUN_CONCURRENCY } from "@/worker/run-queue";
 
 export interface AgentWithLatestRun {
@@ -87,9 +88,9 @@ export interface RunQueueEntry {
   runId: string;
   /** Agent name, or the chat prompt's title. */
   label: string;
-  /** internally-initiated (agent/cron/flow) vs externally-initiated (a prompt). */
-  kind: "agent" | "chat";
-  /** Agent detail link; chat runs have no dedicated page. */
+  /** agent (cron/flow), chat (a prompt), or knowledge (link/snippet enrichment). */
+  kind: "agent" | "chat" | "knowledge";
+  /** A page to open, when the run has one. */
   href: string | null;
   status: "running" | "queued";
   /** cron/manual/flow for agents; the route (⌘K / investments / ask) for chats. */
@@ -119,9 +120,10 @@ export interface RunQueueState {
  * at most `capacity` rows are `running`, the rest wait as `queued`.
  */
 export async function getRunQueue(): Promise<RunQueueState> {
-  // Agents (internally-initiated) + chat prompts (externally-initiated) share
-  // one queue view. Two cheap queries, merged and ordered in JS.
-  const [agentRows, chatRows] = await Promise.all([
+  // Every kind of in-flight model work shares one queue view: agents
+  // (internally-initiated), chat prompts, and knowledge-item enrichment (a link
+  // or snippet being fetched + analyzed by the model). Cheap queries, merged.
+  const [agentRows, chatRows, knowledgeRows] = await Promise.all([
     db
       .select({
         runId: agentRuns.id,
@@ -146,6 +148,19 @@ export async function getRunQueue(): Promise<RunQueueState> {
       })
       .from(chatRuns)
       .where(inArray(chatRuns.status, ["running", "queued"])),
+    db
+      .select({
+        id: knowledgeItems.id,
+        title: knowledgeItems.title,
+        url: knowledgeItems.url,
+        input: knowledgeItems.input,
+        status: knowledgeItems.status,
+        createdAt: knowledgeItems.createdAt,
+        updatedAt: knowledgeItems.updatedAt,
+      })
+      .from(knowledgeItems)
+      // fetching + enriching are the in-flight (model-working) stages.
+      .where(inArray(knowledgeItems.status, ["fetching", "enriching"])),
   ]);
 
   const entries: RunQueueEntry[] = [
@@ -168,6 +183,18 @@ export async function getRunQueue(): Promise<RunQueueState> {
       trigger: CHAT_TRIGGER[r.taskKey] ?? "chat",
       createdAt: new Date(r.createdAt).toISOString(),
       startedAt: r.startedAt ? new Date(r.startedAt).toISOString() : null,
+    })),
+    ...knowledgeRows.map((r) => ({
+      runId: r.id,
+      label: (r.title || r.url || r.input || "knowledge").slice(0, 80),
+      kind: "knowledge" as const,
+      href: "/m/knowledge",
+      // fetching + enriching are both "the model is working on it".
+      status: "running" as const,
+      trigger: r.status === "fetching" ? "fetching" : "enrich",
+      createdAt: new Date(r.createdAt).toISOString(),
+      // updated_at is when it entered the current (fetching/enriching) stage.
+      startedAt: new Date(r.updatedAt).toISOString(),
     })),
   ].sort((a, b) => {
     // Running first, then queued; within each, oldest first (FIFO).

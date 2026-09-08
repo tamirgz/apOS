@@ -82,7 +82,12 @@ export async function reportAgentRunOutcome(opts: {
           inArray(agentRuns.status, ["failed", "timed_out", "succeeded"]),
         ),
       )
-      .orderBy(desc(agentRuns.startedAt))
+      // Order by createdAt, NOT startedAt: a run that failed while still queued
+      // has a NULL startedAt, and Postgres sorts NULLs FIRST in DESC — so such a
+      // row would always win this lookup and make `wasFail` perpetually true,
+      // firing a bogus "recovered" alert on EVERY later success. createdAt is
+      // always set and monotonic, giving the true previous terminal outcome.
+      .orderBy(desc(agentRuns.createdAt))
       .limit(1);
     const isFail = FAIL_STATUSES.includes(status);
     const wasFail = prev ? FAIL_STATUSES.includes(prev.status) : false;

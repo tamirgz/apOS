@@ -77,15 +77,10 @@ export function ChartEmbed({ src }: { src: string }) {
     };
   }, [src]);
 
-  if (failed)
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={src}
-        alt="chart"
-        className="my-2 max-w-full rounded-lg border border-white/10 bg-white"
-      />
-    );
+  // Spec fetch failed → fall back to the static SVG, but through SafeImg so a
+  // MISSING chart (404 — e.g. a model-fabricated /api/charts/<id> that was never
+  // created) degrades to a muted note instead of a raw broken-image icon.
+  if (failed) return <SafeImg src={src} alt="chart" />;
 
   return (
     <div

@@ -49,6 +49,42 @@ function analyzeRequest(msg: string): {
   return { wantsChart, strategyTag: isStrategy ? strategyTag : null };
 }
 
+/**
+ * Anti-hallucination directive for the investments chat. Weak local models were
+ * fabricating output not grounded in tool results — inventing a "net short /
+ * cost basis incomplete" caveat for CAG/JBHT that portfolio.byStrategy never
+ * flagged, and writing a fake /api/charts/<id> URL (rendered as a broken image)
+ * without calling viz.chart. This makes the rules explicit.
+ */
+const INVESTMENTS_GUARDRAIL = [
+  "GROUNDING (STRICT — this is financial data):",
+  "• State ONLY numbers, positions, P&L and flags that appear in a tool result THIS turn. Never estimate or fill gaps from memory.",
+  "• NEVER invent a caveat. Do not call a symbol 'net short', 'cost basis incomplete', 'no matching buy', or 'oversold' unless portfolio.byStrategy returned a `caveat` for THAT symbol. If it returned no caveat, the position is complete — say so.",
+  "• NEVER write an /api/charts/... URL yourself. Only include the exact `embed` string that a viz.chart call RETURNED. If you did not call viz.chart, include no chart image.",
+  "• If you did not call a tool, do not claim or paraphrase its output.",
+].join("\n");
+
+/**
+ * Remove markdown chart images whose id has no real row in the `charts` table —
+ * i.e. a URL the model fabricated. Left in, a fake id renders as a broken image
+ * AND (matching /api/charts/) suppresses the deterministic chart backstop.
+ */
+async function stripFabricatedCharts(text: string): Promise<string> {
+  const ids = [...text.matchAll(/\/api\/charts\/([0-9a-f-]{36})/gi)].map((m) => m[1]);
+  if (!ids.length) return text;
+  const { charts } = await import("@/modules/investments/schema");
+  const { inArray } = await import("drizzle-orm");
+  const rows = await db
+    .select({ id: charts.id })
+    .from(charts)
+    .where(inArray(charts.id, [...new Set(ids)]));
+  const real = new Set(rows.map((r) => r.id));
+  return text.replace(
+    /!\[[^\]]*\]\(\/api\/charts\/([0-9a-f-]{36})[^)]*\)/gi,
+    (m, id: string) => (real.has(id) ? m : ""),
+  );
+}
+
 export async function POST(req: Request) {
   let body: { messages?: ChatMessage[]; route?: string };
   try {
@@ -207,8 +243,15 @@ export async function POST(req: Request) {
         return r?.embed ?? null;
       };
 
+      // The grounding guardrail applies to the whole investments route (verify);
+      // the strategy directive is added on top for strategy questions.
+      const firstDirective =
+        [verify ? INVESTMENTS_GUARDRAIL : null, strategyDirective]
+          .filter(Boolean)
+          .join("\n\n") || undefined;
+
       try {
-        const first = await runOnce(strategyDirective);
+        const first = await runOnce(firstDirective);
         const err = first.err;
         let { calls, text } = first;
 
@@ -236,6 +279,10 @@ export async function POST(req: Request) {
               .replace(/#ref/g, "")
               .trim();
           text = strip(text);
+          // Guardrail: drop any fabricated chart URL (no real chart row) BEFORE
+          // the hasChart check, so a hallucinated link can't both render broken
+          // and suppress the real-chart backstop below.
+          text = await stripFabricatedCharts(text);
 
           // 2b) Report completeness: the written analysis is the model's job
           // here (the chart is added below). If it came back near-empty — e.g.

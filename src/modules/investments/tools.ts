@@ -230,7 +230,7 @@ export const investmentTools: AiToolDef[] = [
   {
     name: "portfolio.savings",
     description:
-      "Cash and savings accounts (and any loans against them): name, amount, currency, loan amount, monthly payment. Read-only. Complements holdings for a net-worth view.",
+      "Cash accounts: name, currency, type, seed_balance, last RECORDED balance (+ date), and the linked portfolio. IMPORTANT: iSentry stores no live cash balance — its own UI DERIVES the displayed cash from the linked portfolio's flows, so these seed/recorded figures may differ from iSentry's live screen (which can show a large negative when portfolio buys weren't matched by recorded deposits). If asked about a cash discrepancy, say the live figure is derived and recorded deposits may be missing — do NOT invent a balance. Read-only.",
     input: z.object({}),
     risk: "safe",
     execute: () =>

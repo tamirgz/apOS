@@ -363,7 +363,10 @@ export function ChatMessages({
               "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
               t.role === "user"
                 ? "max-w-[85%] bg-plasma/12 text-ink"
-                : "max-w-full overflow-x-auto glass text-ink-dim",
+                : // Fill the row (not shrink-wrap to the text) so wide content —
+                  // charts, tables — renders at full width instead of squashed
+                  // into a narrow bubble.
+                  "min-w-0 flex-1 overflow-x-auto glass text-ink-dim",
             )}
           >
             {collapseToolCalls(t.toolCalls).map((c) => (

@@ -66,6 +66,12 @@ const DEFAULTS: { taskKey: string; provider: AIProviderId; model: string }[] = [
   // abliterated with light reasoning).
   { taskKey: "chat.investments", ...CAPABLE },
   { taskKey: "agent.default", ...CAPABLE },
+  // Hierarchical sub-agent (agent.subtask): a fresh-context sub-run an agent
+  // spawns to investigate one item without bloating its own context. Pinned to
+  // an explicit LOCAL model so a free periodic agent (e.g. Project pulse) that
+  // fans out never starts billing — same free-by-policy stance as memory work.
+  // Escalate in Settings → AI Routing if you want deeper sub-agent reasoning.
+  { taskKey: "agent.subtask", provider: "ollama", model: "qwen3-coder:30b" },
   { taskKey: "knowledge.enrich", ...CAPABLE },
   { taskKey: "inbox.triage", ...LIGHT },
   { taskKey: "ideas.analyze", ...CAPABLE },

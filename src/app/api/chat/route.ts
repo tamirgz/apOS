@@ -67,24 +67,35 @@ const INVESTMENTS_GUARDRAIL = [
 ].join("\n");
 
 /**
- * Remove markdown chart images whose id has no real row in the `charts` table —
- * i.e. a URL the model fabricated. Left in, a fake id renders as a broken image
- * AND (matching /api/charts/) suppresses the deterministic chart backstop.
+ * Remove EVERY markdown image that isn't a verified real chart. In the
+ * investments chat the only legitimate image is a chart the app produced
+ * (/api/charts/<id> whose id exists in the `charts` table). The local model
+ * sometimes fabricates a chart link — a fake /api/charts id, or an invented
+ * external domain (e.g. https://api.chcharts.com/<uuid>) — which renders as a
+ * broken "image unavailable" AND can suppress the deterministic chart backstop.
+ * Stripping every non-real image leaves the backstop free to attach the real one.
  */
 async function stripFabricatedCharts(text: string): Promise<string> {
-  const ids = [...text.matchAll(/\/api\/charts\/([0-9a-f-]{36})/gi)].map((m) => m[1]);
-  if (!ids.length) return text;
-  const { charts } = await import("@/modules/investments/schema");
-  const { inArray } = await import("drizzle-orm");
-  const rows = await db
-    .select({ id: charts.id })
-    .from(charts)
-    .where(inArray(charts.id, [...new Set(ids)]));
-  const real = new Set(rows.map((r) => r.id));
-  return text.replace(
-    /!\[[^\]]*\]\(\/api\/charts\/([0-9a-f-]{36})[^)]*\)/gi,
-    (m, id: string) => (real.has(id) ? m : ""),
-  );
+  const imgRe = /!\[[^\]]*\]\(\s*([^)\s]+)[^)]*\)/gi;
+  const srcs = [...text.matchAll(imgRe)].map((m) => m[1]);
+  if (!srcs.length) return text;
+  const idOf = (src: string) =>
+    src.match(/^\/api\/charts\/([0-9a-f-]{36})$/i)?.[1] ?? null;
+  const ids = srcs.map(idOf).filter((x): x is string => !!x);
+  const real = new Set<string>();
+  if (ids.length) {
+    const { charts } = await import("@/modules/investments/schema");
+    const { inArray } = await import("drizzle-orm");
+    const rows = await db
+      .select({ id: charts.id })
+      .from(charts)
+      .where(inArray(charts.id, [...new Set(ids)]));
+    for (const r of rows) real.add(r.id);
+  }
+  return text.replace(imgRe, (m, src: string) => {
+    const id = idOf(src);
+    return id && real.has(id) ? m : "";
+  });
 }
 
 export async function POST(req: Request) {

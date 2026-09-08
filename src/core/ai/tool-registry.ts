@@ -181,7 +181,6 @@ const CORE_TOOLS: AiToolDef[] = [
       const route = await resolveRoute("agent.subtask");
       const DEFAULT_READ_TOOLS = [
         "search.everything",
-        "projects.get",
         "projects.list",
         "tasks.list",
         "notes.search",
@@ -189,11 +188,20 @@ const CORE_TOOLS: AiToolDef[] = [
         "memory.recall",
         "market.quote",
       ];
-      const wanted = input.tools?.length ? input.tools : DEFAULT_READ_TOOLS;
       // Never hand a sub-task the sub-task tool (recursion) or approval-tier tools.
-      const tools = getToolsByNames(wanted).filter(
-        (t) => t.name !== "agent.subtask" && t.risk !== "approval",
-      );
+      const keep = (t: AiToolDef) =>
+        t.name !== "agent.subtask" && t.risk !== "approval";
+      // A caller MAY pass an explicit allowlist, but a local model often mangles
+      // the names (e.g. "project__read" instead of "projects.list"), which
+      // resolve to NOTHING — leaving the sub-task tool-less and unable to
+      // investigate (it then just hallucinates from the task text). So if the
+      // requested set yields no real tools, fall back to the read-only default.
+      let tools = getToolsByNames(
+        input.tools?.length ? input.tools : DEFAULT_READ_TOOLS,
+      ).filter(keep);
+      if (tools.length === 0) {
+        tools = getToolsByNames(DEFAULT_READ_TOOLS).filter(keep);
+      }
       let text = "";
       let err: string | null = null;
       try {

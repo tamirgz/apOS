@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
-import { ArrowUpRight, ChevronRight, LayoutGrid, Menu } from "lucide-react";
+import { ArrowUpRight, Bell, ChevronRight, LayoutGrid, Menu } from "lucide-react";
 import { navModules } from "@/modules/registry";
 import type { ModuleManifest } from "@/core/modules/types";
 import { getSidebarBadges } from "./sidebar-badges";
@@ -138,9 +138,14 @@ function NavGroup({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [badges, setBadges] = useState<{ needsYou: number; inbox: number }>({
+  const [badges, setBadges] = useState<{
+    needsYou: number;
+    inbox: number;
+    notifications: number;
+  }>({
     needsYou: 0,
     inbox: 0,
+    notifications: 0,
   });
   const loadBadges = useCallback(() => {
     getSidebarBadges()
@@ -149,11 +154,17 @@ export function Sidebar() {
   }, []);
   useEffect(loadBadges, [loadBadges]);
   useLiveEvents(
-    ["attention_changed", "approvals_changed", "workbench_changed", "inbox_changed"],
+    ["attention_changed", "approvals_changed", "workbench_changed", "inbox_changed", "notifications"],
     loadBadges,
   );
   const badgeFor = (id: string) =>
-    id === "today" ? badges.needsYou : id === "inbox" ? badges.inbox : 0;
+    id === "today"
+      ? badges.needsYou
+      : id === "inbox"
+        ? badges.inbox
+        : id === "notifications"
+          ? badges.notifications
+          : 0;
 
   // Mobile: the sidebar becomes a drawer behind a hamburger (the shell had no
   // responsive mode at all — a fixed w-52 column on every screen).
@@ -234,6 +245,16 @@ export function Sidebar() {
         {[...groups.entries()].map(([label, items]) => (
           <NavGroup key={label} label={label} items={items} pathname={pathname} />
         ))}
+        {/* Notifications — a core page (like Deck), was only reachable via the
+            bell dropdown or an Inbox link; give it a persistent nav entry. */}
+        <NavItem
+          href="/notifications"
+          title="Notifications"
+          accent="var(--color-ion)"
+          icon={Bell}
+          active={pathname === "/notifications"}
+          badge={badgeFor("notifications")}
+        />
         {settings && (
           <NavItem
             href={`/m/${settings.id}`}

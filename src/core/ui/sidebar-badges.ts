@@ -11,15 +11,21 @@ import { db } from "@/core/db/client";
 export async function getSidebarBadges(): Promise<{
   needsYou: number;
   inbox: number;
+  notifications: number;
 }> {
   const { countNeedsYou } = await import("@/modules/today/queries");
   const { inboxItems } = await import("@/modules/inbox/schema");
-  const [needsYou, [inbox]] = await Promise.all([
+  const { notifications } = await import("@/core/db/schema/notifications");
+  const [needsYou, [inbox], [unread]] = await Promise.all([
     countNeedsYou(),
     db
       .select({ n: dsql<number>`count(*)` })
       .from(inboxItems)
       .where(inArray(inboxItems.status, ["new", "triaging", "failed", "error"])),
+    db
+      .select({ n: dsql<number>`count(*)` })
+      .from(notifications)
+      .where(dsql`${notifications.readAt} is null`),
   ]);
-  return { needsYou, inbox: Number(inbox.n) };
+  return { needsYou, inbox: Number(inbox.n), notifications: Number(unread.n) };
 }

@@ -46,6 +46,7 @@ export function ChartEmbed({ src }: { src: string }) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let chart: any;
     let onResize: (() => void) | undefined;
+    let roDispose: (() => void) | undefined;
     (async () => {
       try {
         const specUrl = src + (src.includes("?") ? "&" : "?") + "spec=1";
@@ -66,6 +67,14 @@ export function ChartEmbed({ src }: { src: string }) {
         chart.setOption(buildChartOption(spec, true));
         onResize = () => chart?.resize();
         window.addEventListener("resize", onResize);
+        // The chart may mount inside a hidden tab (e.g. the Investments Chat
+        // tab): ECharts then inits at 0 width and renders squashed, and no
+        // window-resize fires when the tab is later shown. A ResizeObserver on
+        // the container catches that 0→real width change (and any layout shift)
+        // and re-fits the chart.
+        const ro = new ResizeObserver(() => chart?.resize());
+        ro.observe(ref.current);
+        roDispose = () => ro.disconnect();
       } catch {
         if (!disposed) setFailed(true);
       }
@@ -73,6 +82,7 @@ export function ChartEmbed({ src }: { src: string }) {
     return () => {
       disposed = true;
       if (onResize) window.removeEventListener("resize", onResize);
+      roDispose?.();
       if (chart) chart.dispose();
     };
   }, [src]);

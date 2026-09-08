@@ -120,8 +120,12 @@ export function buildChartOption(spec: ChartSpec, dark = false): Record<string, 
         // labels. For a horizontal bar the value sits on the bar END, so the
         // bottom value-axis is redundant clutter (it was overlapping into a
         // garbled row) — hide its labels + gridlines and keep only the bars.
+        // containLabel reserves space for the AXIS (category) labels but NOT the
+        // series value labels on the bar ends. Those sit to the RIGHT of each
+        // bar, so a positive bar reaching the plot edge clips its label — give
+        // the right an explicit margin wide enough for a "-$322.24" label.
         grid: horizontal
-          ? { left: 8, right: 20, top: spec.subtitle ? 74 : 56, bottom: 8, containLabel: true }
+          ? { left: 8, right: 52, top: spec.subtitle ? 74 : 56, bottom: 8, containLabel: true }
           : { left: 8, right: 20, top: spec.subtitle ? 74 : 56, bottom: 8, containLabel: true },
         xAxis: horizontal
           ? { ...valAxis(), axisLabel: { show: false }, splitLine: { show: false } }

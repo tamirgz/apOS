@@ -22,7 +22,7 @@ import { Markdown } from "./Markdown";
 import { cn } from "./cn";
 
 export type ChatEvent =
-  | { type: "meta"; provider: string; model: string }
+  | { type: "meta"; provider: string; model: string; chatRunId?: string }
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
   | { type: "tool_call"; name: string; input: unknown }
@@ -38,6 +38,9 @@ export interface ChatTurn {
   pending?: boolean;
   thinking?: boolean;
   error?: string;
+  /** The persisted run backing this reply — lets a reopened chat reclaim the
+   *  answer of a prompt that finished server-side after the client left. */
+  chatRunId?: string;
 }
 
 /**
@@ -55,25 +58,72 @@ export function useChat(opts?: { storageKey?: string; route?: string }) {
   );
   const loaded = useRef(false);
 
-  // Load persisted history once.
+  // Load persisted history once, then reclaim any prompt that was still running
+  // when the client last left: its run kept executing server-side, so poll the
+  // run until it finishes and drop the answer back in.
   useEffect(() => {
     if (!key || loaded.current) return;
     loaded.current = true;
+    let loadedTurns: ChatTurn[] = [];
     try {
       const raw = localStorage.getItem(key);
-      if (raw) setTurns(JSON.parse(raw));
+      if (raw) loadedTurns = JSON.parse(raw) as ChatTurn[];
     } catch {
-      // ignore corrupt storage
+      return; // corrupt storage
     }
+    setTurns(loadedTurns);
+    let cancelled = false;
+    for (const t of loadedTurns) {
+      if (t.role !== "assistant" || !t.pending || !t.chatRunId) continue;
+      const runId = t.chatRunId;
+      void (async () => {
+        for (let tries = 0; tries < 240 && !cancelled; tries++) {
+          try {
+            const res = await fetch(`/api/chat/run/${runId}`);
+            if (res.ok) {
+              const r = (await res.json()) as {
+                status: string;
+                result: string | null;
+                error: string | null;
+              };
+              if (r.status !== "running" && r.status !== "queued") {
+                setTurns((prev) =>
+                  prev.map((p) =>
+                    p.chatRunId === runId
+                      ? { ...p, content: r.result ?? p.content, error: r.error ?? undefined, pending: false }
+                      : p,
+                  ),
+                );
+                return;
+              }
+            }
+          } catch {
+            /* transient — retry */
+          }
+          await new Promise((rr) => setTimeout(rr, 2000));
+        }
+      })();
+    }
+    return () => {
+      cancelled = true;
+    };
   }, [key]);
 
-  // Persist on change (only settled turns).
+  // Persist on change. Settled turns always; a still-running turn is kept ONLY
+  // if it has a run id (so it can be reclaimed on return) — never a plain
+  // spinner that would otherwise be stuck forever.
   useEffect(() => {
     if (!key || !loaded.current) return;
     try {
       const clean = turns
-        .filter((t) => !t.pending)
-        .map((t) => ({ role: t.role, content: t.content, error: t.error }));
+        .filter((t) => !t.pending || !!t.chatRunId)
+        .map((t) => ({
+          role: t.role,
+          content: t.content,
+          error: t.error,
+          pending: t.pending,
+          chatRunId: t.chatRunId,
+        }));
       localStorage.setItem(key, JSON.stringify(clean.slice(-40)));
     } catch {
       // ignore quota
@@ -126,6 +176,8 @@ export function useChat(opts?: { storageKey?: string; route?: string }) {
               } else if (event.type === "error") {
                 cur.error = event.message;
                 cur.pending = false;
+              } else if (event.type === "meta" && event.chatRunId) {
+                cur.chatRunId = event.chatRunId;
               }
               next[next.length - 1] = cur;
               return next;

@@ -1,4 +1,6 @@
-import { db } from "@/core/db/client";
+import { eq } from "drizzle-orm";
+import { db, sql } from "@/core/db/client";
+import { chatRuns } from "@/core/db/schema/chat-runs";
 import { getAllTools } from "@/core/ai/tool-registry";
 import { ensureDefaultRoutes, resolveRoute } from "@/core/ai/routing";
 import type { ChatMessage } from "@/core/ai/provider";
@@ -158,12 +160,46 @@ export async function POST(req: Request) {
     ? getAllTools().filter((t) => LEAN_TOOLS.has(t.name))
     : getAllTools();
 
+  // Persist this prompt as a RUN so it survives the client navigating away and
+  // shows in the queue (externally-initiated work, next to agents). The pipeline
+  // below runs DETACHED from the request's abort signal — a browser disconnect
+  // no longer stops it; it finishes server-side and the answer is saved here.
+  const promptText = String(messages[messages.length - 1]?.content ?? "");
+  const [run] = await db
+    .insert(chatRuns)
+    .values({
+      taskKey,
+      title: promptText.replace(/\s+/g, " ").trim().slice(0, 80) || "prompt",
+      status: "running",
+      messages,
+      provider: route.providerId,
+      model: route.model,
+      startedAt: new Date(),
+      heartbeatAt: new Date(),
+    })
+    .returning({ id: chatRuns.id });
+  const chatRunId = run.id;
+  await sql.notify("chat_runs", chatRunId);
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (obj: unknown) =>
-        controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
-      send({ type: "meta", provider: route.providerId, model: route.model });
+      // Best-effort to the client: once it disconnects, enqueue throws — we
+      // swallow that and keep running so the DB record still completes.
+      let clientGone = false;
+      const send = (obj: unknown) => {
+        if (clientGone) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          clientGone = true;
+        }
+      };
+      send({ type: "meta", provider: route.providerId, model: route.model, chatRunId });
+      // The run's own clock — NOT req.signal — so a client disconnect can't
+      // abort it. Capped just under the platform maxDuration.
+      const runAbort = new AbortController();
+      const runTimer = setTimeout(() => runAbort.abort(), 285_000);
       const baseSystem = await systemPrompt();
       // Default chat: reasoning off for snappiness. A dedicated route (e.g.
       // Investments, on the MLX abliterated) lets the provider apply light
@@ -212,7 +248,7 @@ export async function POST(req: Request) {
             toolCtx: { db },
             model: route.model,
             reasoning,
-            signal: req.signal,
+            signal: runAbort.signal,
           })) {
             if (event.type === "tool_call") calls.add(event.name);
             if (event.type === "tool_result") {
@@ -250,6 +286,8 @@ export async function POST(req: Request) {
           .filter(Boolean)
           .join("\n\n") || undefined;
 
+      let finalAnswer = "";
+      let finalError = "";
       try {
         const first = await runOnce(firstDirective);
         const err = first.err;
@@ -345,9 +383,29 @@ export async function POST(req: Request) {
           send({ type: "done", text });
         }
         if (err) send({ type: "error", message: err });
+        finalAnswer = text;
+        finalError = err;
       } catch (e) {
+        finalError = String(e);
         send({ type: "error", message: String(e) });
       } finally {
+        clearTimeout(runTimer);
+        // Persist the outcome so the run is complete in the queue and its answer
+        // is retrievable from history (even if the client already left).
+        try {
+          await db
+            .update(chatRuns)
+            .set({
+              status: finalError ? "failed" : "succeeded",
+              result: finalAnswer || null,
+              error: finalError || null,
+              finishedAt: new Date(),
+            })
+            .where(eq(chatRuns.id, chatRunId));
+          await sql.notify("chat_runs", chatRunId);
+        } catch {
+          /* best-effort persistence */
+        }
         controller.close();
       }
     },

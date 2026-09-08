@@ -379,6 +379,13 @@
       "when": 1788092344399,
       "tag": "0053_freezing_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1788859920745,
+      "tag": "0054_far_maelstrom",
+      "breakpoints": true
     }
   ]
 }

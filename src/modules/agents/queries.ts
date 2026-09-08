@@ -1,5 +1,5 @@
 import { Cron } from "croner";
-import { asc, desc, eq, inArray, sql as dsql } from "drizzle-orm";
+import { desc, eq, inArray, sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import {
   agentRuns,
@@ -7,6 +7,7 @@ import {
   type Agent,
   type AgentRun,
 } from "@/core/db/schema/agents";
+import { chatRuns } from "@/core/db/schema/chat-runs";
 import { RUN_CONCURRENCY } from "@/worker/run-queue";
 
 export interface AgentWithLatestRun {
@@ -84,13 +85,24 @@ export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
 
 export interface RunQueueEntry {
   runId: string;
-  agentId: string;
-  agentName: string;
+  /** Agent name, or the chat prompt's title. */
+  label: string;
+  /** internally-initiated (agent/cron/flow) vs externally-initiated (a prompt). */
+  kind: "agent" | "chat";
+  /** Agent detail link; chat runs have no dedicated page. */
+  href: string | null;
   status: "running" | "queued";
+  /** cron/manual/flow for agents; the route (⌘K / investments / ask) for chats. */
   trigger: string;
   createdAt: string;
   startedAt: string | null;
 }
+
+const CHAT_TRIGGER: Record<string, string> = {
+  chat: "⌘K",
+  "chat.investments": "investments",
+  ask: "ask",
+};
 
 export interface RunQueueState {
   /** Admission cap (AIOS_AGENT_RUN_CONCURRENCY) — the governance policy. */
@@ -107,33 +119,63 @@ export interface RunQueueState {
  * at most `capacity` rows are `running`, the rest wait as `queued`.
  */
 export async function getRunQueue(): Promise<RunQueueState> {
-  const rows = await db
-    .select({
-      runId: agentRuns.id,
-      agentId: agentRuns.agentId,
-      agentName: agents.name,
-      status: agentRuns.status,
-      trigger: agentRuns.trigger,
-      createdAt: agentRuns.createdAt,
-      startedAt: agentRuns.startedAt,
-    })
-    .from(agentRuns)
-    .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-    .where(inArray(agentRuns.status, ["running", "queued"]))
-    // Running rows first, then queued in the order they'll be admitted (FIFO).
-    .orderBy(dsql`case when ${agentRuns.status} = 'running' then 0 else 1 end`, asc(agentRuns.createdAt));
-  return {
-    capacity: RUN_CONCURRENCY,
-    entries: rows.map((r) => ({
+  // Agents (internally-initiated) + chat prompts (externally-initiated) share
+  // one queue view. Two cheap queries, merged and ordered in JS.
+  const [agentRows, chatRows] = await Promise.all([
+    db
+      .select({
+        runId: agentRuns.id,
+        agentId: agentRuns.agentId,
+        agentName: agents.name,
+        status: agentRuns.status,
+        trigger: agentRuns.trigger,
+        createdAt: agentRuns.createdAt,
+        startedAt: agentRuns.startedAt,
+      })
+      .from(agentRuns)
+      .innerJoin(agents, eq(agents.id, agentRuns.agentId))
+      .where(inArray(agentRuns.status, ["running", "queued"])),
+    db
+      .select({
+        runId: chatRuns.id,
+        title: chatRuns.title,
+        taskKey: chatRuns.taskKey,
+        status: chatRuns.status,
+        createdAt: chatRuns.createdAt,
+        startedAt: chatRuns.startedAt,
+      })
+      .from(chatRuns)
+      .where(inArray(chatRuns.status, ["running", "queued"])),
+  ]);
+
+  const entries: RunQueueEntry[] = [
+    ...agentRows.map((r) => ({
       runId: r.runId,
-      agentId: r.agentId,
-      agentName: r.agentName,
+      label: r.agentName,
+      kind: "agent" as const,
+      href: `/m/agents/${r.agentId}`,
       status: r.status as "running" | "queued",
       trigger: r.trigger,
       createdAt: new Date(r.createdAt).toISOString(),
       startedAt: r.startedAt ? new Date(r.startedAt).toISOString() : null,
     })),
-  };
+    ...chatRows.map((r) => ({
+      runId: r.runId,
+      label: r.title,
+      kind: "chat" as const,
+      href: null,
+      status: r.status as "running" | "queued",
+      trigger: CHAT_TRIGGER[r.taskKey] ?? "chat",
+      createdAt: new Date(r.createdAt).toISOString(),
+      startedAt: r.startedAt ? new Date(r.startedAt).toISOString() : null,
+    })),
+  ].sort((a, b) => {
+    // Running first, then queued; within each, oldest first (FIFO).
+    const rank = (s: string) => (s === "running" ? 0 : 1);
+    return rank(a.status) - rank(b.status) || a.createdAt.localeCompare(b.createdAt);
+  });
+
+  return { capacity: RUN_CONCURRENCY, entries };
 }
 
 export async function getAgent(id: string): Promise<Agent | null> {

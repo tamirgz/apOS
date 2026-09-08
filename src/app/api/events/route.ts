@@ -18,6 +18,7 @@ const url =
  */
 const CHANNELS = [
   "agent_runs",
+  "chat_runs",
   "agents_changed",
   "knowledge_changed",
   "notifications",

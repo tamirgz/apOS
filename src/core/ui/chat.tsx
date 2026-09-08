@@ -349,9 +349,11 @@ export function ChatMessages({
             <button
               type="button"
               onClick={() => onDelete(i)}
-              title="Delete this prompt"
-              aria-label="Delete this prompt"
-              className="mt-1.5 shrink-0 rounded p-1 text-ink-faint opacity-0 transition hover:text-flare focus:opacity-100 group-hover:opacity-100"
+              title="Delete this question and its answer"
+              aria-label="Delete this question and its answer"
+              // Always visible (dimmed), not hover-only — otherwise it's
+              // unreachable on touch devices (no hover). Brightens on hover/focus.
+              className="mt-1.5 shrink-0 rounded p-1 text-ink-faint opacity-50 transition hover:text-flare focus:opacity-100 group-hover:opacity-100"
             >
               <Trash2 className="size-3.5" />
             </button>

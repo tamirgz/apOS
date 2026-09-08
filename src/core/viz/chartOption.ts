@@ -114,10 +114,18 @@ export function buildChartOption(spec: ChartSpec, dark = false): Record<string, 
       }));
       return {
         ...common,
+        // containLabel:true lets ECharts auto-size the grid to fit the category
+        // (symbol) names and the bar-end value labels, so neither clips — the
+        // old fixed left/right + containLabel:false clipped long "-$68.90"
+        // labels. For a horizontal bar the value sits on the bar END, so the
+        // bottom value-axis is redundant clutter (it was overlapping into a
+        // garbled row) — hide its labels + gridlines and keep only the bars.
         grid: horizontal
-          ? { left: 104, right: 66, top: spec.subtitle ? 74 : 56, bottom: 26, containLabel: false }
-          : { left: 64, right: 24, top: spec.subtitle ? 74 : 56, bottom: 40, containLabel: false },
-        xAxis: horizontal ? valAxis() : catAxis(labels),
+          ? { left: 8, right: 20, top: spec.subtitle ? 74 : 56, bottom: 8, containLabel: true }
+          : { left: 8, right: 20, top: spec.subtitle ? 74 : 56, bottom: 8, containLabel: true },
+        xAxis: horizontal
+          ? { ...valAxis(), axisLabel: { show: false }, splitLine: { show: false } }
+          : catAxis(labels),
         yAxis: horizontal ? { ...catAxis(labels), inverse: true } : valAxis(),
         series: [
           {

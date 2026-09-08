@@ -140,13 +140,35 @@ export async function performanceByStrategy(tag: string) {
     group by g.symbol`;
 }
 
-/** Cash / savings + loans (user-scoped, standalone from portfolios). */
+/**
+ * Cash accounts (user-scoped). iSentry renamed `savings_accounts` → `cash_accounts`
+ * and moved to a ledger model: a `seed_balance` plus a statement/history — and
+ * DROPPED the old savings_amount / loan columns. Critically, there is NO stored
+ * "current balance": iSentry's UI DERIVES the displayed cash from the linked
+ * portfolio's flows (seed + buys/sells/dividends/deposits). We deliberately do
+ * NOT re-derive that here (fragile, and the memory rule is: never re-derive
+ * iSentry's computed values). Instead we return the seed and the last RECORDED
+ * balance (cash_balance_history) + the linked portfolio; the tool flags that the
+ * live iSentry figure is derived and may differ (e.g. a large negative when
+ * portfolio buys weren't matched by recorded cash deposits).
+ */
 export async function listSavings() {
   const sql = isentrySql();
   const id = isentryAccountId();
-  return id
-    ? sql`select account_name, savings_amount, currency, has_loan, loan_amount, monthly_payment
-          from savings_accounts where user_id = ${id}`
-    : sql`select account_name, savings_amount, currency, has_loan, loan_amount, monthly_payment
-          from savings_accounts`;
+  const where = id
+    ? sql`where a.is_active and a.user_id = ${id}`
+    : sql`where a.is_active`;
+  return sql`
+    select a.name as account_name, a.currency, a.type,
+           a.seed_balance, a.seed_date,
+           bh.balance as recorded_balance, bh.date as recorded_as_of,
+           p.name as linked_portfolio
+    from cash_accounts a
+    left join lateral (
+      select balance, date from cash_balance_history h
+      where h.account_id = a.id order by h.date desc limit 1
+    ) bh on true
+    left join portfolios p on p.id = a.linked_portfolio_id
+    ${where}
+    order by a.name`;
 }

@@ -57,6 +57,12 @@ export interface AiToolContext {
    * and an unknown handle errors instead of silently mis-filing.
    */
   refs?: Record<string, { kind: string; id: string; name: string }>;
+  /**
+   * Recursion guard for the `agent.subtask` tool (hierarchical sub-agents): 0
+   * (or unset) at the top level, incremented for each nested sub-run. A sub-task
+   * may not spawn further sub-tasks, so context can't fan out without bound.
+   */
+  subagentDepth?: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

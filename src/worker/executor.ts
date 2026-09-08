@@ -222,6 +222,11 @@ async function runClaimed(
     const memoryToolNames = agent.isolated
       ? ["memory.remember"]
       : ["memory.update", "memory.remember", "memory.recall"];
+    // Hierarchical sub-agents: a non-isolated agent can offload a focused item
+    // (one project/repo/symbol) to a fresh-context sub-run and get back only a
+    // summary, so its own context stays small over a many-item sweep. Isolated
+    // single-source agents stay in their lane (no orchestration).
+    const orchestrationToolNames = agent.isolated ? [] : ["agent.subtask"];
 
     // Flow integration: when this run is a node inside a flow, inject the
     // upstream step's result and expose flow.emit (sets the structured signal a
@@ -263,7 +268,9 @@ async function runClaimed(
     }
 
     const tools = [
-      ...getToolsByNames([...new Set([...agent.tools, ...memoryToolNames])]).map(
+      ...getToolsByNames([
+        ...new Set([...agent.tools, ...memoryToolNames, ...orchestrationToolNames]),
+      ]).map(
         (t) => (t.risk === "approval" ? wrapWithApproval(t, agent, runId) : t),
       ),
       ...ledgerTools(ledger),

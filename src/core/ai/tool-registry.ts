@@ -153,6 +153,74 @@ const CORE_TOOLS: AiToolDef[] = [
       return { title: a.title, url: a.url, text: a.text.slice(0, 12000) };
     },
   },
+  {
+    name: "agent.subtask",
+    description:
+      "Investigate ONE focused item in a FRESH, isolated context window and get back only a short summary. Use it to keep YOUR context small when you must cover many items — run one sub-task per project / repo / symbol instead of piling everything into this conversation. The sub-task starts clean and CANNOT see this chat, so put EVERYTHING it needs into `task` (ids, names, what to check). It has read tools and returns just its conclusion (≤ ~4k chars). It cannot spawn further sub-tasks.",
+    input: z.object({
+      task: z
+        .string()
+        .min(1)
+        .describe(
+          "A complete, self-contained instruction. Include all needed context — the sub-task can't see this conversation.",
+        ),
+      tools: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Tool names the sub-task may use. Defaults to a read-only subset (search, project/task/notes/knowledge reads, memory recall).",
+        ),
+    }),
+    risk: "safe",
+    async execute(input: { task: string; tools?: string[] }, ctx) {
+      if ((ctx.subagentDepth ?? 0) >= 1) {
+        return { error: "A sub-task cannot spawn further sub-tasks (max depth 1)." };
+      }
+      const { resolveRoute } = await import("@/core/ai/routing");
+      // Falls back to agent.default when no explicit agent.subtask route is set.
+      const route = await resolveRoute("agent.subtask");
+      const DEFAULT_READ_TOOLS = [
+        "search.everything",
+        "projects.get",
+        "projects.list",
+        "tasks.list",
+        "notes.search",
+        "knowledge.search",
+        "memory.recall",
+        "market.quote",
+      ];
+      const wanted = input.tools?.length ? input.tools : DEFAULT_READ_TOOLS;
+      // Never hand a sub-task the sub-task tool (recursion) or approval-tier tools.
+      const tools = getToolsByNames(wanted).filter(
+        (t) => t.name !== "agent.subtask" && t.risk !== "approval",
+      );
+      let text = "";
+      let err: string | null = null;
+      try {
+        for await (const event of route.provider.run({
+          system:
+            "You are a focused sub-agent inside apOS. Do exactly the task using your tools, then reply with a concise, factual summary of what you found — no preamble, no restating the task.",
+          messages: [{ role: "user", content: input.task }],
+          tools,
+          toolCtx: {
+            db: ctx.db,
+            subagentDepth: (ctx.subagentDepth ?? 0) + 1,
+            subject: null,
+            subjectCursor: null,
+          },
+          model: route.model,
+          maxTurns: 12,
+        })) {
+          if (event.type === "done") text = event.text;
+          if (event.type === "error") err = event.message;
+        }
+      } catch (e) {
+        err = String(e);
+      }
+      if (err && !text) return { error: err.slice(0, 200) };
+      return { summary: (text || "(no result)").slice(0, 4000) };
+    },
+  },
 ];
 
 /** All module-declared AI tools, keyed by their dotted name ("tasks.create"). */

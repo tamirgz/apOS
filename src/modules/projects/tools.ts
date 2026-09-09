@@ -157,6 +157,22 @@ export const projectTools: AiToolDef[] = [
         ctx.subjectCursor = { kind: "project", items, index: 0 };
       }
       const cur = ctx.subjectCursor;
+      // Health-write guard: an agent that iterates projects AND writes health
+      // (focusRequireHealth) must record health for the CURRENTLY-focused project
+      // before advancing — otherwise it can focus a project and silently skip it,
+      // freezing its stored health and its deck card. Runs before both the
+      // done-check and the advance, so it also covers the final project. The
+      // focused subject stays put, so the model's next setHealth targets it.
+      if (ctx.focusRequireHealth && cur.index >= 1) {
+        const prev = cur.items[cur.index - 1];
+        if (prev && !cur.healthWritten?.has(prev.id)) {
+          return {
+            needsHealth: true,
+            focused: prev.name,
+            message: `Record projects.setHealth for '${prev.name}' before advancing — every project you focus must get a health judgement. The focused project is still '${prev.name}'.`,
+          };
+        }
+      }
       if (cur.index >= cur.items.length) {
         ctx.subject = null;
         return { done: true, visited: cur.items.length };
@@ -262,6 +278,11 @@ export const projectTools: AiToolDef[] = [
         })
         .where(eq(projects.id, t.id))
         .returning();
+      // Mark this subject as health-written so projects.focusNext's guard lets
+      // the sweep advance past it (see focusRequireHealth).
+      if (row && ctx.subjectCursor) {
+        (ctx.subjectCursor.healthWritten ??= new Set()).add(t.id);
+      }
       return row
         ? { updated: { id: row.id, health: row.health } }
         : { error: "project not found" };

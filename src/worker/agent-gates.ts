@@ -26,6 +26,7 @@ import { promisify } from "node:util";
 import { and, desc, eq, sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { agentRuns } from "@/core/db/schema/agents";
+import { HEALTH_STALE_DAYS } from "@/modules/projects/health";
 
 const exec = promisify(execFile);
 
@@ -64,12 +65,39 @@ function changeGate(kinds: string[], what: string): Gate {
 }
 
 const GATES: Record<string, Gate> = {
-  // Re-derives per-project health from tasks/notes/work. Nothing moved →
-  // health can't have moved either.
-  "Project pulse": changeGate(
-    ["project", "task", "note", "feature", "workbench"],
-    "project/task/note",
-  ),
+  // Re-derives per-project health from tasks/notes/work. Content changes are
+  // the primary signal — but NOT the only one: a project going idle is itself a
+  // health signal (at_risk → stalled at 14d), and "nothing moved" would
+  // otherwise freeze its stored health (and its deck card) forever. So also run
+  // when any active project's stored health has aged past the trust window
+  // (HEALTH_STALE_DAYS), the point at which resolveHealth stops trusting it.
+  // Self-limiting: setHealth bumps health_updated_at, so a refreshed project
+  // stays fresh for ~HEALTH_STALE_DAYS before this can fire for it again.
+  "Project pulse": async (lastSuccessAt) => {
+    if (!lastSuccessAt) return RUN("first run");
+    if (
+      await indexChangedSince(
+        ["project", "task", "note", "feature", "workbench"],
+        lastSuccessAt,
+      )
+    ) {
+      return RUN("project/task/note changed since last success");
+    }
+    const stale = await db.execute(dsql`
+      select 1 from projects
+       where status = 'active' and kind = 'project'
+         and (health_updated_at is null
+              or health_updated_at < now() - make_interval(days => ${HEALTH_STALE_DAYS}))
+       limit 1`);
+    if ([...stale].length > 0) {
+      return RUN(
+        `a project's stored health is stale (>${HEALTH_STALE_DAYS}d) — re-deriving`,
+      );
+    }
+    return SKIP(
+      `no project/task/note changes and all health fresh since ${lastSuccessAt.toISOString()}`,
+    );
+  },
 
   // Chief-of-staff read per project — grounded in the same material, plus
   // fresh repo digests.

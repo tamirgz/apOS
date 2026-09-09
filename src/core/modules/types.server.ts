@@ -46,7 +46,22 @@ export interface AiToolContext {
     kind: string;
     items: Array<{ id: string; name: string; read: Record<string, unknown> }>;
     index: number;
+    /**
+     * Subject ids that received a health write (projects.setHealth) this run.
+     * Backs the focusNext health-write guard (see `focusRequireHealth`): the
+     * cursor won't advance past a focused project that isn't in here.
+     */
+    healthWritten?: Set<string>;
   } | null;
+  /**
+   * When true, projects.focusNext refuses to advance to the next project until
+   * the currently-focused one has received a projects.setHealth write — so a
+   * health-writing sweep (Project pulse) can't focus a project and silently skip
+   * it, freezing its stored health. Set by the executor for agents whose toolset
+   * has BOTH projects.focusNext and projects.setHealth; unset (so no-op) for
+   * iterating agents that don't write health (advisor, repo-watcher).
+   */
+  focusRequireHealth?: boolean;
   /**
    * Per-run entity handle table for SURVEY writes (where the agent legitimately
    * picks WHICH few entities to act on — task triage, idea review, follow-ups).

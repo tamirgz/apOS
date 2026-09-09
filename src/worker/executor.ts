@@ -359,7 +359,19 @@ async function runClaimed(
           tools,
           // subject/subjectCursor start empty; a cursor tool (projects.focusNext)
           // binds the subject so per-subject writes never carry a model id.
-          toolCtx: { db, agentRunId: runId, ledger, subject: null, subjectCursor: null },
+          // focusRequireHealth: a project-iterating agent that can write health
+          // (Project pulse) must write it for every focused project — the
+          // focusNext guard enforces it so none is skipped and left stale.
+          toolCtx: {
+            db,
+            agentRunId: runId,
+            ledger,
+            subject: null,
+            subjectCursor: null,
+            focusRequireHealth:
+              agent.tools.includes("projects.focusNext") &&
+              agent.tools.includes("projects.setHealth"),
+          },
           model: mdl,
           // Per-agent tool-loop budget; undefined falls back to the provider
           // default. Lets a many-item agent finish the list instead of

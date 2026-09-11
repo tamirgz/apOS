@@ -575,6 +575,9 @@ export async function runAttempt(attemptId: string): Promise<void> {
         ? [...cliPreamble, "", "TASK:", task.prompt, feedbackBlock, researchBlock].join("\n")
         : task.prompt + feedbackBlock + researchBlock;
 
+    // The id of the current contiguous streamed-text row (coalesced in the
+    // event callback below); reset to null whenever a non-text event arrives.
+    let curTextEventId: string | null = null;
     const result = await adapter.run(
       {
         attemptId: attempt.id,
@@ -615,7 +618,32 @@ export async function runAttempt(attemptId: string): Promise<void> {
       },
       async (e) => {
         lastProgressAt = Date.now(); // any event = progress; resets the stall clock
-        await emitEvent(attempt.id, e);
+        if (e.type === "text") {
+          // Providers stream CUMULATIVE assistant text (each event is the full
+          // text so far). Coalesce a contiguous run into ONE row we UPDATE, so
+          // the UI shows a single growing block instead of a per-token staircase
+          // (and we don't persist hundreds of snapshot rows per turn).
+          if (curTextEventId) {
+            await db
+              .update(attemptEvents)
+              .set({ payload: e.payload })
+              .where(eq(attemptEvents.id, curTextEventId));
+            await db
+              .update(taskAttempts)
+              .set({ heartbeatAt: new Date() })
+              .where(eq(taskAttempts.id, attempt.id));
+          } else {
+            const [row] = await db
+              .insert(attemptEvents)
+              .values({ attemptId: attempt.id, type: "text", payload: e.payload })
+              .returning({ id: attemptEvents.id });
+            curTextEventId = row?.id ?? null;
+          }
+        } else {
+          // Any non-text event ends the current text segment.
+          curTextEventId = null;
+          await emitEvent(attempt.id, e);
+        }
         await notifyChanged(task.id);
       },
     );

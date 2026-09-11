@@ -303,6 +303,32 @@ async function sweepOrphanedFlowRuns() {
   log(`flow orphan sweep: failed ${ids.length} run(s)`);
 }
 
+/**
+ * Workbench attempts run IN this process (native adapter) or as children it
+ * supervises, so any attempt still queued/running at boot died with the previous
+ * worker — without this it sat in "running" forever (and, since it's now in the
+ * run queue, showed there indefinitely). Boot-only + unconditional, like flows.
+ */
+async function sweepOrphanedWorkbench() {
+  const orphaned = await db.execute(dsql`
+    update task_attempts
+       set status = 'failed',
+           error = 'orphaned (worker restarted or crashed mid-run)',
+           ended_at = now()
+     where status in ('queued', 'running')
+     returning id, task_id`);
+  const rows = [...orphaned] as { id: string; task_id: string }[];
+  if (rows.length === 0) return;
+  const taskIds = [...new Set(rows.map((r) => r.task_id))];
+  // Fail the parent task too (unless a human already resolved it otherwise).
+  await db.execute(dsql`
+    update workbench_tasks
+       set status = 'failed', updated_at = now()
+     where id = any(${taskIds}::uuid[]) and status in ('queued', 'running')`);
+  for (const id of taskIds) await sql.notify("workbench_changed", id);
+  log(`workbench orphan sweep: failed ${rows.length} attempt(s)`);
+}
+
 async function main() {
   // Single-runner guarantee via advisory lock on a dedicated connection.
   const lockConn = postgres(url, { max: 1, ssl: PG_SSL });
@@ -318,6 +344,7 @@ async function main() {
 
   await sweepOrphans();
   await sweepOrphanedFlowRuns().catch((e) => log(`flow orphan sweep failed: ${e}`));
+  await sweepOrphanedWorkbench().catch((e) => log(`workbench orphan sweep failed: ${e}`));
   await syncSchedules();
   await syncRoutineCrons();
   await syncFlowCrons();

@@ -60,8 +60,15 @@ function eventLine(e: Detail["events"][number]): string {
         0,
         400,
       );
-    case "tool_result":
-      return `← ${String(p.result ?? "").slice(0, 300)}`;
+    case "tool_result": {
+      // Tool results are usually objects — JSON-stringify so they don't render
+      // as "[object Object]".
+      const r =
+        typeof p.result === "string"
+          ? p.result
+          : JSON.stringify(p.result ?? "");
+      return `← ${r.slice(0, 300)}`;
+    }
     case "summary":
       return `❯ ${p.text}`;
     case "result":

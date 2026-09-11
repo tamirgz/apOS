@@ -37,16 +37,22 @@ export const PG_SSL: SslPolicy = resolveSsl();
 // it via AIOS_PG_POOL_MAX on cloud so the two process pools + singletons fit.
 const POOL_MAX = Math.max(1, Number(process.env.AIOS_PG_POOL_MAX ?? 10));
 
-// On a hosted DB, RELEASE idle pool connections instead of holding `max` open
-// forever. This keeps the resting footprint tiny (just the persistent
-// lock/listener/SSE singletons) so a low connection cap isn't exhausted — and,
-// crucially, so restart churn can't accumulate: a killed daemon's idle backends
-// are what clogged the Aiven free 20-slot cap. Locally it's a harmless no-op
-// (unlimited connections). idle_timeout/max_lifetime are in SECONDS.
+// On a hosted DB, connections are released after `idle_timeout` idle seconds.
+// This must balance two costs on a REMOTE TLS DB:
+//   - too SHORT and every navigation after a short pause pays a fresh connect +
+//     TLS verify-full handshake to the DB region — measured ~600ms vs ~60ms on a
+//     warm connection, which is exactly the "some pages take time" lag.
+//   - too LONG (or 0 = never) and idle backends accumulate against the cap.
+// The old 20s was sized for Aiven's dead 20-slot free cap; Supabase's pooler is
+// 40, so we keep connections WARM across an active browsing session (default
+// 10 min, tunable via AIOS_PG_IDLE_TIMEOUT) and let max_lifetime recycle them
+// for hygiene. Locally it's a harmless no-op (unlimited connections).
+// idle_timeout/max_lifetime are in SECONDS.
+const IDLE_TIMEOUT = Math.max(20, Number(process.env.AIOS_PG_IDLE_TIMEOUT ?? 600));
 const idleOpts =
   PG_SSL === false
     ? {}
-    : { idle_timeout: 20, max_lifetime: 60 * 30, connect_timeout: 30 };
+    : { idle_timeout: IDLE_TIMEOUT, max_lifetime: 60 * 30, connect_timeout: 30 };
 
 // Cache the connection across Next.js HMR reloads.
 const g = globalThis as unknown as { __aiosSql?: ReturnType<typeof postgres> };

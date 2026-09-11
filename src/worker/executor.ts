@@ -378,6 +378,13 @@ async function runClaimed(
           // truncating at the default cap.
           maxTurns: agent.turnBudget ?? undefined,
           signal: controller.signal,
+          // Queue visibility: fold this run's model calls into the agent_run row.
+          track: {
+            source: "agent",
+            label: agent.name,
+            parentKind: "agent",
+            parentId: runId,
+          },
         })) {
           await transcript.push(event);
           if (event.type === "done") finalText = event.text;

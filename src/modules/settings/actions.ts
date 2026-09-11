@@ -241,6 +241,7 @@ export async function verifyClaudeAuth(): Promise<{ valid: boolean; error?: stri
       toolCtx: { db },
       model: "claude-haiku-4-5-20251001",
       maxTurns: 1,
+      track: { source: "test", label: "connection test" },
     })) {
       if (ev.type === "done" && ev.text?.trim()) ok = true;
       if (ev.type === "error") err = ev.message;

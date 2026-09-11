@@ -89,8 +89,10 @@ export interface RunQueueEntry {
   /** Agent name, or the chat prompt's title. */
   label: string;
   /** agent (cron/flow), chat (a prompt), knowledge (link/snippet enrichment),
-   *  or workbench (a Workbench task — e.g. the Investments deep report). */
-  kind: "agent" | "chat" | "knowledge" | "workbench";
+   *  workbench (a Workbench task — e.g. the Investments deep report), model (a
+   *  standalone model call caught by the provider chokepoint — a job, gate, Ask,
+   *  flow or sub-task), or embedding (the coalesced embedding-sweep activity). */
+  kind: "agent" | "chat" | "knowledge" | "workbench" | "model" | "embedding";
   /** A page to open, when the run has one. */
   href: string | null;
   status: "running" | "queued";
@@ -124,7 +126,8 @@ export async function getRunQueue(): Promise<RunQueueState> {
   // Every kind of in-flight model work shares one queue view: agents
   // (internally-initiated), chat prompts, and knowledge-item enrichment (a link
   // or snippet being fetched + analyzed by the model). Cheap queries, merged.
-  const [agentRows, chatRows, knowledgeRows, workbenchRows] = await Promise.all([
+  const [agentRows, chatRows, knowledgeRows, workbenchRows, modelCallRows] =
+    await Promise.all([
     db
       .select({
         runId: agentRuns.id,
@@ -181,6 +184,28 @@ export async function getRunQueue(): Promise<RunQueueState> {
         left join task_attempts a on a.task_id = t.id
        where t.status in ('queued','running')
        order by t.id, a.created_at desc nulls last`),
+    // The provider chokepoint's live registry — EVERY model call that isn't
+    // already one of the rich rows above (background jobs, gates, Ask, flows,
+    // sub-tasks, the embedding sweep). Rows whose parentKind names a rich kind
+    // are suppressed here: their agent/chat/workbench row already represents
+    // them. Stale rows (a crashed process) are excluded by the time cutoffs.
+    db.execute<{
+      id: string;
+      kind: string;
+      provider: string;
+      model: string;
+      label: string;
+      source: string;
+      started_at: Date;
+    }>(dsql`
+      select id, kind, provider, model, label, source, started_at
+        from model_calls
+       where (parent_kind is null
+              or parent_kind not in ('agent','chat','workbench','knowledge'))
+         and (
+           (kind = 'generation' and started_at > now() - interval '30 minutes')
+           or (kind = 'embedding' and started_at > now() - interval '30 seconds')
+         )`),
   ]);
 
   const entries: RunQueueEntry[] = [
@@ -229,6 +254,19 @@ export async function getRunQueue(): Promise<RunQueueState> {
         : "workbench",
       createdAt: new Date(r.created_at).toISOString(),
       startedAt: r.started_at ? new Date(r.started_at).toISOString() : null,
+    })),
+    ...[...modelCallRows].map((r) => ({
+      runId: r.id,
+      label: r.label || r.source,
+      kind: (r.kind === "embedding" ? "embedding" : "model") as
+        | "embedding"
+        | "model",
+      href: null,
+      status: "running" as const,
+      // source + the bare model name, e.g. "gate · qwen3:8b".
+      trigger: r.model ? `${r.source} · ${r.model.split("/").pop()}` : r.source,
+      createdAt: new Date(r.started_at).toISOString(),
+      startedAt: new Date(r.started_at).toISOString(),
     })),
   ].sort((a, b) => {
     // Running first, then queued; within each, oldest first (FIFO).

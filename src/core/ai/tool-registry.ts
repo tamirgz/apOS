@@ -218,6 +218,8 @@ const CORE_TOOLS: AiToolDef[] = [
           },
           model: route.model,
           maxTurns: 12,
+          // Its own queue row (no parentKind) so nested sub-agent work is visible.
+          track: { source: "subtask", label: "sub-task" },
         })) {
           if (event.type === "done") text = event.text;
           if (event.type === "error") err = event.message;

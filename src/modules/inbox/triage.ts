@@ -93,6 +93,7 @@ export async function triageInboxItem(itemId: string): Promise<void> {
       messages: [{ role: "user", content: `Captured input:\n${item.input}` }],
       tools: getToolsByNames(TRIAGE_TOOLS),
       toolCtx: { db },
+      track: { source: "job", label: "inbox triage" },
       model: route.model,
       maxTurns: 6,
     })) {

@@ -161,6 +161,7 @@ export async function reconsiderProject(projectId: string, angle: string) {
     toolCtx: { db },
     model: "claude-haiku-4-5-20251001",
     maxTurns: 6,
+    track: { source: "action", label: "advisor refresh" },
   })) {
     if (ev.type === "error") throw new Error(ev.message);
   }

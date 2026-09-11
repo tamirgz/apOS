@@ -241,6 +241,7 @@ export async function answerQuestion(query: string): Promise<AskAnswer> {
     toolCtx: { db },
     model: route.model,
     maxTurns: 1,
+    track: { source: "ask", label: "ask" },
     signal: AbortSignal.timeout(90_000),
   })) {
     if (ev.type === "text") answer = ev.text;

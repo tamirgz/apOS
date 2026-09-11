@@ -8,14 +8,28 @@ import { mlxProvider } from "./mlx";
 import { nvidiaProvider } from "./nvidia";
 import { geminiProvider } from "./gemini";
 import { openrouterProvider } from "./openrouter";
+import { trackGeneration } from "./model-track";
+
+/**
+ * Wrap a provider so EVERY run() registers a live row in the model-call queue
+ * for the duration of the call. This is the single chokepoint: whatever calls
+ * resolveRoute().provider.run(...) or providers.<id>.run(...) is tracked, so no
+ * model invocation can escape the queue.
+ */
+function tracked(id: AIProviderId, p: AIProvider): AIProvider {
+  return {
+    ...p,
+    run: (opts) => trackGeneration(id, opts.model, opts.track, p.run(opts)),
+  };
+}
 
 export const providers: Record<AIProviderId, AIProvider> = {
-  anthropic: anthropicProvider,
-  ollama: ollamaProvider,
-  mlx: mlxProvider,
-  nvidia: nvidiaProvider,
-  gemini: geminiProvider,
-  openrouter: openrouterProvider,
+  anthropic: tracked("anthropic", anthropicProvider),
+  ollama: tracked("ollama", ollamaProvider),
+  mlx: tracked("mlx", mlxProvider),
+  nvidia: tracked("nvidia", nvidiaProvider),
+  gemini: tracked("gemini", geminiProvider),
+  openrouter: tracked("openrouter", openrouterProvider),
 };
 
 // Re-exported for server-side callers that already import this module —
@@ -145,7 +159,7 @@ export async function resolveRoute(taskKey: string): Promise<ResolvedRoute> {
   }
   return {
     taskKey,
-    provider: anthropicProvider,
+    provider: providers.anthropic,
     providerId: "anthropic",
     model: "claude-sonnet-5",
   };

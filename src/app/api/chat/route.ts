@@ -260,6 +260,12 @@ export async function POST(req: Request) {
             model: route.model,
             reasoning,
             signal: runAbort.signal,
+            track: {
+              source: "chat",
+              label: taskKey,
+              parentKind: "chat",
+              parentId: chatRunId,
+            },
           })) {
             if (event.type === "tool_call") calls.add(event.name);
             if (event.type === "tool_result") {

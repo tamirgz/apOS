@@ -499,6 +499,10 @@ async function main() {
   // pick-up every 5 minutes.
   new Cron("*/5 * * * *", () => {
     sweepOrphans().catch((e) => log(`safety-net orphan sweep failed: ${e}`));
+    // Reap model-call registry rows orphaned by a crashed process.
+    import("@/core/ai/model-track")
+      .then((m) => m.sweepStaleModelCalls())
+      .catch((e) => log(`model-call sweep failed: ${e}`));
     syncSchedules().catch((e) => log(`safety-net schedule sync failed: ${e}`));
     syncRoutineCrons().catch((e) => log(`safety-net routine sync failed: ${e}`));
     syncFlowCrons().catch((e) => log(`safety-net flow sync failed: ${e}`));

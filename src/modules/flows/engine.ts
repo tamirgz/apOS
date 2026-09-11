@@ -799,6 +799,7 @@ async function judge(cond: string, report: string): Promise<boolean> {
       toolCtx: { db },
       model: route.model,
       maxTurns: 1,
+      track: { source: "flow", label: "flow node" },
     })) {
       if (ev.type === "done") out = ev.text;
     }

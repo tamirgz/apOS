@@ -38,6 +38,7 @@ export async function translateToEnglish(text: string): Promise<string | null> {
       toolCtx: { db },
       model: route.model,
       maxTurns: 1,
+      track: { source: "job", label: "telegram translate" },
     })) {
       if (ev.type === "text") out += ev.text;
       else if (ev.type === "done" && ev.text) out = ev.text;

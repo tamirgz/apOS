@@ -74,7 +74,13 @@ function QueueRow({
  */
 export function RunQueuePanel({ state }: { state: RunQueueState }) {
   const [now, setNow] = useState(() => Date.now());
-  useLiveEvents(["agent_runs", "chat_runs", "knowledge_changed", "workbench_changed"]);
+  useLiveEvents([
+    "agent_runs",
+    "chat_runs",
+    "knowledge_changed",
+    "workbench_changed",
+    "model_calls",
+  ]);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);

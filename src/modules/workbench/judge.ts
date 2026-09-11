@@ -127,6 +127,7 @@ async function runOnce(
     toolCtx: { db },
     model,
     maxTurns: 1,
+    track: { source: "workbench", label: "judge" },
   })) {
     if (ev.type === "text") text += ev.text;
     else if (ev.type === "done" && ev.text) text = ev.text;

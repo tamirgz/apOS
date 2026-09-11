@@ -93,6 +93,7 @@ export async function classifyCommitRelevance(
       toolCtx: { db },
       model,
       maxTurns: 1,
+      track: { source: "gate", label: "commit gate" },
     })) {
       if (ev.type === "text") out += ev.text;
       else if (ev.type === "done" && ev.text) out = ev.text;

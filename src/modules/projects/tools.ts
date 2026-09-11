@@ -42,6 +42,7 @@ async function verifyBriefGrounded(
       toolCtx: { db },
       model: route.model,
       maxTurns: 1,
+      track: { source: "gate", label: "insight verify" },
     })) {
       if (ev.type === "done") text = ev.text;
     }

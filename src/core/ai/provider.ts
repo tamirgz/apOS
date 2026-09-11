@@ -33,6 +33,23 @@ export interface AIRunOptions {
   // reasoning yields no thinking tokens but adds latency (up to 6.7×) and can
   // trigger spurious tool calls. Providers without a reasoning channel ignore it.
   reasoning?: "none" | "low";
+  /**
+   * Optional queue-visibility descriptor. The provider wrapper (core/ai/routing
+   * → model-track) registers a live model-call row for this run; `track` labels
+   * it and, when `parentKind` names a queue-backed run (agent/chat/workbench),
+   * lets the queue fold this call into the rich parent row instead of showing a
+   * bare generation row. Omitted → the call is still tracked, as "unknown".
+   */
+  track?: ModelTrack;
+}
+
+/** How a model call presents in the run queue (see core/ai/model-track). */
+export interface ModelTrack {
+  /** Origin class: agent | chat | workbench | job | gate | ask | flow | subtask | test | … */
+  source: string;
+  label?: string;
+  parentKind?: string | null;
+  parentId?: string | null;
 }
 
 export interface AIProvider {

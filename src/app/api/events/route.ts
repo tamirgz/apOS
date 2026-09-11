@@ -37,6 +37,7 @@ const CHANNELS = [
   "telegram_changed",
   "flow_runs",
   "flows_changed",
+  "model_calls",
 ] as const;
 
 type Subscriber = (channel: string, payload: string) => void;

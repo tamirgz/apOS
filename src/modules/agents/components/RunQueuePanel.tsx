@@ -31,7 +31,7 @@ function QueueRow({
         className={cn("dot", running && "animate-pulse-soft")}
         style={{ color }}
       />
-      {/* non-agent work (chat prompts, knowledge enrichment) is dimmed + italic
+      {/* non-agent work (chat prompts, knowledge enrichment, workbench tasks) is dimmed + italic
           to tell it apart from agents at a glance. */}
       <span
         className={cn(
@@ -74,7 +74,7 @@ function QueueRow({
  */
 export function RunQueuePanel({ state }: { state: RunQueueState }) {
   const [now, setNow] = useState(() => Date.now());
-  useLiveEvents(["agent_runs", "chat_runs", "knowledge_changed"]);
+  useLiveEvents(["agent_runs", "chat_runs", "knowledge_changed", "workbench_changed"]);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);

@@ -88,8 +88,9 @@ export interface RunQueueEntry {
   runId: string;
   /** Agent name, or the chat prompt's title. */
   label: string;
-  /** agent (cron/flow), chat (a prompt), or knowledge (link/snippet enrichment). */
-  kind: "agent" | "chat" | "knowledge";
+  /** agent (cron/flow), chat (a prompt), knowledge (link/snippet enrichment),
+   *  or workbench (a Workbench task — e.g. the Investments deep report). */
+  kind: "agent" | "chat" | "knowledge" | "workbench";
   /** A page to open, when the run has one. */
   href: string | null;
   status: "running" | "queued";
@@ -123,7 +124,7 @@ export async function getRunQueue(): Promise<RunQueueState> {
   // Every kind of in-flight model work shares one queue view: agents
   // (internally-initiated), chat prompts, and knowledge-item enrichment (a link
   // or snippet being fetched + analyzed by the model). Cheap queries, merged.
-  const [agentRows, chatRows, knowledgeRows] = await Promise.all([
+  const [agentRows, chatRows, knowledgeRows, workbenchRows] = await Promise.all([
     db
       .select({
         runId: agentRuns.id,
@@ -161,6 +162,25 @@ export async function getRunQueue(): Promise<RunQueueState> {
       .from(knowledgeItems)
       // fetching + enriching are the in-flight (model-working) stages.
       .where(inArray(knowledgeItems.status, ["fetching", "enriching"])),
+    // Workbench tasks (the deep report, routines, any delegated task). One row
+    // per in-flight task with its latest attempt's executor/model + start time,
+    // so the queue reflects EVERY model call regardless of where it came from.
+    db.execute<{
+      id: string;
+      title: string;
+      status: string;
+      created_at: Date;
+      executor_id: string | null;
+      model: string | null;
+      started_at: Date | null;
+    }>(dsql`
+      select distinct on (t.id)
+             t.id, t.title, t.status, t.created_at,
+             a.executor_id, a.model, a.started_at
+        from workbench_tasks t
+        left join task_attempts a on a.task_id = t.id
+       where t.status in ('queued','running')
+       order by t.id, a.created_at desc nulls last`),
   ]);
 
   const entries: RunQueueEntry[] = [
@@ -195,6 +215,20 @@ export async function getRunQueue(): Promise<RunQueueState> {
       createdAt: new Date(r.createdAt).toISOString(),
       // updated_at is when it entered the current (fetching/enriching) stage.
       startedAt: new Date(r.updatedAt).toISOString(),
+    })),
+    ...[...workbenchRows].map((r) => ({
+      runId: r.id,
+      label: r.title,
+      kind: "workbench" as const,
+      href: `/m/workbench/${r.id}`,
+      status: r.status as "running" | "queued",
+      // The executor + model carrying the task — the workbench equivalent of a
+      // chat's route (e.g. "native · mlx…"). Falls back to "workbench".
+      trigger: r.executor_id
+        ? `${r.executor_id}${r.model ? ` · ${r.model.split("/").pop()}` : ""}`
+        : "workbench",
+      createdAt: new Date(r.created_at).toISOString(),
+      startedAt: r.started_at ? new Date(r.started_at).toISOString() : null,
     })),
   ].sort((a, b) => {
     // Running first, then queued; within each, oldest first (FIFO).

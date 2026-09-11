@@ -75,6 +75,7 @@ export async function analyzeIdea(ideaId: string): Promise<void> {
       ],
       tools: [submitTool],
       toolCtx: { db },
+      track: { source: "job", label: "idea analysis" },
       model: route.model,
       // The SDK counts internal tool rounds too — a structured multi-section
       // analysis needs headroom (8 was not enough in practice).

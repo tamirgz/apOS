@@ -30,6 +30,7 @@ async function llmJson(system: string, user: string): Promise<unknown | null> {
       toolCtx: { db },
       model: route.model,
       maxTurns: 1,
+      track: { source: "job", label: "memory distill" },
     })) {
       if (ev.type === "done") text = ev.text;
     }

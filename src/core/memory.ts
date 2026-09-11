@@ -587,6 +587,7 @@ export async function reflectOnRun(input: {
       toolCtx: { db },
       model: route.model,
       maxTurns: 1,
+      track: { source: "job", label: "memory" },
     })) {
       if (ev.type === "done") text = ev.text;
       else if (ev.type === "text" && !text) text += ev.text;

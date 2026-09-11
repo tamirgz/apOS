@@ -380,6 +380,7 @@ export async function composeRoutine(description: string): Promise<
       toolCtx: { db },
       model: route.model,
       maxTurns: 1,
+      track: { source: "workbench", label: "routine builder" },
     })) {
       if (ev.type === "text") text += ev.text;
       else if (ev.type === "done" && ev.text) text = ev.text;

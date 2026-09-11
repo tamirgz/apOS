@@ -72,6 +72,12 @@ export const nativeAdapter: Adapter = {
         toolCtx: { db },
         model,
         signal: ctx.signal,
+        track: {
+          source: "workbench",
+          label: "workbench task",
+          parentKind: "workbench",
+          parentId: ctx.attemptId,
+        },
       })) {
         switch (event.type) {
           case "text":

@@ -24,6 +24,9 @@ export async function getEmbeddingModel(): Promise<string> {
 
 export async function embedText(text: string): Promise<number[]> {
   const model = await getEmbeddingModel();
+  // Register embedding activity in the model-call queue (coalesced + throttled,
+  // so a big sweep isn't thousands of DB writes). Best-effort, never blocks.
+  void import("@/core/ai/model-track").then((m) => m.embeddingHeartbeat(model));
   // Serialized through the local-inference queue so the embed sweep doesn't
   // contend with (and get evicted by) a big chat model on the same machine.
   return withLocalSlot(async () => {

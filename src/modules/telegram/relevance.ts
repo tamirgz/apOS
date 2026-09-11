@@ -81,6 +81,7 @@ export async function classifyRelevance(input: {
       toolCtx: { db },
       model: route.model,
       maxTurns: 1,
+      track: { source: "gate", label: "telegram relevance" },
     })) {
       if (ev.type === "text") out += ev.text;
       else if (ev.type === "done" && ev.text) out = ev.text;

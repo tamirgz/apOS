@@ -393,6 +393,13 @@
       "when": 1789128357006,
       "tag": "0055_woozy_crusher_hogan",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1789251200500,
+      "tag": "0056_harsh_sugar_man",
+      "breakpoints": true
     }
   ]
 }

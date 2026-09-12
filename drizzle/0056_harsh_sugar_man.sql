@@ -1,0 +1,1 @@
+ALTER TABLE "knowledge_items" ADD COLUMN IF NOT EXISTS "category" text;

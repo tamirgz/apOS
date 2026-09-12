@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { BrainCircuit, Sparkles, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
+import { categoryColor } from "@/modules/projects/components/categoryColor";
 import { captureKnowledge } from "../actions";
 import type { KnowledgeDuplicate } from "../dedup";
 import type { KnowledgeItem } from "../schema";
@@ -159,10 +160,91 @@ function ItemCard({ item, index }: { item: KnowledgeItem; index: number }) {
   );
 }
 
+const UNSORTED = "Unsorted";
+
+/** Group items by their theme category; Unsorted (unclassified) sinks last,
+ *  the rest by size so the fullest shelves lead. */
+function groupByCategory(
+  items: KnowledgeItem[],
+): [string, KnowledgeItem[]][] {
+  const map = new Map<string, KnowledgeItem[]>();
+  for (const it of items) {
+    const c = it.category?.trim() || UNSORTED;
+    const bucket = map.get(c) ?? (map.set(c, []), map.get(c)!);
+    bucket.push(it);
+  }
+  return [...map.entries()].sort((a, b) => {
+    if (a[0] === UNSORTED) return 1;
+    if (b[0] === UNSORTED) return -1;
+    return b[1].length - a[1].length;
+  });
+}
+
+function FilterPill({
+  label,
+  count,
+  color,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  color: string | null;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition",
+        active
+          ? "border-white/20 bg-white/6 text-ink"
+          : "border-white/8 text-ink-dim hover:bg-white/4",
+      )}
+    >
+      <span
+        className="size-1.5 rounded-full"
+        style={color ? { background: color } : { border: "1px solid rgba(255,255,255,0.25)" }}
+      />
+      <span className="max-w-[12rem] truncate">{label}</span>
+      <span className="font-mono text-[10px] text-ink-faint">{count}</span>
+    </button>
+  );
+}
+
+function SectionHeader({
+  label,
+  count,
+  color,
+}: {
+  label: string;
+  count: number;
+  color: string | null;
+}) {
+  return (
+    <div className="mb-3 flex items-center gap-2.5">
+      <span
+        className="size-2 rounded-full"
+        style={color ? { background: color } : { border: "1px solid rgba(255,255,255,0.2)" }}
+      />
+      <h3 className="font-display text-sm font-semibold text-ink">{label}</h3>
+      <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+        {count}
+      </span>
+      <span className="h-px flex-1 bg-gradient-to-r from-white/8 to-transparent" />
+    </div>
+  );
+}
+
 export function KnowledgeBoard({ items }: { items: KnowledgeItem[] }) {
   useLiveEvents(["knowledge_changed"]);
+  // Filter to one category, or null for all. Searching lives in ⌘K.
+  const [active, setActive] = useState<string | null>(null);
+  const groups = useMemo(() => groupByCategory(items), [items]);
+  const shown = active ? groups.filter(([c]) => c === active) : groups;
 
-  // Searching lives in ⌘K (context-aware) while on this page — no inline bar.
   return (
     <div>
       <CaptureBox />
@@ -173,13 +255,45 @@ export function KnowledgeBoard({ items }: { items: KnowledgeItem[] }) {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <AnimatePresence mode="popLayout">
-            {items.map((item, i) => (
-              <ItemCard key={item.id} item={item} index={i} />
+        <>
+          <div className="mb-6 flex flex-wrap items-center gap-2">
+            <FilterPill
+              label="All"
+              count={items.length}
+              color={null}
+              active={active === null}
+              onClick={() => setActive(null)}
+            />
+            {groups.map(([cat, list]) => (
+              <FilterPill
+                key={cat}
+                label={cat}
+                count={list.length}
+                color={cat === UNSORTED ? null : categoryColor(cat)}
+                active={active === cat}
+                onClick={() => setActive(active === cat ? null : cat)}
+              />
             ))}
-          </AnimatePresence>
-        </div>
+          </div>
+          <div className="flex flex-col gap-8">
+            {shown.map(([cat, list]) => (
+              <section key={cat}>
+                <SectionHeader
+                  label={cat}
+                  count={list.length}
+                  color={cat === UNSORTED ? null : categoryColor(cat)}
+                />
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <AnimatePresence mode="popLayout">
+                    {list.map((item, i) => (
+                      <ItemCard key={item.id} item={item} index={i} />
+                    ))}
+                  </AnimatePresence>
+                </div>
+              </section>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

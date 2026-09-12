@@ -24,7 +24,42 @@ const InsightSchema = z.object({
   relevance: z
     .string()
     .describe("One sentence: how this connects to the user's stated note/goals"),
+  category: z
+    .string()
+    .describe(
+      "The single best THEME this belongs to (2-3 words, Title Case), e.g. 'AI & Agents', 'Dev Tools & Infra'. REUSE one of the existing categories listed in the prompt when it fits — only coin a new one for a genuinely new domain. This is the shelf it lives on, not a tag.",
+    ),
 });
+
+/** The existing category set, so enrichment reuses shelves instead of coining a
+ *  near-duplicate for every item (the whole point of grouping). */
+async function existingCategories(): Promise<string[]> {
+  const { knowledgeItems } = await import("./schema");
+  const { isNotNull } = await import("drizzle-orm");
+  const rows = await db
+    .selectDistinct({ c: knowledgeItems.category })
+    .from(knowledgeItems)
+    .where(isNotNull(knowledgeItems.category));
+  const seeds = [
+    "AI & Agents",
+    "Dev Tools & Infra",
+    "Software & Open Source",
+    "Systems & Architecture",
+    "Security & Privacy",
+    "Ideas & Inspiration",
+    "Life & Health",
+  ];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of [...rows.map((r) => r.c!).filter(Boolean), ...seeds]) {
+    const k = c.toLowerCase();
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(c);
+    }
+  }
+  return out;
+}
 
 /** Fabric-style named enrichment patterns, per kind. */
 const PATTERNS: Record<string, string> = {
@@ -59,8 +94,11 @@ export async function enrichItem(
     },
   };
 
+  const categories = await existingCategories();
   const material = [
     PATTERNS[item.kind] ?? PATTERNS.text,
+    "",
+    `EXISTING CATEGORIES (reuse one for \`category\` if it fits; only invent a new one for a genuinely new domain): ${categories.join(" · ")}`,
     "",
     `KIND: ${item.kind}`,
     item.url ? `URL: ${item.url}` : null,

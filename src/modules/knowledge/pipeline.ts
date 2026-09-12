@@ -49,6 +49,8 @@ export async function processKnowledgeItem(itemId: string): Promise<void> {
     await setStatus(itemId, "ready", {
       insight,
       title,
+      // Mirror the AI's chosen theme to the top-level column the board groups by.
+      category: insight.category?.trim() || null,
       statusDetail: null,
     });
   } catch (e) {

@@ -34,6 +34,11 @@ export interface KnowledgeInsight {
   quotes: string[];
   tags: string[];
   relevance: string;
+  /** Primary theme the item belongs to — the board groups by this. Free-form
+   *  but REUSED (the AI is seeded with the existing set), like project
+   *  categories, so a handful of stable shelves emerge instead of 40 tag
+   *  fragments. Mirrored to the top-level `category` column for grouping/editing. */
+  category: string;
 }
 
 export const knowledgeItems = pgTable("knowledge_items", {
@@ -49,6 +54,9 @@ export const knowledgeItems = pgTable("knowledge_items", {
     .notNull()
     .default("captured"),
   statusDetail: text("status_detail"),
+  /** Primary theme for board grouping — set by enrichment, editable by the user
+   *  (free-form + reused, like project categories). Null until classified. */
+  category: text("category"),
   /** Fetched source material (readme, oembed, page text …). */
   raw: jsonb("raw"),
   insight: jsonb("insight").$type<KnowledgeInsight>(),

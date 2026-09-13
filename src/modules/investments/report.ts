@@ -19,12 +19,12 @@ import { db } from "@/core/db/client";
  * Runs on the faithful MLX abliterated model (needs LM Studio warm). Editable
  * per-attempt in the Workbench — retry on Claude for a heavier pass.
  */
-// A FAST instruct model: the staged report is now a single-shot WRITE from
-// pre-provided data (no agentic gather), so it doesn't need the heavy
-// abliterated model — which, run through the native executor (tools attached →
-// MLX reasoning on), took ~10min and blew the docs wall-clock (TypeError:
-// terminated). coder-30b-a3b writes the same report from the data in ~1min.
-const REPORT_MODEL = "mlx/qwen3-coder-30b-a3b-instruct";
+// The staged report is a single-shot WRITE from pre-provided data. It runs on
+// OLLAMA's qwen3-coder:30b, not LM Studio/MLX: a long MLX generation kept getting
+// dropped mid-stream ("Model unloaded" → TypeError: terminated) as LM Studio's
+// JIT evicted the model under memory pressure. Ollama keeps the model resident
+// (keep-alive) and streams the full report without eviction (~1min).
+const REPORT_MODEL = "ollama/qwen3-coder:30b";
 
 type ToolResult = Record<string, unknown>;
 

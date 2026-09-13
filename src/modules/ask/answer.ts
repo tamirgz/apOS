@@ -11,7 +11,7 @@
  * Worker-safe (no next/cache).
  */
 import { and, eq } from "drizzle-orm";
-import { resolveRoute } from "@/core/ai/routing";
+import { resolveRoute, runTask } from "@/core/ai/routing";
 import { searchEverything, RELATED_MAX_DISTANCE } from "@/core/embeddings";
 import { db } from "@/core/db/client";
 import { projectFiles, projects } from "@/modules/projects/schema";
@@ -213,7 +213,6 @@ export async function answerQuestion(query: string): Promise<AskAnswer> {
     .join("\n\n");
 
   const ownCount = ownData.length;
-  const route = await resolveRoute("ask");
   const material = [
     `QUESTION: ${q}`,
     "",
@@ -232,14 +231,14 @@ export async function answerQuestion(query: string): Promise<AskAnswer> {
     .filter((line) => line !== null)
     .join("\n");
 
+  const route = await resolveRoute("ask");
   let answer = "";
-  for await (const ev of route.provider.run({
+  for await (const ev of runTask("ask", {
     system:
       "You are the Ask engine of apOS, the user's Agentic Personalized Operating System. Write in a precise, professional register. The SUBSTANCE of your answer comes strictly from the user's own saved data — notes, knowledge, vault, ideas, tasks, files, mail, calendar, people, Telegram, and past answers — never invented facts — and you cite those sources inline as [n]. For external links, use ONLY the exact URLs of the provided \"web\" sources; NEVER invent, guess, or reconstruct a URL from memory (they are fetched and verified, so a fabricated link is stripped). If the provided sources don't answer the question, say so.",
     messages: [{ role: "user", content: material }],
     tools: [],
     toolCtx: { db },
-    model: route.model,
     maxTurns: 1,
     track: { source: "ask", label: "ask" },
     signal: AbortSignal.timeout(90_000),

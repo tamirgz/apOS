@@ -1,7 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
 import { aiRoutes, type AIProviderId } from "@/core/db/schema/ai-routes";
-import type { AIProvider } from "./provider";
+import type { AIEvent, AIProvider, AIRunOptions } from "./provider";
 import { anthropicProvider } from "./anthropic";
 import { ollamaProvider } from "./ollama";
 import { mlxProvider } from "./mlx";
@@ -165,6 +165,61 @@ export async function resolveRoute(taskKey: string): Promise<ResolvedRoute> {
     providerId: "anthropic",
     model: "claude-sonnet-5",
   };
+}
+
+/**
+ * Local fallback per task: when a route's primary provider fails to produce
+ * anything (e.g. a free-tier allowance is exhausted → 429, or the provider is
+ * unreachable), the run retries on this local model so the feature still works.
+ * Keyed by taskKey; only the tasks we deliberately point at a metered/free-tier
+ * cloud model need one.
+ */
+const ROUTE_FALLBACK: Record<string, { provider: AIProviderId; model: string }> = {
+  ask: { provider: "ollama", model: "qwen3-coder:30b" },
+  "project.advisor": { provider: "ollama", model: "qwen3-coder:30b" },
+};
+
+/**
+ * Run a routed task with automatic fallback. Yields the primary run's events;
+ * if the primary errors BEFORE producing any output (the free-tier-exhausted
+ * case surfaces as an immediate error), it transparently reruns on the local
+ * fallback. A primary that already streamed output is NOT re-run (no double
+ * answer / double tool-write) — its error is surfaced as-is.
+ */
+export async function* runTask(
+  taskKey: string,
+  opts: Omit<AIRunOptions, "model">,
+): AsyncIterable<AIEvent> {
+  const route = await resolveRoute(taskKey);
+  const fb = ROUTE_FALLBACK[taskKey];
+  let produced = false;
+  let failed = false;
+  const isOutput = (t: AIEvent["type"]) =>
+    t === "text" || t === "tool_call" || t === "tool_result" || t === "done";
+  try {
+    for await (const ev of route.provider.run({ ...opts, model: route.model })) {
+      if (ev.type === "error") {
+        failed = true;
+        if (produced) yield ev; // partial output already streamed — surface it
+        break;
+      }
+      if (isOutput(ev.type)) produced = true;
+      yield ev;
+    }
+  } catch (e) {
+    failed = true;
+    if (produced) yield { type: "error", message: String(e) };
+  }
+  if (
+    failed &&
+    !produced &&
+    fb &&
+    !(fb.provider === route.providerId && fb.model === route.model)
+  ) {
+    for await (const ev of providers[fb.provider].run({ ...opts, model: fb.model })) {
+      yield ev;
+    }
+  }
 }
 
 export async function setRoute(

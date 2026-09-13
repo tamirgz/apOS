@@ -740,7 +740,16 @@ export function OrbitGraph({ data }: { data: Graph }) {
 
   return (
     <div className="relative h-[calc(100vh-8.5rem)] overflow-hidden rounded-2xl glass">
-      <div ref={holderRef} className="absolute inset-0" />
+      <div
+        ref={holderRef}
+        className="absolute inset-0"
+        onContextMenu={(e) => {
+          // Right-click freezes / resumes the auto-orbit (constellation only).
+          if (mode !== "constellation") return;
+          e.preventDefault();
+          setSpinning((s) => !s);
+        }}
+      />
       <div
         ref={labelLayerRef}
         className="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
@@ -773,16 +782,6 @@ export function OrbitGraph({ data }: { data: Graph }) {
             </button>
           ))}
         </div>
-        {mode === "constellation" && (
-          <button
-            type="button"
-            onClick={() => setSpinning((s) => !s)}
-            className="ml-2 rounded-lg glass px-2.5 py-1 text-xs text-ink-faint transition hover:text-ink-dim"
-            title={spinning ? "Stop the auto-orbit" : "Resume the auto-orbit"}
-          >
-            {spinning ? "◼ stop orbit" : "▶ orbit"}
-          </button>
-        )}
         <p className="mt-1.5 max-w-[15rem] text-[11px] leading-snug text-ink-faint">
           {mode === "semantic"
             ? "A flat 2D map placed by meaning — nearby stars share a topic."
@@ -989,7 +988,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
       <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
         {mode === "semantic"
           ? "drag to pan · scroll to zoom · click a node to open"
-          : "drag to orbit · scroll to zoom · click a node to open"}
+          : `drag to orbit · scroll to zoom · click a node to open · right-click to ${spinning ? "stop" : "resume"} orbiting`}
       </div>
     </div>
   );

@@ -71,6 +71,11 @@ export const nativeAdapter: Adapter = {
         tools,
         toolCtx: { db },
         model,
+        // A "docs" write (e.g. the Investments deep report) is prose from
+        // provided data — NOT an agentic loop. Force reasoning OFF so a local
+        // MLX model doesn't spend minutes on chain-of-thought (which, on the
+        // 30B/35B, stretched the stream until LM Studio dropped it: "terminated").
+        reasoning: ctx.taskType === "docs" ? "none" : undefined,
         signal: ctx.signal,
         track: {
           source: "workbench",

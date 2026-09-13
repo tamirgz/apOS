@@ -31,7 +31,7 @@ interface Probe {
 
 /** listModels() hits the provider's real endpoint with the configured key, so a
  *  bad key or dead endpoint throws — a good cheap auth+connectivity probe. */
-function listModelsProbe(id: "gemini" | "openrouter" | "nvidia") {
+function listModelsProbe(id: "gemini" | "openrouter" | "nvidia" | "tokenharbor") {
   return async () => {
     try {
       const { providers } = await import("@/core/ai/routing");
@@ -69,6 +69,11 @@ async function buildProbes(): Promise<Probe[]> {
       label: "OpenRouter",
       configured: async () => (await has("openrouter_api_key")) || env("OPENROUTER_API_KEY"),
       check: listModelsProbe("openrouter"),
+    },
+    {
+      label: "Token Harbor",
+      configured: async () => (await has("tokenharbor_api_key")) || env("TOKENHARBOR_API_KEY"),
+      check: listModelsProbe("tokenharbor"),
     },
     {
       label: "NVIDIA",

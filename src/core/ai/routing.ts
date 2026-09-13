@@ -8,6 +8,7 @@ import { mlxProvider } from "./mlx";
 import { nvidiaProvider } from "./nvidia";
 import { geminiProvider } from "./gemini";
 import { openrouterProvider } from "./openrouter";
+import { tokenharborProvider } from "./tokenharbor";
 import { trackGeneration } from "./model-track";
 
 /**
@@ -30,6 +31,7 @@ export const providers: Record<AIProviderId, AIProvider> = {
   nvidia: tracked("nvidia", nvidiaProvider),
   gemini: tracked("gemini", geminiProvider),
   openrouter: tracked("openrouter", openrouterProvider),
+  tokenharbor: tracked("tokenharbor", tokenharborProvider),
 };
 
 // Re-exported for server-side callers that already import this module —

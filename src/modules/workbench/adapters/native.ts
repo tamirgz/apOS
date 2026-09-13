@@ -8,6 +8,50 @@ import { db } from "@/core/db/client";
 import { providers, resolveRoute } from "@/core/ai/routing";
 import type { Adapter, AdapterContext, AdapterResult } from "./types";
 
+/**
+ * Guarantee every chart the prompt declared is present in the output. The prompt
+ * may carry a "CHART EMBEDS" block of lines like
+ *   `- LABEL (Section name): ![title](/api/charts/<id>)`
+ * Local models often drop these. For each declared embed missing from the
+ * report, insert it right after that section's `##` heading (or append it).
+ */
+function ensureChartsPresent(prompt: string, report: string): string {
+  const directive =
+    /^\s*[-*]\s*.+?\(([^)]+)\):\s*(!\[[^\]]*\]\(\/api\/charts\/[0-9a-f-]+\))/gim;
+  const charts: { section: string; embed: string; url: string }[] = [];
+  for (const m of prompt.matchAll(directive)) {
+    const url = m[2].match(/\/api\/charts\/[0-9a-f-]+/)?.[0] ?? "";
+    charts.push({ section: m[1].trim(), embed: m[2], url });
+  }
+  if (!charts.length) return report;
+
+  let out = report;
+  for (const c of charts) {
+    if (!c.url || out.includes(c.url)) continue; // already placed
+    // Find the section heading containing (most of) the section name.
+    const words = c.section.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    const lines = out.split("\n");
+    let at = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (/^#{1,6}\s/.test(l)) {
+        const low = l.toLowerCase();
+        if (words.some((w) => low.includes(w))) {
+          at = i;
+          break;
+        }
+      }
+    }
+    if (at >= 0) {
+      lines.splice(at + 1, 0, "", c.embed);
+      out = lines.join("\n");
+    } else {
+      out += `\n\n${c.embed}`;
+    }
+  }
+  return out;
+}
+
 export const nativeAdapter: Adapter = {
   id: "native",
 
@@ -105,8 +149,13 @@ export const nativeAdapter: Adapter = {
             outputTokens += event.outputTokens;
             break;
           case "done":
-            finalText = event.text;
-            await emit({ type: "result", payload: { text: event.text } });
+            // Local models often DROP the chart-embed lines they were asked to
+            // copy. If the prompt declared charts (a "CHART EMBEDS" block), make
+            // sure every one lands in the output — inserting any the model
+            // dropped into its named section — so the report always has its
+            // graphs regardless of how faithfully the model copied.
+            finalText = ensureChartsPresent(ctx.prompt, event.text);
+            await emit({ type: "result", payload: { text: finalText } });
             break;
           case "error":
             error = event.message;

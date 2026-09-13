@@ -136,17 +136,16 @@ export async function reconsiderProject(projectId: string, angle: string) {
   if (!p) return { error: "project not found" as const };
 
   const { getToolsByNames } = await import("@/core/ai/tool-registry");
-  const { resolveRoute } = await import("@/core/ai/routing");
+  const { runTask } = await import("@/core/ai/routing");
   // Which brain reads a project is configurable — Settings → AI Routing
-  // ("project.advisor"), not hardcoded here.
-  const route = await resolveRoute("project.advisor");
+  // ("project.advisor"); runTask falls back to a local model if it's exhausted.
   const tools = getToolsByNames([
     "projects.list",
     "tasks.list",
     "projects.readRepo",
     "projects.setAdvisorBrief",
   ]);
-  for await (const ev of route.provider.run({
+  for await (const ev of runTask("project.advisor", {
     system:
       "You are the user's chief-of-staff for their projects. Be sharp, specific and honest — no boilerplate, no restating the goal.",
     messages: [
@@ -159,7 +158,6 @@ export async function reconsiderProject(projectId: string, angle: string) {
     ],
     tools,
     toolCtx: { db },
-    model: "claude-haiku-4-5-20251001",
     maxTurns: 6,
     track: { source: "action", label: "advisor refresh" },
   })) {

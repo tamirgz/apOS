@@ -3,7 +3,7 @@ import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 // "nvidia" = free-tier NVIDIA cloud (OpenAI-compatible). Guarded so only $0
 // models can run — see src/core/ai/nvidia.ts. "mlx" = local Apple-MLX runtime
 // via mlx_lm.server. Text column, so adding a provider needs no migration.
-export const AI_PROVIDERS = ["anthropic", "ollama", "mlx", "nvidia", "gemini", "openrouter"] as const;
+export const AI_PROVIDERS = ["anthropic", "ollama", "mlx", "nvidia", "gemini", "openrouter", "tokenharbor"] as const;
 export type AIProviderId = (typeof AI_PROVIDERS)[number];
 
 /**
@@ -19,6 +19,7 @@ export const CLOUD_PROVIDERS: readonly AIProviderId[] = [
   "nvidia",
   "gemini",
   "openrouter",
+  "tokenharbor",
 ];
 export function isCloudProvider(p: AIProviderId): boolean {
   return CLOUD_PROVIDERS.includes(p);

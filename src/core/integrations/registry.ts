@@ -104,6 +104,22 @@ export const INTEGRATIONS: Integration[] = [
     ],
   },
   {
+    id: "tokenharbor",
+    label: "Token Harbor",
+    category: "ai",
+    blurb:
+      "Token Harbor API key — a unified OpenAI-compatible gateway (GPT / Claude / Gemini / DeepSeek / Kimi) with a free tier.",
+    fields: [
+      {
+        key: "tokenharbor_api_key",
+        label: "Token Harbor API key",
+        kind: "secret",
+        placeholder: "th-…",
+        hint: "From tokenharbor.ai. Enables Token Harbor models in AI Routing — including free ones (ids ending ':free', $0, e.g. deepseek-v4-flash:free, mimo-v2.5:free) so you can compare them against your other models. Metered per-token for non-free models.",
+      },
+    ],
+  },
+  {
     id: "obsidian",
     label: "Obsidian vault",
     category: "knowledge",

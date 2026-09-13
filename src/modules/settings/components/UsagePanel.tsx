@@ -22,6 +22,7 @@ const COST_REASON: Record<AIProviderId, string> = {
   anthropic: "Claude Max subscription — flat-rate, no per-token metering (no API key is configured)",
   gemini: "Google AI Studio API key — METERED, billed per-token by Google (free tier available)",
   openrouter: "OpenRouter API key — METERED per-token, but models ending ':free' cost $0",
+  tokenharbor: "Token Harbor API key — METERED per-token, but models ending ':free' cost $0",
 };
 
 /** Per-agent token/run aggregates for the last 30 days, plus which mode (cloud/local) each currently runs on. */
@@ -111,7 +112,7 @@ export async function UsagePanel() {
                         title={COST_REASON[effProvider]}
                         className="font-mono text-xs tabular-nums text-ink-faint"
                       >
-                        {effProvider === "gemini" || effProvider === "openrouter"
+                        {effProvider === "gemini" || effProvider === "openrouter" || effProvider === "tokenharbor"
                           ? "meter"
                           : "$0"}
                       </span>

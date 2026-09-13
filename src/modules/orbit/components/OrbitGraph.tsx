@@ -137,6 +137,8 @@ export function OrbitGraph({ data }: { data: Graph }) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [ready, setReady] = useState(false);
   const [mode, setMode] = useState<Mode>("constellation");
+  // Auto-orbit (camera spin) in the 3D constellation — user can stop it.
+  const [spinning, setSpinning] = useState(true);
   const [query, setQuery] = useState("");
   // Semantic-search results: a set of matching node ids (null = title-match mode).
   const [semanticIds, setSemanticIds] = useState<Set<string> | null>(null);
@@ -151,6 +153,19 @@ export function OrbitGraph({ data }: { data: Graph }) {
   // Current mode for the (stable) node-label accessor to read without re-init.
   const modeRef = useRef<Mode>("constellation");
   modeRef.current = mode;
+  // Spin state for the (stable) init/mode-switch code + a live toggle effect.
+  const spinningRef = useRef(true);
+  spinningRef.current = spinning;
+  useEffect(() => {
+    const g = graphRef.current;
+    if (!g) return;
+    try {
+      // Only the 3D constellation orbits; semantic map is always static.
+      g.controls().autoRotate = spinning && mode === "constellation";
+    } catch {
+      /* controls not ready */
+    }
+  }, [spinning, mode]);
   // Current query for the (stable) colour accessor to read without re-init.
   const queryRef = useRef("");
   queryRef.current = query.trim().toLowerCase();
@@ -380,7 +395,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
       }
 
       const controls = g.controls();
-      controls.autoRotate = true;
+      controls.autoRotate = spinningRef.current;
       controls.autoRotateSpeed = 0.5;
 
       onResize = () => {
@@ -538,7 +553,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
         } catch {
           /* forces not ready */
         }
-        c.autoRotate = true;
+        c.autoRotate = spinningRef.current;
         c.enableRotate = true;
         c.mouseButtons.LEFT = 0; // THREE.MOUSE.ROTATE
         g.d3ReheatSimulation?.();
@@ -758,6 +773,16 @@ export function OrbitGraph({ data }: { data: Graph }) {
             </button>
           ))}
         </div>
+        {mode === "constellation" && (
+          <button
+            type="button"
+            onClick={() => setSpinning((s) => !s)}
+            className="ml-2 rounded-lg glass px-2.5 py-1 text-xs text-ink-faint transition hover:text-ink-dim"
+            title={spinning ? "Stop the auto-orbit" : "Resume the auto-orbit"}
+          >
+            {spinning ? "◼ stop orbit" : "▶ orbit"}
+          </button>
+        )}
         <p className="mt-1.5 max-w-[15rem] text-[11px] leading-snug text-ink-faint">
           {mode === "semantic"
             ? "A flat 2D map placed by meaning — nearby stars share a topic."

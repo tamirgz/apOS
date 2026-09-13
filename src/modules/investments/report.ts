@@ -19,7 +19,12 @@ import { db } from "@/core/db/client";
  * Runs on the faithful MLX abliterated model (needs LM Studio warm). Editable
  * per-attempt in the Workbench — retry on Claude for a heavier pass.
  */
-const REPORT_MODEL = "mlx/huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-mlx";
+// A FAST instruct model: the staged report is now a single-shot WRITE from
+// pre-provided data (no agentic gather), so it doesn't need the heavy
+// abliterated model — which, run through the native executor (tools attached →
+// MLX reasoning on), took ~10min and blew the docs wall-clock (TypeError:
+// terminated). coder-30b-a3b writes the same report from the data in ~1min.
+const REPORT_MODEL = "mlx/qwen3-coder-30b-a3b-instruct";
 
 type ToolResult = Record<string, unknown>;
 
@@ -177,7 +182,7 @@ export async function createInvestmentReport(): Promise<{ id: string }> {
     "## Positions of note — biggest winners and losers, concentration risk. Place the WINNERS & LOSERS chart here.",
     "## Observations & watch-items — 4-6 grounded observations and what's worth monitoring. Still no recommendations.",
     "",
-    "CHART EMBEDS — copy each line VERBATIM into the named section (they render as interactive charts). Do not alter them:",
+    "CHART EMBEDS — you MUST include EVERY one of the following lines, each exactly ONCE, copied VERBATIM into its named section (they render as interactive charts). Do not omit, merge, reword, or alter any of them:",
     waterfallEmbed && `- RETURN-COMPOSITION (Portfolio overview): ${waterfallEmbed}`,
     marketEmbed && `- ALLOCATION-BY-MARKET (Portfolio overview): ${marketEmbed}`,
     perfEmbed && `- PERFORMANCE (Performance & trend): ${perfEmbed}`,

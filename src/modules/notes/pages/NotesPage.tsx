@@ -7,6 +7,11 @@ export async function NotesPage() {
     listNotes(),
     listProjects().catch(() => []),
   ]);
-  const projectNames = Object.fromEntries(projects.map((p) => [p.id, p.name]));
-  return <NotesGrid notes={notes} projectNames={projectNames} />;
+  const projectInfo = Object.fromEntries(
+    projects.map((p) => [
+      p.id,
+      { name: p.name, category: p.category ?? null, kind: p.kind },
+    ]),
+  );
+  return <NotesGrid notes={notes} projectInfo={projectInfo} />;
 }

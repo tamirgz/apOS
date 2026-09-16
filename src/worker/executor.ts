@@ -16,6 +16,7 @@ import { getToolsByNames } from "@/core/ai/tool-registry";
 import { reportAgentRunOutcome } from "@/core/alerts";
 import type { AiToolDef } from "@/core/modules/types.server";
 import { withRunSlot } from "./run-queue";
+import { waitForLocalIdle } from "@/core/ai/local-queue";
 
 const RUN_TIMEOUT_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 15 * 1000;
@@ -409,6 +410,34 @@ async function runClaimed(
       }
       return { finalText, tokensIn, tokensOut, errored, okTools, aborted: controller.signal.aborted };
     };
+
+    // Local-resource gate: when this agent runs on a LOCAL runtime (Ollama / LM
+    // Studio), wait until no OTHER local generation is in flight before starting.
+    // Otherwise the agent's model load collides with a box already serving the
+    // deep report, chat, Ask, or another agent — the swap evicts a resident model
+    // ("Model unloaded" thrash). Bounded (5 min) so a stuck external call never
+    // starves the agent; heartbeats while parked so the run isn't swept as
+    // orphaned. Cloud agents (anthropic/gemini/nvidia/openrouter/tokenharbor)
+    // skip this — they contend for no local resource.
+    if (provider.id === "ollama" || provider.id === "mlx") {
+      const gate = await waitForLocalIdle({
+        exceptParentId: runId,
+        maxWaitMs: 5 * 60_000,
+        onWait: async () => {
+          await db
+            .update(agentRuns)
+            .set({ heartbeatAt: new Date() })
+            .where(eq(agentRuns.id, runId))
+            .catch(() => {});
+        },
+      });
+      if (gate.waitedMs > 1000) {
+        await transcript.push({
+          type: "error",
+          message: `⏸ Waited ${Math.round(gate.waitedMs / 1000)}s for local inference to free up${gate.timedOut ? " (max wait reached — proceeding)" : ""} before running ${provider.id}/${model}.`,
+        });
+      }
+    }
 
     let res = await attempt(provider, model);
 

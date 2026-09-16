@@ -260,8 +260,31 @@ async function sweepOrphans() {
         dsql`coalesce(${agentRuns.heartbeatAt}, ${agentRuns.createdAt}) < ${cutoff.toISOString()}::timestamptz`,
       ),
     )
-    .returning({ id: agentRuns.id });
-  if (orphaned.length) log(`orphan sweep: failed ${orphaned.length} run(s)`);
+    .returning({ id: agentRuns.id, agentId: agentRuns.agentId, trigger: agentRuns.trigger });
+  if (!orphaned.length) return;
+  log(`orphan sweep: failed ${orphaned.length} run(s)`);
+  // A scheduled (cron) run killed by a restart would otherwise be lost until its
+  // next fire — a weekly job (e.g. Memory consolidation) then silently skips a
+  // whole cycle. Re-enqueue those once so a deploy/restart never eats a periodic
+  // run. enqueueRun's one-live-run guard prevents duplicates; runs are wrapped in
+  // try/catch so they can't crash the worker, so this can't loop.
+  const cronOrphans = [...new Set(orphaned.filter((r) => r.trigger === "cron").map((r) => r.agentId))];
+  for (const agentId of cronOrphans) {
+    try {
+      const [ag] = await db
+        .select({ enabled: agents.enabled, name: agents.name })
+        .from(agents)
+        .where(eq(agents.id, agentId));
+      if (!ag?.enabled) continue;
+      const runId = await enqueueRun(agentId, "cron");
+      if (runId) {
+        log(`re-enqueued orphaned cron run for "${ag.name}" → ${runId}`);
+        void executeRun(runId).catch((e) => log(`re-run failed: ${e}`));
+      }
+    } catch (e) {
+      log(`orphan re-enqueue failed for ${agentId}: ${e}`);
+    }
+  }
 }
 
 /** Execute queued runs whose NOTIFY was missed (e.g. worker restart window). */

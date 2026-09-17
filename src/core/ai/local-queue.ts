@@ -14,7 +14,7 @@
  * Concurrency is `AIOS_LOCAL_INFERENCE_CONCURRENCY` (default 1). Raise it only if
  * the machine can genuinely hold that many models resident at once.
  */
-import { and, eq, gt, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, gt, inArray } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { modelCalls } from "@/core/db/schema/model-calls";
 import { GENERATION_STALE_MS } from "./model-track";
@@ -71,68 +71,101 @@ export async function acquireLocalSlot(): Promise<() => void> {
   };
 }
 
-/**
- * Local runtimes whose GPU/RAM an agent's model call contends for. A live
- * `generation` row on either means the box is actively inferring right now.
- */
+/** Local runtimes whose GPU/RAM an agent's model call contends for. */
 const LOCAL_PROVIDERS = ["ollama", "mlx"];
+const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+/** The tiny always-on embedder. It coexists with any chat model for ~370 MB and
+ *  is needed constantly, so it is never a "contender" and never unloaded. */
+const EMBED_MODEL_PREFIX = "nomic-embed-text";
+
+/** A model that can share the box with `myModel` without forcing a swap: the SAME
+ *  model (already resident — no reload) or the tiny embedder. */
+function coexists(model: string, myModel: string): boolean {
+  return model === myModel || model.startsWith(EMBED_MODEL_PREFIX);
+}
 
 /**
- * Count LIVE local generation calls (other than `exceptParentId`'s own) via the
- * cross-process model-call registry — web (deep report, chat, ask) and worker
- * (agents, sub-tasks) both write it, so this sees contention the in-process slot
- * count above cannot. Embeddings are excluded: nomic-embed is tiny and already
- * serialized by the local slot; the contention that EVICTS a resident model is
- * the big chat/report/agent generations. Orphaned rows (crashed process) are
- * ignored once older than the generation staleness cutoff.
+ * How many LIVE local calls are running a DIFFERENT heavy model than `myModel` —
+ * the only calls whose model an agent's load would swap out. Read from the
+ * cross-process model-call registry (web: report/chat/ask; worker: agents/gates/
+ * sub-tasks), so it sees contention the in-process slot above cannot. A call on
+ * `myModel` (same resident model) or the tiny embedder is NOT a contender.
+ * Orphaned rows past the staleness cutoff are ignored.
  */
-async function activeLocalGenerations(exceptParentId?: string): Promise<number> {
+async function activeLocalContenders(myModel: string): Promise<number> {
   const cutoff = new Date(Date.now() - GENERATION_STALE_MS);
   const rows = await db
-    .select({ id: modelCalls.id })
+    .select({ model: modelCalls.model })
     .from(modelCalls)
     .where(
-      and(
-        eq(modelCalls.kind, "generation"),
-        inArray(modelCalls.provider, LOCAL_PROVIDERS),
-        gt(modelCalls.startedAt, cutoff),
-        exceptParentId
-          ? or(
-              isNull(modelCalls.parentId),
-              ne(modelCalls.parentId, exceptParentId),
-            )
-          : undefined,
-      ),
+      and(inArray(modelCalls.provider, LOCAL_PROVIDERS), gt(modelCalls.startedAt, cutoff)),
     );
-  return rows.length;
+  return rows.filter((r) => !coexists(r.model, myModel)).length;
+}
+
+/**
+ * Unload every RESIDENT Ollama model that isn't `keepModel` or the embedder, so
+ * an agent's model isn't co-resident with a big model left over from an earlier
+ * chat/report (keep_alive keeps models loaded ~5 min after use — that idle
+ * residence is the memory pressure that evicts models). `keep_alive:0` on a bare
+ * request unloads immediately (verified: done_reason "unload"). Best-effort and
+ * bounded — a failure never blocks the run. Returns the names it unloaded.
+ * (Only Ollama exposes resident models + an unload; LM Studio JIT/TTL manages
+ * its own, and clearing Ollama frees unified RAM for it either way.)
+ */
+export async function freeIdleLocalResidents(keepModel: string): Promise<string[]> {
+  const unloaded: string[] = [];
+  try {
+    const res = await fetch(`${OLLAMA_BASE}/api/ps`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return unloaded;
+    const data = (await res.json()) as {
+      models?: Array<{ name?: string; model?: string }>;
+    };
+    for (const m of data.models ?? []) {
+      const name = m.name ?? m.model ?? "";
+      if (!name || name === keepModel || name.startsWith(EMBED_MODEL_PREFIX)) continue;
+      await fetch(`${OLLAMA_BASE}/api/generate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: name, keep_alive: 0 }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {});
+      unloaded.push(name);
+    }
+  } catch {
+    /* best-effort — freeing residents must never break a run */
+  }
+  return unloaded;
 }
 
 export interface LocalIdleOptions {
-  /** Cap the wait so a stuck/long-resident external call can't starve the agent. */
+  /** The model this run is about to load — used to tell a swap-forcing call apart
+   *  from one already on the same (or the tiny embedder) model. */
+  myModel: string;
+  /** Cap the wait so a stuck/long call can't starve the agent. */
   maxWaitMs?: number;
   /** Poll cadence while parked. */
   pollMs?: number;
-  /** Ignore this run's own generation rows (e.g. a prior fallback attempt). */
-  exceptParentId?: string;
-  /** Called on each park (loop), with the busy count + elapsed ms — for a
-   *  heartbeat write so a waiting run isn't swept as orphaned, and telemetry. */
+  /** Called on each park with the contender count + elapsed ms — for a heartbeat
+   *  write so a waiting run isn't swept as orphaned, and telemetry. */
   onWait?: (busy: number, waitedMs: number) => void | Promise<void>;
   signal?: AbortSignal;
 }
 
 /**
- * Block until no OTHER local model generation is in flight, so an agent's local
- * model call doesn't collide with LM Studio / Ollama already serving the deep
- * report, chat, or another agent — the collision forces a model swap that evicts
- * a resident model ("Model unloaded" / "terminated" thrash). Because a
- * generation ROW exists only while a call is actually generating (Ollama's
- * keep_alive keeps the model RESIDENT but writes no row when idle), this
- * normally returns the instant the current call finishes. Bounded by maxWaitMs
- * so a genuinely stuck external call never starves the agent. A gate error never
- * blocks the run (returns as idle). Cloud-provider agents should not call this.
+ * Block until no OTHER heavy local model is actively generating, so an agent's
+ * model load doesn't swap out a model LM Studio / Ollama is mid-call on (the swap
+ * evicts a resident model → "Model unloaded" / "terminated" thrash). A call on
+ * the SAME model or the tiny embedder is not contention, so this returns
+ * immediately in the common case and only parks behind a genuinely conflicting
+ * generation — normally clearing the instant that call finishes. Bounded by
+ * maxWaitMs so a stuck call never starves the agent. A gate error never blocks
+ * the run (returns as idle). Cloud-provider agents should not call this.
  */
 export async function waitForLocalIdle(
-  opts: LocalIdleOptions = {},
+  opts: LocalIdleOptions,
 ): Promise<{ waitedMs: number; timedOut: boolean }> {
   const maxWaitMs = opts.maxWaitMs ?? 5 * 60_000;
   const pollMs = opts.pollMs ?? 1500;
@@ -142,7 +175,7 @@ export async function waitForLocalIdle(
     if (opts.signal?.aborted) return { waitedMs: waited, timedOut: false };
     let busy: number;
     try {
-      busy = await activeLocalGenerations(opts.exceptParentId);
+      busy = await activeLocalContenders(opts.myModel);
     } catch {
       return { waitedMs: waited, timedOut: false }; // never block a run on a gate hiccup
     }

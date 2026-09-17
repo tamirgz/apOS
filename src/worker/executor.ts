@@ -16,7 +16,7 @@ import { getToolsByNames } from "@/core/ai/tool-registry";
 import { reportAgentRunOutcome } from "@/core/alerts";
 import type { AiToolDef } from "@/core/modules/types.server";
 import { withRunSlot } from "./run-queue";
-import { waitForLocalIdle } from "@/core/ai/local-queue";
+import { waitForLocalIdle, freeIdleLocalResidents } from "@/core/ai/local-queue";
 
 const RUN_TIMEOUT_MS = 10 * 60 * 1000;
 const HEARTBEAT_MS = 15 * 1000;
@@ -412,16 +412,20 @@ async function runClaimed(
     };
 
     // Local-resource gate: when this agent runs on a LOCAL runtime (Ollama / LM
-    // Studio), wait until no OTHER local generation is in flight before starting.
-    // Otherwise the agent's model load collides with a box already serving the
-    // deep report, chat, Ask, or another agent — the swap evicts a resident model
-    // ("Model unloaded" thrash). Bounded (5 min) so a stuck external call never
-    // starves the agent; heartbeats while parked so the run isn't swept as
+    // Studio), (1) wait until no OTHER heavy local model is mid-generation — so
+    // the agent's model load doesn't swap out a model the deep report, chat, Ask,
+    // or another agent is actively using (the swap evicts it → "Model unloaded"
+    // thrash) — then (2) unload any idle heavy model left resident from an
+    // earlier call, so the agent's model isn't co-resident with a big leftover
+    // (that idle residence is the memory pressure that evicts). A call on the
+    // SAME model or the tiny embedder is never contention, so a same-model gate
+    // (e.g. insight.verify sharing the agent's model) does not wait or unload.
+    // Bounded (5 min); heartbeats while parked so the run isn't swept as
     // orphaned. Cloud agents (anthropic/gemini/nvidia/openrouter/tokenharbor)
     // skip this — they contend for no local resource.
     if (provider.id === "ollama" || provider.id === "mlx") {
       const gate = await waitForLocalIdle({
-        exceptParentId: runId,
+        myModel: model,
         maxWaitMs: 5 * 60_000,
         onWait: async () => {
           await db
@@ -431,10 +435,17 @@ async function runClaimed(
             .catch(() => {});
         },
       });
-      if (gate.waitedMs > 1000) {
+      const freed = await freeIdleLocalResidents(model);
+      if (gate.waitedMs > 1000 || freed.length) {
+        const parts: string[] = [];
+        if (gate.waitedMs > 1000)
+          parts.push(
+            `waited ${Math.round(gate.waitedMs / 1000)}s for local inference to free up${gate.timedOut ? " (max wait reached)" : ""}`,
+          );
+        if (freed.length) parts.push(`unloaded idle ${freed.join(", ")}`);
         await transcript.push({
           type: "error",
-          message: `⏸ Waited ${Math.round(gate.waitedMs / 1000)}s for local inference to free up${gate.timedOut ? " (max wait reached — proceeding)" : ""} before running ${provider.id}/${model}.`,
+          message: `⏸ Local-resource gate: ${parts.join("; ")} before running ${provider.id}/${model}.`,
         });
       }
     }

@@ -63,6 +63,18 @@ export interface AiToolContext {
    */
   focusRequireHealth?: boolean;
   /**
+   * When true, projects.focusNext's queue is filtered to projects whose material
+   * has changed since their LAST advisor brief (advisorUpdatedAt) — unchanged
+   * projects keep their existing brief and are skipped. This makes the advisor
+   * sweep incremental (a ledger, not a full re-scan) so it stays bounded as the
+   * project count grows instead of overrunning the run-timeout re-briefing all N
+   * every fire. Set by the executor for a brief-writing iterator (focusNext +
+   * setAdvisorBrief) that is NOT also a health-writer — a health sweep (Project
+   * pulse) must still visit EVERY project to keep health/deck cards fresh, so it
+   * never gets this flag.
+   */
+  focusChangedOnly?: boolean;
+  /**
    * Per-run entity handle table for SURVEY writes (where the agent legitimately
    * picks WHICH few entities to act on — task triage, idea review, follow-ups).
    * A `*.list` tool registers each row under a short, non-UUID handle (t1, i2,

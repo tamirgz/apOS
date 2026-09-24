@@ -117,6 +117,12 @@ export const projectTools: AiToolDef[] = [
         .describe(
           "Only iterate projects that have a code repo attached — for repo-focused runs, so you never land on a project with nothing to read.",
         ),
+      changedOnly: z
+        .boolean()
+        .optional()
+        .describe(
+          "Only iterate projects whose tasks/notes/activity moved since their LAST advisor brief — unchanged projects keep their existing brief and are skipped. For an incremental advisor sweep so it stays fast as the project count grows. (The advisor agent sets this automatically.)",
+        ),
     }),
     async execute(input, ctx) {
       // Build the queue once: the backbone owns the SET (active projects) and
@@ -136,6 +142,27 @@ export const projectTools: AiToolDef[] = [
             ).map((r) => r.id),
           );
           active = active.filter((p) => repoIds.has(p.id));
+        }
+        // Incremental advisor sweep (ctx flag from the executor, or an explicit
+        // arg for chat): re-brief only projects whose material moved since their
+        // last brief. A project never briefed (advisorUpdatedAt null) always
+        // qualifies; one whose newest activity predates its brief is skipped and
+        // keeps that brief. lastActivityAt already folds task/note/attention
+        // activity + projects.updatedAt, and setAdvisorBrief does NOT bump
+        // updatedAt, so writing a brief can't re-arm a project for the next run.
+        if (ctx.focusChangedOnly || input.changedOnly) {
+          active = active.filter((p) => {
+            if (!p.advisorUpdatedAt) return true; // never briefed
+            const since = p.advisorUpdatedAt;
+            // Project-management activity OR the code moving (repoDigestAt, bumped
+            // when Repo watcher digests new commits) counts as change — the
+            // advisor grounds its brief in readRepo, so a code-only advance must
+            // re-brief too, not just task/note edits.
+            return (
+              (p.lastActivityAt !== null && p.lastActivityAt > since) ||
+              (p.repoDigestAt !== null && p.repoDigestAt > since)
+            );
+          });
         }
         const items = active.map((p) => ({
             id: p.id,

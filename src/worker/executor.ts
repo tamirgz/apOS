@@ -372,6 +372,13 @@ async function runClaimed(
             focusRequireHealth:
               agent.tools.includes("projects.focusNext") &&
               agent.tools.includes("projects.setHealth"),
+            // Incremental advisor sweep: a brief-writing iterator that is NOT a
+            // health-writer re-briefs only projects changed since their last
+            // brief. A health sweep (setHealth) must visit all, so it's excluded.
+            focusChangedOnly:
+              agent.tools.includes("projects.focusNext") &&
+              agent.tools.includes("projects.setAdvisorBrief") &&
+              !agent.tools.includes("projects.setHealth"),
           },
           model: mdl,
           // Per-agent tool-loop budget; undefined falls back to the provider

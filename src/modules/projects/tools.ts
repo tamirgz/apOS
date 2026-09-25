@@ -377,7 +377,7 @@ export const projectTools: AiToolDef[] = [
   {
     name: "projects.readRepo",
     description:
-      "Read the FOCUSED project's attached code repo — recent commits + its README — so your advice is grounded in the actual code, not a guess (targets the project from projects.focusNext; you pass no id). Returns attached:false when no repo is attached or it hasn't cloned yet.",
+      "Read the FOCUSED project's attached code repo — recent commits + its README — so your advice is grounded in the actual code, not a guess (targets the project from projects.focusNext; you pass no id). Returns attached:false when no repo is attached or it hasn't cloned yet. If it returns an `error` field, the repo couldn't be read (a transient git failure) — that is NOT the same as an empty repo, so don't conclude 'no activity'; skip a digest for it and move on.",
     input: z.object({
       projectId: z
         .string()
@@ -398,14 +398,25 @@ export const projectTools: AiToolDef[] = [
       const exec = promisify(execFile);
       let recentCommits = "";
       let readme = "";
+      // Surface a git failure instead of swallowing it into an empty string: a
+      // license gate ("agree to the Xcode license"), a bad network, or dubious
+      // ownership makes `git log` throw, and a silent "" is indistinguishable
+      // from "repo has no commits" — which sends the agent down the "nothing to
+      // digest" path and only shows up later as an opaque "no digest recorded"
+      // run failure. Reporting the error lets the agent (and the run transcript)
+      // name the real cause on the spot.
+      let gitError: string | null = null;
       try {
         recentCommits = (
           await exec("git", ["-C", dir, "log", "--oneline", "-20"], {
             maxBuffer: 4 * 1024 * 1024,
           })
         ).stdout.trim();
-      } catch {
-        // shallow/odd repo — commits are optional context
+      } catch (e) {
+        gitError = (e instanceof Error ? e.message : String(e))
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 300);
       }
       try {
         const name = readdirSync(dir).find((n) => /^readme(\.md|\.rst|\.txt)?$/i.test(n));
@@ -413,7 +424,9 @@ export const projectTools: AiToolDef[] = [
       } catch {
         // no README — fine
       }
-      return { attached: true, recentCommits, readme };
+      return gitError
+        ? { attached: true, recentCommits, readme, error: `git log failed: ${gitError}` }
+        : { attached: true, recentCommits, readme };
     },
   },
   {

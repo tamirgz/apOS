@@ -95,7 +95,9 @@ export function ProjectMultiPicker({
         ? selectedNames[0]
         : `${selectedNames.length} filed`;
 
-  const Group = ({ heading, items }: { heading: string; items: ProjectOption[] }) => (
+  // A render helper, not a component: a component declared in render is a new
+  // type every render, so React would remount the whole checklist each time.
+  const group = (heading: string, items: ProjectOption[]) => (
     <div className="mb-1 last:mb-0">
       <p className="px-2 py-1 font-mono text-[9px] uppercase tracking-[0.2em] text-ink-faint">
         {heading}
@@ -154,8 +156,8 @@ export function ProjectMultiPicker({
             style={{ position: "fixed", top: coords.top, left: coords.left, width: MENU_W }}
             className="z-[100] max-h-80 overflow-auto rounded-lg border border-white/10 bg-abyss p-1 shadow-xl shadow-black/40"
           >
-            {areas.length > 0 && <Group heading="Areas of development" items={areas} />}
-            {projects.length > 0 && <Group heading="Projects" items={projects} />}
+            {areas.length > 0 && group("Areas of development", areas)}
+            {projects.length > 0 && group("Projects", projects)}
             {options.length === 0 && (
               <p className="px-2 py-2 text-xs text-ink-faint">No projects yet.</p>
             )}

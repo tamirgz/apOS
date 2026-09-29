@@ -58,10 +58,25 @@ export function AdvisorPanel({
   const act = (fn: () => Promise<unknown>, label: string) =>
     start(async () => {
       await fn();
-      setDid(label);
+      setDid(`${label} created`);
       setTimeout(() => setDid(null), 2000);
       router.refresh();
     });
+
+  /** Advisor → backlog: a work item, named by its identifier once it exists. */
+  const toItem = (text: string, kind: "next" | "blocker") =>
+    start(async () => {
+      const r = await advisorToTask(projectId, text, kind);
+      setDid(r.existed ? `already ${r.identifier ?? "on the board"}` : `${r.identifier ?? "item"} created`);
+      setTimeout(() => setDid(null), 3500);
+      router.refresh();
+    });
+
+  const doneChip = did && (
+    <span className="flex items-center gap-1 font-mono text-[9px] uppercase tracking-widest text-plasma">
+      <Check className="size-3" /> {did}
+    </span>
+  );
 
   const reconsider = () => {
     const a = angle.trim();
@@ -142,16 +157,25 @@ export function AdvisorPanel({
             {state}
           </p>
           {blocker && (
-            <p className="flex items-start gap-2 rounded-lg border border-flare/20 bg-flare/5 px-3 py-2 text-sm text-flare">
+            <div className="flex items-start gap-2 rounded-lg border border-flare/20 bg-flare/5 px-3 py-2 text-sm text-flare">
               <OctagonAlert className="mt-0.5 size-3.5 shrink-0" />
-              <span>
+              <span className="flex-1">
                 <span className="font-mono text-[9px] uppercase tracking-widest opacity-70">
                   blocker
                 </span>
                 <br />
                 {blocker}
               </span>
-            </p>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => toItem(blocker, "blocker")}
+                title="File this blocker as a high-priority work item"
+                className="flex shrink-0 items-center gap-1 rounded-md border border-flare/25 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-flare/80 transition hover:bg-flare/10 hover:text-flare disabled:opacity-50"
+              >
+                <ListPlus className="size-3" /> item
+              </button>
+            </div>
           )}
           {next && (
             <div className="flex flex-col gap-1.5">
@@ -170,10 +194,11 @@ export function AdvisorPanel({
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => act(() => advisorToTask(projectId, next), "task")}
+                  onClick={() => toItem(next, "next")}
+                  title="Add this next move to the project's work items"
                   className="flex items-center gap-1 rounded-md border border-white/8 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:border-plasma/30 hover:text-plasma disabled:opacity-50"
                 >
-                  <ListPlus className="size-3" /> task
+                  <ListPlus className="size-3" /> item
                 </button>
                 <button
                   type="button"
@@ -183,14 +208,11 @@ export function AdvisorPanel({
                 >
                   <Layers className="size-3" /> feature
                 </button>
-                {did && (
-                  <span className="flex items-center gap-1 font-mono text-[9px] uppercase tracking-widest text-plasma">
-                    <Check className="size-3" /> {did} created
-                  </span>
-                )}
+                {doneChip}
               </div>
             </div>
           )}
+          {!next && doneChip}
         </div>
       ) : (
         <p className="text-xs text-ink-faint">

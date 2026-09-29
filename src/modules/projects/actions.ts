@@ -1,6 +1,6 @@
 "use server";
 
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
 import { getSetting, setSetting } from "@/core/app-settings";
@@ -108,18 +108,45 @@ export async function runProjectAdvisor() {
   return { ok: true as const };
 }
 
-/** Turn an advisor recommendation into a task in this project. */
-export async function advisorToTask(projectId: string, title: string) {
+/** Advisor prose is markdown-ish and can run long: its first line, stripped. */
+const advisorLine = (text: string) =>
+  text.trim().split("\n")[0].replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
+
+/** Turn an advisor next move (or blocker) into a work item in this project. */
+export async function advisorToTask(projectId: string, text: string, kind: "next" | "blocker" = "next") {
   const { createTask } = await import("@/modules/tasks/actions");
-  await createTask({ title: title.trim().slice(0, 200), projectRef: `projects:${projectId}` });
+  const { tasks, isClosed } = await import("@/modules/tasks/schema");
+  const { withIdentifiers } = await import("@/modules/tasks/core");
+  // The full text rides along in the notes.
+  const full = text.trim();
+  const title = `${kind === "blocker" ? "Unblock: " : ""}${advisorLine(full)}`.slice(0, 200);
+  const projectRef = `projects:${projectId}`;
+  // A second click on the same recommendation finds the item, not a duplicate.
+  const open = (
+    await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.projectRef, projectRef), dsql`lower(${tasks.title}) = ${title.toLowerCase()}`))
+  ).filter((t) => !isClosed(t.status));
+  if (open.length) {
+    const [item] = await withIdentifiers(db, open.slice(0, 1));
+    return { ok: true as const, identifier: item.identifier, existed: true };
+  }
+  const item = await createTask({
+    title,
+    notes: `${kind === "blocker" ? "Blocker" : "Next move"} flagged by the project advisor:\n\n${full}`,
+    priority: kind === "blocker" ? "high" : "medium",
+    labels: kind === "blocker" ? ["blocker"] : [],
+    projectRef,
+  });
   revalidateProjects(projectId);
-  return { ok: true as const };
+  return { ok: true as const, identifier: item.identifier, existed: false };
 }
 
 /** Turn an advisor recommendation into a feature in this project. */
 export async function advisorToFeature(projectId: string, name: string) {
   const { createFeature } = await import("./features-actions");
-  await createFeature(projectId, name.trim().slice(0, 120));
+  await createFeature(projectId, advisorLine(name).slice(0, 120));
   revalidateProjects(projectId);
   return { ok: true as const };
 }

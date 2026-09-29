@@ -92,6 +92,7 @@ export async function delegateWorkItem(db: Db, id: string, actor: Actor, extra?:
     extra?.trim() ? `\nAdditional instructions:\n${extra.trim()}` : null,
     "",
     `When you commit, reference ${item.identifier ?? "the item"} in the commit message.`,
+    APOS_TOOLS_HINT,
     "Finish with a short summary of what you did and anything left open.",
   ]
     .filter((l) => l !== null)
@@ -107,6 +108,10 @@ export async function delegateWorkItem(db: Db, id: string, actor: Actor, extra?:
   await linkAndStart(db, [row], wb, actor);
   return wb;
 }
+
+/** Only the Claude/Codex executors carry the apOS MCP server, hence "if". */
+const APOS_TOOLS_HINT =
+  "If you have the apOS work-tracker tools (apos: tasks__comment, tasks__create, …), use them to comment progress on the item and to file follow-up items you discover — but don't change the item's status: apOS moves it when this run finishes.";
 
 /** A whole feature's open items → one Workbench run that ships the feature. */
 export async function delegateFeature(db: Db, featureId: string, actor: Actor, extra?: string) {
@@ -128,6 +133,7 @@ export async function delegateFeature(db: Db, featureId: string, actor: Actor, e
     extra?.trim() ? `\nAdditional instructions:\n${extra.trim()}` : null,
     "",
     "Reference the identifiers (e.g. " + (items[0].identifier ?? "KEY-1") + ") in your commit messages.",
+    APOS_TOOLS_HINT,
     "Finish with a short summary per item: done, or what is left.",
   ]
     .filter((l) => l !== null)

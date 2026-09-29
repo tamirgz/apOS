@@ -31,6 +31,7 @@ export interface PlaneModule {
   name: string;
   description?: string | null;
   status?: string | null;
+  start_date?: string | null;
   target_date?: string | null;
   archived_at?: string | null;
 }

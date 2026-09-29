@@ -32,3 +32,15 @@ export const RELATION_SIDE_LABEL: Record<RelationSide, string> = {
   duplicates: "duplicates",
   duplicated_by: "duplicated by",
 };
+
+/**
+ * A title as shown on cards and rows: inline markdown markers stripped
+ * (imported titles often carry **bold** / `code`), text kept.
+ */
+export function plainTitle(title: string): string {
+  return title
+    .replace(/\*\*(.+?)\*\*|__(.+?)__/g, "$1$2")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*|__/g, "")
+    .trim();
+}

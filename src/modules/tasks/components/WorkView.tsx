@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Ban,
@@ -11,6 +11,7 @@ import {
   ChevronDown,
   Columns3,
   Download,
+  Gauge,
   Layers,
   List,
   Plus,
@@ -27,16 +28,15 @@ import type { WorkItem } from "../core";
 import { parseQuick } from "../parse";
 import type { WorkData } from "../queries";
 import { TASK_STATUSES, type TaskPriority, type TaskStatus } from "../schema";
-import { BOARD_STATUSES, PRIORITY_META, STATUS_META } from "../states";
-import { CyclesView } from "./CyclePanel";
-import { FeatureRoadmap, FeatureStrip } from "./FeaturePanel";
+import { BOARD_STATUSES, PRIORITY_META, STATUS_META, plainTitle } from "../states";
+import { CycleHeader, CyclesView, nextCycleFor } from "./CyclePanel";
+import { ModuleHeader, ModulesView } from "./ModulesView";
 import { PlaneImport } from "./PlaneImport";
 import { Timeline } from "./Timeline";
 import { WorkItemDetail } from "./WorkItemDetail";
 
-type View = "board" | "list" | "cycles" | "timeline" | "features";
-const ALL_VIEWS: View[] = ["board", "list", "cycles", "timeline", "features"];
 const DONE_WINDOW_DAYS = 14;
+const BOARD_CAP = 25;
 const DAY = 86_400_000;
 const closed = (s: TaskStatus) => s === "done" || s === "cancelled";
 
@@ -123,11 +123,13 @@ function QuickCreate({
   data,
   projectId,
   featureId,
+  cycleId,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
   data: WorkData;
   projectId?: string;
   featureId: string | null;
+  cycleId?: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -148,6 +150,7 @@ function QuickCreate({
         status: parsed.status,
         projectRef,
         featureRef: featureId && (!keyed || keyed.id === projectId) ? `features:${featureId}` : null,
+        cycleId: cycleId ?? null,
       });
       setText("");
       router.refresh();
@@ -269,7 +272,7 @@ function Card({
         )}
       </div>
       <p dir="auto" className={cn("text-sm leading-snug", closed(item.status) ? "text-ink-faint line-through" : "text-ink-dim group-hover:text-ink")}>
-        {item.title}
+        {plainTitle(item.title)}
       </p>
       {(item.labels.length > 0 || item.dueAt || subCount || blocked || delegated) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -306,6 +309,8 @@ function Board({
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<TaskStatus | null>(null);
   const [olderDone, setOlderDone] = useState(false);
+  // Big projects (an imported backlog runs to hundreds) would render every card: cap each column.
+  const [limit, setLimit] = useState<Partial<Record<TaskStatus, number>>>({});
   const now = useNow();
 
   const subCounts = useMemo(() => {
@@ -328,7 +333,7 @@ function Board({
       hidden = col.length - recent.length;
       col = recent.sort((a, b) => +new Date(b.completedAt!) - +new Date(a.completedAt!));
     }
-    return { status, col, hidden };
+    return { status, col, hidden, cap: limit[status] ?? BOARD_CAP };
   });
 
   const dropAt = (status: TaskStatus, before: WorkItem | null) => {
@@ -351,7 +356,7 @@ function Board({
 
   return (
     <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-2">
-      {columns.map(({ status, col, hidden }) => {
+      {columns.map(({ status, col, hidden, cap }) => {
         const meta = STATUS_META[status];
         const active = overCol === status && !!dragId;
         return (
@@ -387,7 +392,7 @@ function Board({
                 {active ? "drop here" : "empty"}
               </div>
             )}
-            {col.map((t) => (
+            {col.slice(0, cap).map((t) => (
               <Card
                 key={t.id}
                 item={t}
@@ -404,6 +409,15 @@ function Board({
                 onDropBefore={() => dropAt(status, t)}
               />
             ))}
+            {col.length > cap && (
+              <button
+                type="button"
+                onClick={() => setLimit((l) => ({ ...l, [status]: cap + BOARD_CAP * 2 }))}
+                className="rounded-lg py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:bg-white/4 hover:text-ink-dim"
+              >
+                show {Math.min(BOARD_CAP * 2, col.length - cap)} more · {col.length - cap} hidden
+              </button>
+            )}
             {status === "done" && (hidden > 0 || olderDone) && (
               <button
                 type="button"
@@ -484,7 +498,7 @@ function ListView({
                         <span className="w-16 shrink-0 font-mono text-[10px] text-ink-faint">{t.identifier}</span>
                         <span dir="auto" className={cn("min-w-0 flex-1 truncate text-sm", closed(t.status) ? "text-ink-faint line-through" : "text-ink-dim")}>
                           {t.parentId && <span className="mr-1 text-ink-faint">↳</span>}
-                          {t.title}
+                          {plainTitle(t.title)}
                         </span>
                         <span className="hidden items-center gap-1.5 sm:flex">
                           <Flags blocked={flags.blocked.has(t.id)} delegated={flags.delegated[t.id]} />
@@ -515,12 +529,44 @@ function ListView({
 
 // ── the view ───────────────────────────────────────────────────────────────
 
+type Tab = "items" | "cycles" | "modules" | "timeline" | "overview";
+type Layout = "board" | "list";
+const LAYOUTS: Layout[] = ["board", "list"];
+
+/** Tab + detail selection live in the URL (?tab=modules&module=…) so a module or cycle page is linkable. */
+function useWorkUrl(hasOverview: boolean) {
+  const sp = useSearchParams();
+  const raw = sp.get("tab");
+  const tabs: Tab[] = ["items", "cycles", "modules", "timeline", ...(hasOverview ? (["overview"] as Tab[]) : [])];
+  const tab: Tab = raw && (tabs as string[]).includes(raw) ? (raw as Tab) : "items";
+  const go = useCallback(
+    (next: { tab?: Tab; module?: string | null; cycle?: string | null }) => {
+      const p = new URLSearchParams(sp.toString());
+      const t = next.tab ?? tab;
+      if (t === "items") p.delete("tab");
+      else p.set("tab", t);
+      for (const k of ["module", "cycle"] as const) {
+        const v = next[k];
+        if (v === undefined && next.tab && next.tab !== tab) p.delete(k);
+        else if (v === null) p.delete(k);
+        else if (v) p.set(k, v);
+      }
+      const qs = p.toString();
+      window.history.pushState(null, "", qs ? `?${qs}` : window.location.pathname);
+    },
+    [sp, tab],
+  );
+  return { tab, moduleId: tab === "modules" ? sp.get("module") : null, cycleId: tab === "cycles" ? sp.get("cycle") : null, go };
+}
+
 /**
  * The Work surface — one component for /m/tasks (all work) and a project page
- * (scoped). Board ⇄ List ⇄ Features, quick-create with inline tokens, filter
- * by text / label / project / feature, and a side drawer for the item.
+ * (scoped, with an Overview tab for the cockpit). Tabs, Plane-style: Work items
+ * (board ⇄ list, quick-create with inline tokens, filters), Cycles and Modules
+ * (each with a detail page: header + that slice of items), Timeline; a side
+ * drawer for the item.
  */
-export function WorkView({ data, projectId }: { data: WorkData; projectId?: string }) {
+export function WorkView({ data, projectId, overview }: { data: WorkData; projectId?: string; overview?: React.ReactNode }) {
   const router = useRouter();
   // Local copy for optimistic moves; re-seeded whenever the server sends new data.
   const [items, setItems] = useState(data.items);
@@ -531,26 +577,34 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
   }
   const now = useNow();
   const [, startMove] = useTransition();
+  const { tab, moduleId, cycleId, go } = useWorkUrl(!!overview);
 
-  const prefKey = projectId ? "work.view.project" : "work.view.all";
-  const [view, setView] = useState<View>("board");
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- restore the remembered view after hydration (localStorage is client-only)
-  useEffect(() => setView(readPref<View>(prefKey, "board", ALL_VIEWS)), [prefKey]);
-  const pickView = (v: View) => {
-    setView(v);
+  const prefKey = projectId ? "work.layout.project" : "work.layout.all";
+  const [layout, setLayout] = useState<Layout>("board");
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- restore the remembered layout after hydration (localStorage is client-only)
+  useEffect(() => setLayout(readPref<Layout>(prefKey, "board", LAYOUTS)), [prefKey]);
+  const pickLayout = (v: Layout) => {
+    setLayout(v);
     writePref(prefKey, v);
   };
 
   const [q, setQ] = useState("");
   const [label, setLabel] = useState("");
   const [project, setProject] = useState("");
-  const [feature, setFeature] = useState<string | null>(null);
+  const [feature, setFeature] = useState("");
   const [cycle, setCycle] = useState("");
   const [planeOpen, setPlaneOpen] = useState(false);
   const flags = useMemo(() => ({ blocked: new Set(data.blocked), delegated: data.delegated }), [data.blocked, data.delegated]);
   const currentCycles = useMemo(() => new Set(data.cycles.filter((c) => c.status === "current").map((c) => c.id)), [data.cycles]);
   const [openId, setOpenId] = useState<string | null>(null);
   const quickRef = useRef<HTMLInputElement>(null);
+
+  const openModule = moduleId ? data.features.find((f) => f.id === moduleId) : undefined;
+  const openCycle = cycleId ? data.cycles.find((c) => c.id === cycleId) : undefined;
+  // The item surface shows on Work items and on a module / cycle page.
+  const itemSurface = tab === "items" || !!openModule || !!openCycle;
+  const scopeFeature = openModule?.id ?? feature;
+  const scopeCycle = openCycle?.id ?? cycle;
 
   // "C" jumps to quick-create; Esc closes the drawer.
   useEffect(() => {
@@ -568,18 +622,22 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
   }, [openId]);
 
   const allLabels = useMemo(() => [...new Set(items.flatMap((t) => t.labels))].sort(), [items]);
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return items.filter(
-      (t) =>
-        (!needle || t.title.toLowerCase().includes(needle) || t.identifier?.toLowerCase() === needle) &&
-        (!label || t.labels.includes(label)) &&
-        (!project || (project === "none" ? !t.projectRef : t.projectRef === `projects:${project}`)) &&
-        (!feature || t.featureRef === `features:${feature}`) &&
-        (!cycle ||
-          (cycle === "current" ? !!t.cycleId && currentCycles.has(t.cycleId) : cycle === "none" ? !t.cycleId : t.cycleId === cycle)),
+  // Not memoized by hand: the React Compiler handles it (scope comes from a derived lookup).
+  const needle = q.trim().toLowerCase();
+  const filtered = items.filter(
+    (t) =>
+      (!needle || t.title.toLowerCase().includes(needle) || t.identifier?.toLowerCase() === needle) &&
+      (!label || t.labels.includes(label)) &&
+      (!project || (project === "none" ? !t.projectRef : t.projectRef === `projects:${project}`)) &&
+      (!scopeFeature || (scopeFeature === "none" ? !t.featureRef : t.featureRef === `features:${scopeFeature}`)) &&
+      (!scopeCycle ||
+        (scopeCycle === "current"
+          ? !!t.cycleId && currentCycles.has(t.cycleId)
+          : scopeCycle === "none"
+            ? !t.cycleId
+            : t.cycleId === scopeCycle)),
     );
-  }, [items, q, label, project, feature, cycle, currentCycles]);
+
 
   const refresh = useCallback(() => router.refresh(), [router]);
 
@@ -598,50 +656,112 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
     });
   };
 
-  const views: { id: View; label: string; icon: typeof List }[] = [
-    { id: "board", label: "Board", icon: Columns3 },
-    { id: "list", label: "List", icon: List },
-    { id: "cycles", label: "Cycles", icon: Repeat },
+  const liveFeatures = data.features.filter((f) => f.status === "planned" || f.status === "active" || f.status === "paused");
+  const tabs: { id: Tab; label: string; icon: typeof List; count?: number }[] = [
+    { id: "items", label: "Work items", icon: Columns3, count: items.filter((t) => !closed(t.status)).length },
+    { id: "cycles", label: "Cycles", icon: Repeat, count: data.cycles.filter((c) => c.status !== "completed").length },
+    { id: "modules", label: "Modules", icon: Layers, count: liveFeatures.length },
     { id: "timeline", label: "Timeline", icon: CalendarRange },
-    ...(projectId ? [] : [{ id: "features" as View, label: "Features", icon: Layers }]),
+    ...(overview ? [{ id: "overview" as Tab, label: "Overview", icon: Gauge }] : []),
   ];
-  const itemView = view === "board" || view === "list" || view === "timeline";
+  const selectCls = "rounded-lg border border-white/8 bg-panel px-2 py-1 text-xs text-ink-dim outline-none";
 
   return (
     <div className="flex flex-col gap-4">
-      {projectId && (
-        <FeatureStrip
-          projectId={projectId}
+      <nav className="-mx-1 flex items-center gap-1 overflow-x-auto border-b border-white/6 px-1" role="tablist" aria-label="Project sections">
+        {tabs.map((t) => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => go({ tab: t.id, module: null, cycle: null })}
+              className={cn(
+                "-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 font-mono text-[11px] uppercase tracking-widest transition",
+                active ? "border-ion text-ink" : "border-transparent text-ink-faint hover:text-ink-dim",
+              )}
+            >
+              <t.icon className={cn("size-3.5", active && "text-ion")} />
+              {t.label}
+              {t.count != null && t.count > 0 && <span className="tabular-nums text-ink-faint">{t.count}</span>}
+            </button>
+          );
+        })}
+        {!projectId && (
+          <button
+            type="button"
+            onClick={() => setPlaneOpen(true)}
+            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:bg-white/5 hover:text-ink"
+          >
+            <Download className="size-3.5" /> import from Plane
+          </button>
+        )}
+      </nav>
+
+      {tab === "overview" && overview}
+
+      {tab === "modules" && !openModule && (
+        <ModulesView
           features={data.features}
           items={items}
-          selected={feature}
-          onSelect={setFeature}
+          projects={data.projects}
+          projectId={projectId}
+          onOpen={(id) => go({ module: id })}
+        />
+      )}
+      {openModule && (
+        <ModuleHeader
+          f={openModule}
+          items={items}
+          project={data.projects.find((p) => p.id === openModule.projectId)}
+          onBack={() => go({ module: null })}
+          onDeleted={() => go({ module: null })}
         />
       )}
 
-      {itemView && <QuickCreate inputRef={quickRef} data={data} projectId={projectId} featureId={feature} />}
+      {tab === "cycles" && !openCycle && (
+        <CyclesView cycles={data.cycles} items={items} projectId={projectId} projects={data.projects} onSelect={(id) => go({ cycle: id })} />
+      )}
+      {openCycle && <CycleHeader c={openCycle} next={nextCycleFor(data.cycles, openCycle)} onBack={() => go({ cycle: null })} />}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg border border-white/8 p-0.5" role="tablist" aria-label="View">
-          {views.map((v) => (
-            <button
-              key={v.id}
-              type="button"
-              role="tab"
-              aria-selected={view === v.id}
-              onClick={() => pickView(v.id)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest transition",
-                view === v.id ? "bg-ion/15 text-ion" : "text-ink-faint hover:text-ink-dim",
-              )}
-            >
-              <v.icon className="size-3.5" />
-              {v.label}
-            </button>
-          ))}
-        </div>
-        {itemView && (
-          <>
+      {tab === "timeline" && (
+        <Timeline
+          items={items}
+          features={projectId ? data.features : data.features.filter((f) => f.status !== "shipped")}
+          projects={data.projects}
+          byFeature={!!projectId}
+          onOpen={setOpenId}
+        />
+      )}
+
+      {itemSurface && (
+        <>
+          <QuickCreate inputRef={quickRef} data={data} projectId={projectId} featureId={openModule?.id ?? (feature && feature !== "none" ? feature : null)} cycleId={openCycle?.id ?? null} />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-lg border border-white/8 p-0.5" role="radiogroup" aria-label="Layout">
+              {([
+                { id: "board", label: "Board", icon: Columns3 },
+                { id: "list", label: "List", icon: List },
+              ] as const).map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={layout === v.id}
+                  onClick={() => pickLayout(v.id)}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest transition",
+                    layout === v.id ? "bg-ion/15 text-ion" : "text-ink-faint hover:text-ink-dim",
+                  )}
+                >
+                  <v.icon className="size-3.5" />
+                  {v.label}
+                </button>
+              ))}
+            </div>
             <label className="flex items-center gap-1.5 rounded-lg border border-white/8 px-2 py-1">
               <Search className="size-3.5 text-ink-faint" />
               <input
@@ -658,12 +778,7 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
               )}
             </label>
             {allLabels.length > 0 && (
-              <select
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                aria-label="Label"
-                className="rounded-lg border border-white/8 bg-panel px-2 py-1 text-xs text-ink-dim outline-none"
-              >
+              <select value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Label" className={selectCls}>
                 <option value="">all labels</option>
                 {allLabels.map((l) => (
                   <option key={l} value={l}>#{l}</option>
@@ -671,12 +786,7 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
               </select>
             )}
             {!projectId && (
-              <select
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-                aria-label="Project"
-                className="rounded-lg border border-white/8 bg-panel px-2 py-1 text-xs text-ink-dim outline-none"
-              >
+              <select value={project} onChange={(e) => setProject(e.target.value)} aria-label="Project" className={selectCls}>
                 <option value="">all projects</option>
                 <option value="none">no project</option>
                 {data.projects.map((p) => (
@@ -686,13 +796,17 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
                 ))}
               </select>
             )}
-            {data.cycles.length > 0 && (
-              <select
-                value={cycle}
-                onChange={(e) => setCycle(e.target.value)}
-                aria-label="Cycle"
-                className="rounded-lg border border-white/8 bg-panel px-2 py-1 text-xs text-ink-dim outline-none"
-              >
+            {!openModule && data.features.length > 0 && (
+              <select value={feature} onChange={(e) => setFeature(e.target.value)} aria-label="Module" className={cn(selectCls, "max-w-48")}>
+                <option value="">all modules</option>
+                <option value="none">no module</option>
+                {liveFeatures.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+            )}
+            {!openCycle && data.cycles.length > 0 && (
+              <select value={cycle} onChange={(e) => setCycle(e.target.value)} aria-label="Cycle" className={selectCls}>
                 <option value="">all cycles</option>
                 {currentCycles.size > 0 && <option value="current">current cycle</option>}
                 <option value="none">no cycle</option>
@@ -704,49 +818,14 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
             <span className="ml-auto font-mono text-[10px] tabular-nums text-ink-faint">
               {filtered.filter((t) => !closed(t.status)).length} open
             </span>
-          </>
-        )}
-        {!projectId && (
-          <button
-            type="button"
-            onClick={() => setPlaneOpen(true)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:bg-white/5 hover:text-ink",
-              !itemView && "ml-auto",
-            )}
-          >
-            <Download className="size-3.5" /> import from Plane
-          </button>
-        )}
-      </div>
+          </div>
 
-      {view === "board" && (
-        <Board items={filtered} all={items} flags={flags} onOpen={setOpenId} onMove={onMove} />
+          {layout === "board" && <Board items={filtered} all={items} flags={flags} onOpen={setOpenId} onMove={onMove} />}
+          {layout === "list" && <ListView items={filtered} data={data} flags={flags} showProject={!projectId} onOpen={setOpenId} />}
+        </>
       )}
-      {view === "list" && <ListView items={filtered} data={data} flags={flags} showProject={!projectId} onOpen={setOpenId} />}
-      {view === "cycles" && (
-        <CyclesView
-          cycles={data.cycles}
-          items={items}
-          projectId={projectId}
-          projects={data.projects}
-          onSelect={(id) => {
-            setCycle(id);
-            pickView("board");
-          }}
-        />
-      )}
-      {view === "timeline" && (
-        <Timeline
-          items={filtered}
-          features={projectId ? data.features : data.features.filter((f) => f.status !== "shipped")}
-          projects={data.projects}
-          byFeature={!!projectId}
-          onOpen={setOpenId}
-        />
-      )}
+
       {planeOpen && <PlaneImport onClose={() => setPlaneOpen(false)} />}
-      {view === "features" && <FeatureRoadmap features={data.features} items={items} projects={data.projects} />}
 
       <AnimatePresence>
         {openId && (

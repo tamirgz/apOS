@@ -421,6 +421,13 @@
       "when": 1790705586748,
       "tag": "0059_slow_joshua_kane",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1790711452534,
+      "tag": "0060_fancy_vulture",
+      "breakpoints": true
     }
   ]
 }

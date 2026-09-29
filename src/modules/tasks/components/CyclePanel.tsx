@@ -154,7 +154,7 @@ function CycleRow({
   return (
     <div className={cn("group glass flex flex-col gap-2 rounded-xl p-3 transition", pending && "opacity-50")}>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-3 text-left" title="Show this cycle's items on the board">
+        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-3 text-left" title="Open this cycle">
           <span
             className="shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest"
             style={{ color: CYCLE_META[c.status].color, borderColor: "color-mix(in oklab, currentColor 35%, transparent)" }}
@@ -254,10 +254,7 @@ export function CyclesView({
       order.indexOf(a.status) - order.indexOf(b.status) ||
       (a.status === "completed" ? +new Date(b.startsAt) - +new Date(a.startsAt) : +new Date(a.startsAt) - +new Date(b.startsAt)),
   );
-  const nextFor = (c: CycleSummary) =>
-    cycles
-      .filter((o) => o.id !== c.id && o.status !== "completed" && (o.projectId ?? null) === (c.projectId ?? null))
-      .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt))[0] ?? null;
+  const nextFor = (c: CycleSummary) => nextCycleFor(cycles, c);
 
   // Default a new cycle to start the day after the latest one ends (or today), two weeks long.
   const latestEnd = Math.max(0, ...cycles.map((c) => +new Date(c.endsAt)));
@@ -318,5 +315,123 @@ export function CyclesView({
         </p>
       )}
     </div>
+  );
+}
+
+/** A cycle's page header: span, days left, progress, a full-size burndown, and roll-over when it's over. */
+export function CycleHeader({
+  c,
+  next,
+  onBack,
+}: {
+  c: CycleSummary;
+  next: CycleSummary | null;
+  onBack: () => void;
+}) {
+  const router = useRouter();
+  const now = useNow();
+  const [pending, start] = useTransition();
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = (fn: () => Promise<unknown>) =>
+    start(async () => {
+      setError(null);
+      try {
+        await fn();
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    });
+  const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
+  const open = c.total - c.done;
+  const daysLeft = Math.ceil((+new Date(c.endsAt) + DAY - now) / DAY);
+
+  return (
+    <section className={cn("glass flex flex-col gap-3 rounded-2xl p-4", pending && "opacity-70")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:bg-white/5 hover:text-ink"
+        >
+          <ArrowRight className="size-3 rotate-180" /> cycles
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing((v) => !v)}
+          className="ml-auto rounded-md p-1 text-ink-faint transition hover:text-ink"
+          aria-label={`Edit ${c.name}`}
+        >
+          <Pencil className="size-3.5" />
+        </button>
+      </div>
+      {editing ? (
+        <CycleForm
+          initial={{ name: c.name, startsAt: dateInput(c.startsAt), endsAt: dateInput(c.endsAt) }}
+          pending={pending}
+          onCancel={() => setEditing(false)}
+          onSubmit={(v) => run(async () => (await updateCycleAction(c.id, v), setEditing(false)))}
+        />
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <div className="flex min-w-56 flex-1 flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <span
+                className="rounded-md border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest"
+                style={{ color: CYCLE_META[c.status].color, borderColor: "color-mix(in oklab, currentColor 35%, transparent)" }}
+              >
+                {CYCLE_META[c.status].label}
+              </span>
+              <h2 dir="auto" className="font-display text-xl text-ink">{c.name}</h2>
+            </div>
+            <p className="font-mono text-[10px] tabular-nums text-ink-faint">
+              {shortDate(c.startsAt)} → {shortDate(c.endsAt)}
+              {c.status === "current" && ` · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`}
+              {c.status === "upcoming" && ` · starts in ${Math.ceil((+new Date(c.startsAt) - now) / DAY)}d`}
+            </p>
+          </div>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-baseline gap-2">
+              <span className="font-display text-3xl tabular-nums text-ink">{pct}%</span>
+              <span className="font-mono text-[10px] tabular-nums text-ink-faint">
+                {c.done}/{c.total} items{c.points ? ` · ${c.pointsDone}/${c.points} pts` : ""}
+              </span>
+            </div>
+            <span className="h-1 w-48 overflow-hidden rounded-full bg-white/6" aria-hidden>
+              <span className="block h-full rounded-full bg-plasma/70" style={{ width: `${pct}%` }} />
+            </span>
+          </div>
+          <span className="text-ink-faint">
+            <Burndown c={c} width={240} height={60} />
+          </span>
+        </div>
+      )}
+      {c.status === "completed" && open > 0 && (
+        <div className="flex items-center gap-2 border-t border-white/5 pt-2 text-xs text-ink-faint">
+          <span>
+            {open} item{open === 1 ? "" : "s"} didn&apos;t finish.
+          </span>
+          <button
+            type="button"
+            onClick={() => run(() => rollOverCycleAction(c.id, next?.id ?? null))}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/10"
+          >
+            <RefreshCw className="size-3" />
+            {next ? `move to ${next.name}` : "un-plan them"}
+          </button>
+        </div>
+      )}
+      {error && <p className="text-xs text-flare">{error}</p>}
+    </section>
+  );
+}
+
+/** The cycle a finished one would roll its leftovers into: the next unfinished one in the same scope. */
+export function nextCycleFor(cycles: CycleSummary[], c: CycleSummary): CycleSummary | null {
+  return (
+    cycles
+      .filter((o) => o.id !== c.id && o.status !== "completed" && (o.projectId ?? null) === (c.projectId ?? null))
+      .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt))[0] ?? null
   );
 }

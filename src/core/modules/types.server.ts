@@ -25,6 +25,12 @@ export interface AiToolContext {
   db: Db;
   /** Set when the tool is invoked from an agent run (not chat). */
   agentRunId?: string;
+  /**
+   * The running agent's display name (agent runs only). Lets write tools
+   * attribute their changes — a work item's activity feed says "Project pulse
+   * set …", an attention card's source is "agent:Project pulse".
+   */
+  agentName?: string;
   /** Processed-items ledger, available to agent runs for idempotency. */
   ledger?: {
     has(itemKey: string): Promise<boolean>;

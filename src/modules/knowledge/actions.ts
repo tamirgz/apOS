@@ -3,6 +3,7 @@
 import { desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
+import { recordUsage } from "@/core/usage";
 import { detectKind } from "./detect";
 import { findDuplicateKnowledge, type KnowledgeDuplicate } from "./dedup";
 import { knowledgeItems, type KnowledgeItem } from "./schema";
@@ -22,6 +23,7 @@ export async function captureKnowledge(
   input: string,
   note?: string,
 ): Promise<CaptureResult> {
+  recordUsage("knowledge.capture");
   const trimmed = input.trim();
   if (!trimmed) throw new Error("nothing to capture");
   const { kind, url } = detectKind(trimmed);

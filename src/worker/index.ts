@@ -625,7 +625,7 @@ async function main() {
   // gets larger with no bounded steady state.
   new Cron("10 3 * * *", { protect: true }, async () => {
     try {
-      const [t, r, n, l, au] = await Promise.all([
+      const [t, r, n, l, au, ue] = await Promise.all([
         db.execute(dsql`update agent_runs set transcript='[]'::jsonb
           where finished_at < now() - interval '14 days'
             and transcript <> '[]'::jsonb`),
@@ -637,10 +637,12 @@ async function main() {
           where processed_at < now() - interval '180 days'`),
         db.execute(dsql`delete from agent_audit
           where created_at < now() - interval '180 days'`),
+        db.execute(dsql`delete from ui_events
+          where ts < now() - interval '90 days'`),
       ]);
       const c = (x: unknown) => (x as { count?: number })?.count ?? 0;
       log(
-        `retention: trimmed ${c(t)} transcript(s), deleted ${c(r)} old run(s), ${c(n)} old notification(s), ${c(l)} old ledger row(s), ${c(au)} old audit row(s)`,
+        `retention: trimmed ${c(t)} transcript(s), deleted ${c(r)} old run(s), ${c(n)} old notification(s), ${c(l)} old ledger row(s), ${c(au)} old audit row(s), ${c(ue)} old usage event(s)`,
       );
     } catch (e) {
       log(`retention sweep failed: ${String(e).slice(0, 120)}`);

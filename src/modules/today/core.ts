@@ -53,6 +53,29 @@ export interface RaiseInput {
    * doesn't lexically match the project.
    */
   trustProjectRef?: boolean;
+  /**
+   * A BACKBONE-OWNED dedupe key that replaces the derived content key — e.g.
+   * the pulse guard's `pulse:<projectId>:<ISO-week>`. Only server code sets
+   * this; a model-supplied `dedupeKey` is still ignored (see deriveDedupeKey).
+   */
+  fixedDedupeKey?: string;
+  /**
+   * With `fixedDedupeKey`: the key may produce at most ONE card EVER, whatever
+   * its status — so a card the user dismissed (or that expired) is not raised
+   * again the next morning under the same key. Without it, only an OPEN card
+   * blocks a re-raise.
+   */
+  oncePerKey?: boolean;
+}
+
+/** ISO-8601 week label, e.g. "2026-W40" — the pulse card's dedupe window. */
+export function isoWeek(d = new Date()): string {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((+t - +yearStart) / 86400000 + 1) / 7);
+  return `${t.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
 /**
@@ -109,7 +132,17 @@ export async function insertAttentionItem(input: RaiseInput) {
   const personRef = normalizeRef(input.personRef, "people");
   // Content key off the NORMALIZED refs — so "projects:<id>" and a bare "<id>"
   // from an inconsistent agent collapse to one key.
-  const dedupeKey = deriveDedupeKey({ projectRef, personRef, title: input.title });
+  const dedupeKey =
+    input.fixedDedupeKey ?? deriveDedupeKey({ projectRef, personRef, title: input.title });
+
+  if (input.fixedDedupeKey && input.oncePerKey) {
+    const [ever] = await db
+      .select()
+      .from(attentionItems)
+      .where(eq(attentionItems.dedupeKey, dedupeKey))
+      .limit(1);
+    if (ever) return ever;
+  }
 
   const findOpenByKey = async () => {
     const [existing] = await db
@@ -209,13 +242,41 @@ export async function wakeSnoozed(): Promise<number> {
   return woken.length;
 }
 
+/** How long an agent-raised card may sit un-acted before it expires. */
+export const AGENT_CARD_TTL_DAYS = 7;
+
+/**
+ * Expire agent-raised cards nobody acted on within AGENT_CARD_TTL_DAYS. An
+ * ignored nudge is a signal, not a debt: leaving it open only buries the cards
+ * that matter (on 2026-09-28, 10 pulse cards piled up and none were touched).
+ * Status becomes 'expired' — distinct from a user 'dismissed' — so the usage
+ * panel can tell "you said no" apart from "you never looked". Never touches
+ * system/planner cards or 'approve' cards (those gate a real decision).
+ */
+export async function expireStaleAgentCards(): Promise<number> {
+  const rows = await db
+    .update(attentionItems)
+    .set({ status: "expired", updatedAt: new Date() })
+    .where(
+      and(
+        eq(attentionItems.status, "open"),
+        dsql`${attentionItems.source} like 'agent%'`,
+        dsql`${attentionItems.type} <> 'approve'`,
+        dsql`${attentionItems.createdAt} < now() - make_interval(days => ${AGENT_CARD_TTL_DAYS})`,
+      ),
+    )
+    .returning({ id: attentionItems.id });
+  if (rows.length) await sql.notify("attention_changed", "");
+  return rows.length;
+}
+
 /** Drop long-dead rows so the table can't grow without bound. */
 export async function pruneAttention(): Promise<void> {
   await db
     .delete(attentionItems)
     .where(
       and(
-        dsql`${attentionItems.status} in ('done','dismissed')`,
+        dsql`${attentionItems.status} in ('done','dismissed','expired')`,
         dsql`${attentionItems.updatedAt} < now() - interval '30 days'`,
       ),
     );

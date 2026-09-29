@@ -131,7 +131,10 @@ export const projectTools: AiToolDef[] = [
       // an attached repo, so a repo-only run never has to skip empties.
       if (!ctx.subjectCursor) {
         const all = await getProjectCockpit(ctx.db);
-        let active = all.filter((p) => p.status === "active");
+        // Areas of development (Home & Family, Personal Growth…) are standing
+        // buckets, not deliverables — no health to judge, no brief to write.
+        // Sweeping them only manufactured generic coaching cards.
+        let active = all.filter((p) => p.status === "active" && p.kind !== "area");
         if (input.withRepo) {
           const repoIds = new Set(
             (

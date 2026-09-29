@@ -3,6 +3,7 @@
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
+import { recordUsage } from "@/core/usage";
 import { createEvent } from "@/modules/calendar/actions";
 import { insertAttentionItem, type RaiseInput } from "./core";
 import { attentionItems, type AttentionStatus } from "./schema";
@@ -30,10 +31,15 @@ export async function raiseAttention(input: RaiseInput) {
 }
 
 async function setStatus(id: string, status: AttentionStatus) {
-  await db
+  const [card] = await db
     .update(attentionItems)
     .set({ status, updatedAt: new Date() })
-    .where(eq(attentionItems.id, id));
+    .where(eq(attentionItems.id, id))
+    .returning({ source: attentionItems.source, type: attentionItems.type });
+  recordUsage(`attention.${status}`, {
+    entityRef: `attention:${id}`,
+    meta: { source: card?.source, type: card?.type },
+  });
   await ping();
   revalidate();
 }
@@ -51,6 +57,7 @@ export async function snoozeAttention(id: string, until: Date) {
     .update(attentionItems)
     .set({ status: "snoozed", snoozedUntil: until, updatedAt: new Date() })
     .where(eq(attentionItems.id, id));
+  recordUsage("attention.snoozed", { entityRef: `attention:${id}` });
   await ping();
   revalidate();
 }

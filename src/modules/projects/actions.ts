@@ -4,7 +4,6 @@ import { desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
 import { getSetting, setSetting } from "@/core/app-settings";
-import { tasks } from "@/modules/tasks/schema";
 import {
   projects,
   statusRank,
@@ -227,12 +226,8 @@ export async function completeProjectNextAction(id: string) {
   const step = proj?.nextAction?.trim();
   if (!step) return;
 
-  await db.insert(tasks).values({
-    title: step,
-    status: "done",
-    completedAt: new Date(),
-    projectRef: `projects:${id}`,
-  });
+  const { createWorkItem } = await import("@/modules/tasks/core");
+  await createWorkItem(db, { title: step, status: "done", projectRef: `projects:${id}` }, "user");
   await db
     .update(projects)
     .set({ nextAction: null, updatedAt: new Date() })

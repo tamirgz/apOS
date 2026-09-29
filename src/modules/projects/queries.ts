@@ -52,8 +52,8 @@ export async function getProjectCockpit(
     .select({
       project: projects,
       total: sql<number>`(select count(*) from ${tasks} where ${tasks.projectRef} = ${ref})`,
-      done: sql<number>`(select count(*) from ${tasks} where ${tasks.projectRef} = ${ref} and ${tasks.status} = 'done')`,
-      overdue: sql<number>`(select count(*) from ${tasks} where ${tasks.projectRef} = ${ref} and ${tasks.status} <> 'done' and ${tasks.dueAt} is not null and ${tasks.dueAt} < now())`,
+      done: sql<number>`(select count(*) from ${tasks} where ${tasks.projectRef} = ${ref} and ${tasks.status} in ('done','cancelled'))`,
+      overdue: sql<number>`(select count(*) from ${tasks} where ${tasks.projectRef} = ${ref} and ${tasks.status} not in ('done','cancelled') and ${tasks.dueAt} is not null and ${tasks.dueAt} < now())`,
       noteCount: sql<number>`(select count(*) from ${notes} where ${notes.projectRefs} @> jsonb_build_array(${ref}))`,
       openAttention: sql<number>`(select count(*) from ${attentionItems} where ${attentionItems.projectRef} = ${ref} and ${attentionItems.status} = 'open')`,
       lastActivityAt: sql<string | null>`greatest(
@@ -68,7 +68,7 @@ export async function getProjectCockpit(
       // project has no open tasks left) wins over it, below.
       nextTaskTitle: sql<string | null>`(
         select ${tasks.title} from ${tasks}
-        where ${tasks.projectRef} = ${ref} and ${tasks.status} <> 'done'
+        where ${tasks.projectRef} = ${ref} and ${tasks.status} not in ('done','cancelled')
         order by (${tasks.dueAt} is null), ${tasks.dueAt} asc, ${priorityRank}, ${tasks.createdAt} asc
         limit 1
       )`,
@@ -129,7 +129,7 @@ export async function getProjectsWithTaskCounts(
     .select({
       project: projects,
       total: sql<number>`(select count(*) from ${tasks} where ${tasks.projectRef} = ${ref})`,
-      done: sql<number>`(select count(*) from ${tasks} where ${tasks.projectRef} = ${ref} and ${tasks.status} = 'done')`,
+      done: sql<number>`(select count(*) from ${tasks} where ${tasks.projectRef} = ${ref} and ${tasks.status} in ('done','cancelled'))`,
     })
     .from(projects)
     .orderBy(statusRank, desc(projects.updatedAt));

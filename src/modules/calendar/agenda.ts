@@ -1,6 +1,6 @@
-import { and, asc, gte, isNotNull, lte, ne } from "drizzle-orm";
+import { and, asc, gte, isNotNull, lte } from "drizzle-orm";
 import { db } from "@/core/db/client";
-import { tasks } from "../tasks/schema";
+import { taskIsOpen, tasks } from "../tasks/schema";
 import { calendarEvents } from "./schema";
 
 export interface AgendaItem {
@@ -47,7 +47,7 @@ export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
           isNotNull(tasks.dueAt),
           gte(tasks.dueAt, from),
           lte(tasks.dueAt, to),
-          ne(tasks.status, "done"),
+          taskIsOpen,
         ),
       ),
   ]);

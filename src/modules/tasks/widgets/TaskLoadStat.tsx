@@ -7,14 +7,14 @@ import { tasks } from "../schema";
 export async function TaskLoadStat() {
   const [c] = await db
     .select({
-      todo: sql<number>`count(*) filter (where ${tasks.status} = 'todo')`,
-      doing: sql<number>`count(*) filter (where ${tasks.status} = 'doing')`,
+      todo: sql<number>`count(*) filter (where ${tasks.status} in ('backlog','todo'))`,
+      doing: sql<number>`count(*) filter (where ${tasks.status} in ('doing','review'))`,
     })
     .from(tasks);
   const open = Number(c.todo) + Number(c.doing);
   return (
     <StatCell
-      label="Task load"
+      label="Work load"
       value={open}
       hint={`open · ${Number(c.doing)} in flight`}
       href="/m/tasks"

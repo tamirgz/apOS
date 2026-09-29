@@ -1,42 +1,21 @@
-import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { db } from "@/core/db/client";
 import type { ModuleRouteProps } from "@/core/modules/types.server";
-import { listProjectOptions } from "@/modules/projects/queries";
-import { tasks } from "../schema";
-import { TaskDetailCard } from "../components/TaskDetailCard";
+import { db } from "@/core/db/client";
+import { findByIdentifier } from "../core";
+import { loadWorkData } from "../queries";
+import { WorkItemPage } from "../components/WorkItemPage";
 
 /**
- * /m/tasks/<id> — the landing page for every task-shaped link in the system
- * (planner cards, triage results, search hits, widgets). Before this route
- * they all dumped on the full board and you hunted.
+ * /m/tasks/<id | KEY-N> — the permalink for a work item (planner cards, triage
+ * results, search hits, widgets, commit links). Accepts the uuid or the human
+ * identifier, so "ETHOS-12" is a URL you can type.
  */
 export async function TaskDetailPage({ params }: ModuleRouteProps) {
-  const [id] = params;
-  const task =
-    id && /^[0-9a-f-]{36}$/i.test(id)
-      ? (await db.select().from(tasks).where(eq(tasks.id, id)))[0]
-      : undefined;
-
-  if (!task) {
-    return (
-      <div className="glass flex flex-col items-center gap-3 rounded-2xl px-8 py-16 text-center">
-        <p className="font-mono text-[11px] uppercase tracking-[0.35em] text-flare">
-          task not found
-        </p>
-        <p className="text-sm text-ink-dim">It may have been deleted.</p>
-        <Link
-          href="/m/tasks"
-          className="mt-1 rounded-lg border border-plasma/30 px-4 py-2 font-mono text-xs uppercase tracking-widest text-plasma transition hover:bg-plasma/10"
-        >
-          back to tasks
-        </Link>
-      </div>
-    );
-  }
-
-  const projectOptions = await listProjectOptions();
+  const [raw] = params;
+  const ref = decodeURIComponent(raw ?? "");
+  const id = /^[0-9a-f-]{36}$/i.test(ref) ? ref : (await findByIdentifier(db, ref))?.id;
+  const { projects } = await loadWorkData();
 
   return (
     <div className="max-w-2xl">
@@ -45,9 +24,17 @@ export async function TaskDetailPage({ params }: ModuleRouteProps) {
         className="mb-3 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:text-ink"
       >
         <ArrowLeft className="size-3.5" />
-        tasks
+        work
       </Link>
-      <TaskDetailCard task={task} projectOptions={projectOptions} />
+      {id ? (
+        <div className="glass rounded-2xl p-6">
+          <WorkItemPage id={id} projects={projects} />
+        </div>
+      ) : (
+        <p className="glass rounded-2xl px-8 py-16 text-center font-mono text-[11px] uppercase tracking-[0.35em] text-flare">
+          no work item {ref}
+        </p>
+      )}
     </div>
   );
 }

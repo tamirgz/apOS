@@ -1,22 +1,29 @@
 import Link from "next/link";
-import { asc, ne } from "drizzle-orm";
+import { asc, inArray, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
-import { priorityRank, tasks } from "../schema";
+import { ACTIVE_STATUSES, priorityRank, tasks } from "../schema";
+import { withIdentifiers } from "../core";
+import { STATUS_META } from "../states";
 import { cn } from "@/core/ui/cn";
 
 const PRIORITY_COLOR = {
+  urgent: "text-flare",
   high: "text-flare",
   medium: "text-solar",
   low: "text-ink-faint",
 } as const;
 
 export async function UpNextWidget() {
-  const rows = await db
-    .select()
-    .from(tasks)
-    .where(ne(tasks.status, "done"))
-    .orderBy(priorityRank, asc(tasks.createdAt))
-    .limit(5);
+  // Committed work only (not the backlog): in-progress first, then priority.
+  const rows = await withIdentifiers(
+    db,
+    await db
+      .select()
+      .from(tasks)
+      .where(inArray(tasks.status, [...ACTIVE_STATUSES]))
+      .orderBy(asc(sql`case ${tasks.status} when 'review' then 0 when 'doing' then 1 else 2 end`), priorityRank, asc(tasks.sortOrder))
+      .limit(5),
+  );
 
   if (rows.length === 0) {
     return (
@@ -42,7 +49,7 @@ export async function UpNextWidget() {
               PRIORITY_COLOR[t.priority],
             )}
           >
-            ▲ {t.status}
+            ▲ {t.identifier ? `${t.identifier} · ` : ""}{STATUS_META[t.status].label}
           </span>
           <span className="line-clamp-2 text-[13px] leading-snug text-ink-dim transition group-hover:text-ink">
             {t.title}

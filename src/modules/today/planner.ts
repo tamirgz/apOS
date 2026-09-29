@@ -15,7 +15,7 @@
 import { and, eq, inArray, isNotNull, lt, sql as dsql } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
 import { projects } from "@/modules/projects/schema";
-import { tasks } from "@/modules/tasks/schema";
+import { ACTIVE_STATUSES, OPEN_STATUSES, tasks } from "@/modules/tasks/schema";
 import { attentionItems } from "./schema";
 import { deriveDedupeKey, insertAttentionItem, normalizeRef, type RaiseInput } from "./core";
 
@@ -55,7 +55,7 @@ export async function planDay(): Promise<{ raised: number; closed: number }> {
   const overdue = await db
     .select({ id: tasks.id, title: tasks.title, dueAt: tasks.dueAt, projectRef: tasks.projectRef })
     .from(tasks)
-    .where(and(inArray(tasks.status, ["todo", "doing"]), isNotNull(tasks.dueAt), lt(tasks.dueAt, new Date())))
+    .where(and(inArray(tasks.status, [...OPEN_STATUSES]), isNotNull(tasks.dueAt), lt(tasks.dueAt, new Date())))
     .orderBy(tasks.dueAt)
     .limit(3);
   for (const t of overdue) {
@@ -78,8 +78,8 @@ export async function planDay(): Promise<{ raised: number; closed: number }> {
     .from(tasks)
     .where(
       and(
-        inArray(tasks.status, ["todo", "doing"]),
-        eq(tasks.priority, "high"),
+        inArray(tasks.status, [...ACTIVE_STATUSES]),
+        inArray(tasks.priority, ["high", "urgent"]),
         isNotNull(tasks.dueAt),
         dsql`${tasks.dueAt}::date = now()::date`,
         dsql`${tasks.dueAt} >= now()`,

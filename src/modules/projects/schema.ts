@@ -41,6 +41,11 @@ export type ProjectHealth = (typeof PROJECT_HEALTHS)[number];
 export const projects = pgTable("projects", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
+  /**
+   * Short uppercase prefix for work-item identifiers ("ETHOS" → ETHOS-12).
+   * Derived from the name on first need (tasks/keys.ts), unique, editable.
+   */
+  key: text("key").unique(),
   description: text("description"),
   /**
    * Free-form single category the project belongs to ("Shahar", "Startup",
@@ -104,10 +109,20 @@ export const projects = pgTable("projects", {
 export type Project = typeof projects.$inferSelect;
 
 /**
+ * Feature lifecycle (Plane's module states, trimmed). Mostly self-driving —
+ * tasks/core.ts syncs it whenever an item changes:
+ *   planned → active   when any item starts moving (doing/review/done)
+ *   active  → shipped  when its last open item closes (stamps shippedAt)
+ *   shipped → active   when an item is reopened or a new one is added
+ * paused / cancelled are manual and never auto-changed.
+ */
+export const FEATURE_STATUSES = ["planned", "active", "paused", "shipped", "cancelled"] as const;
+export type FeatureStatus = (typeof FEATURE_STATUSES)[number];
+
+/**
  * A feature — a mid-layer between project and task. A feature belongs to one
  * project and groups multiple tasks (tasks.featureRef = "features:<id>").
- * Lightweight: just name + description; status and progress are derived from
- * its tasks at read time.
+ * Progress is derived from its tasks at read time; status follows them (above).
  */
 export const features = pgTable(
   "features",
@@ -116,6 +131,10 @@ export const features = pgTable(
     projectId: uuid("project_id").notNull(),
     name: text("name").notNull(),
     description: text("description"),
+    status: text("status", { enum: FEATURE_STATUSES }).notNull().default("active"),
+    /** Target date — the feature's deadline on the roadmap. */
+    targetAt: timestamp("target_at", { withTimezone: true }),
+    shippedAt: timestamp("shipped_at", { withTimezone: true }),
     /** Manual order within the project's feature list. */
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

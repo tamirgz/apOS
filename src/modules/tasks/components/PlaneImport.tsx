@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Download, Loader2, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
@@ -62,7 +63,9 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
       }
     });
 
-  return (
+  // Portaled: an ancestor's backdrop-filter would otherwise become the fixed
+  // overlay's containing block and clip the dialog to the toolbar's box.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-void/70 p-4 pt-[10vh] backdrop-blur-sm" onClick={onClose}>
       <div
         role="dialog"
@@ -192,7 +195,8 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

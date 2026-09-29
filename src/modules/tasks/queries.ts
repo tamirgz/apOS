@@ -1,9 +1,9 @@
-import { asc, eq, ne } from "drizzle-orm";
+import { asc, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { features, projects, type FeatureStatus } from "@/modules/projects/schema";
 import { blockedItemIds, listWorkItems, type WorkItem } from "./core";
 import { listCycles, type CycleSummary } from "./cycles";
-import { taskLinks } from "./schema";
+import { taskLinks, workViews, type WorkView } from "./schema";
 
 export interface WorkProject {
   id: string;
@@ -33,11 +33,13 @@ export interface WorkData {
   blocked: string[];
   /** itemId → latest Workbench run status (queued/running/review/…) for delegated items. */
   delegated: Record<string, string>;
+  /** Saved views for this surface (the project's, or all-work ones). */
+  views: WorkView[];
 }
 
 /** Everything a Work view needs: items (+identifiers), the project picker, features. */
 export async function loadWorkData(projectId?: string): Promise<WorkData> {
-  const [items, projectRows, featureRows, cycleRows, blocked, wbLinks] = await Promise.all([
+  const [items, projectRows, featureRows, cycleRows, blocked, wbLinks, views] = await Promise.all([
     listWorkItems(db, { projectId }),
     db
       .select({ id: projects.id, name: projects.name, key: projects.key, kind: projects.kind })
@@ -67,6 +69,11 @@ export async function loadWorkData(projectId?: string): Promise<WorkData> {
       .from(taskLinks)
       .where(eq(taskLinks.kind, "workbench"))
       .orderBy(asc(taskLinks.createdAt)),
+    db
+      .select()
+      .from(workViews)
+      .where(projectId ? eq(workViews.projectId, projectId) : isNull(workViews.projectId))
+      .orderBy(asc(workViews.sortOrder), asc(workViews.createdAt)),
   ]);
   const delegated: Record<string, string> = {};
   for (const l of wbLinks) delegated[l.taskId] = l.state ?? "queued"; // later rows win
@@ -77,5 +84,6 @@ export async function loadWorkData(projectId?: string): Promise<WorkData> {
     cycles: cycleRows,
     blocked: [...blocked],
     delegated,
+    views,
   };
 }

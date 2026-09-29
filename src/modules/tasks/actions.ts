@@ -23,7 +23,7 @@ import {
 import { createCycle, cycleStatus, deleteCycle, rollOverCycle, updateCycle } from "./cycles";
 import { delegateFeature, delegateWorkItem } from "./delegate";
 import { PLANE_STATUS_KEY, type PlaneImportStatus } from "./plane/import";
-import { cycles, tasks, type TaskStatus } from "./schema";
+import { cycles, tasks, workViews, type TaskStatus, type WorkViewFilters } from "./schema";
 
 function revalidateWork(projectRef?: string | null) {
   revalidatePath("/");
@@ -202,4 +202,21 @@ export async function startPlaneImport(mode: "preview" | "import", projectIds?: 
   const queued: PlaneImportStatus = { state: "running", mode, startedAt: now, updatedAt: now, step: "queued for the worker", log: [] };
   await setSetting(PLANE_STATUS_KEY, JSON.stringify(queued));
   await sql.notify("plane_import", JSON.stringify({ mode, projectIds }));
+}
+
+// ── saved views ────────────────────────────────────────────────────────────
+
+/** Save the current filters as a named view (on a project page, or on all work when projectId is null). */
+export async function saveWorkView(projectId: string | null, name: string, filters: WorkViewFilters) {
+  const clean = name.trim().slice(0, 60);
+  if (!clean) throw new Error("A view needs a name");
+  const kept = Object.fromEntries(Object.entries(filters).filter(([, v]) => typeof v === "string" && v)) as WorkViewFilters;
+  const [row] = await db.insert(workViews).values({ projectId, name: clean, filters: kept }).returning();
+  revalidateWork(projectId ? `projects:${projectId}` : null);
+  return row;
+}
+
+export async function deleteWorkView(id: string) {
+  const [row] = await db.delete(workViews).where(eq(workViews.id, id)).returning({ projectId: workViews.projectId });
+  revalidateWork(row?.projectId ? `projects:${row.projectId}` : null);
 }

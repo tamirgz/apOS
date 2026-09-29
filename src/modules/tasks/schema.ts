@@ -3,6 +3,7 @@ import {
   doublePrecision,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -206,3 +207,32 @@ export const taskLinks = pgTable(
 );
 
 export type TaskLink = typeof taskLinks.$inferSelect;
+
+/** The filter set a saved view restores (all optional; "" / absent = no filter). */
+export interface WorkViewFilters {
+  q?: string;
+  label?: string;
+  project?: string;
+  feature?: string;
+  cycle?: string;
+  layout?: "board" | "list" | "calendar";
+}
+
+/**
+ * Saved views — named filter sets on the Work items tab. projectId scopes a
+ * view to one project page; null = a view on all work.
+ */
+export const workViews = pgTable(
+  "work_views",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id"),
+    name: text("name").notNull(),
+    filters: jsonb("filters").$type<WorkViewFilters>().notNull().default({}),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("work_views_project").on(t.projectId)],
+);
+
+export type WorkView = typeof workViews.$inferSelect;

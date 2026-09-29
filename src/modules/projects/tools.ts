@@ -10,6 +10,7 @@ import { getProjectCockpit, getProjectTasks } from "./queries";
 import { boundProjectId, resolveProjectByName } from "./subject";
 import { usableRepoPath } from "./repo";
 import { projectFiles, projects, PROJECT_HEALTHS, PROJECT_STATUSES } from "./schema";
+import { isClosed } from "../tasks/schema";
 
 const DAY = 24 * 60 * 60 * 1000;
 const daysAgo = (d: Date | null) =>
@@ -216,7 +217,7 @@ export const projectTools: AiToolDef[] = [
       // pulse write an "[Advise] …" next step when nothing is open.
       const all = await getProjectTasks(it.id, ctx.db);
       const openTasks = all
-        .filter((t) => t.status !== "done")
+        .filter((t) => !isClosed(t.status))
         .slice(0, 20)
         .map((t) => ({
           title: t.title,

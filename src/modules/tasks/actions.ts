@@ -1,91 +1,86 @@
 "use server";
 
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/core/db/client";
+import { recordUsage } from "@/core/usage";
+import { features } from "@/modules/projects/schema";
 import {
-  priorityRank,
-  tasks,
-  type TaskPriority,
-  type TaskStatus,
-} from "./schema";
+  addComment,
+  createWorkItem,
+  deleteWorkItem,
+  getWorkItem,
+  listWorkItems,
+  updateWorkItem,
+  type WorkItemInput,
+  type WorkItemPatch,
+} from "./core";
+import { tasks, type TaskStatus } from "./schema";
 
-export async function listTasks(status?: TaskStatus) {
-  return db
-    .select()
-    .from(tasks)
-    .where(status ? eq(tasks.status, status) : undefined)
-    .orderBy(priorityRank, asc(tasks.createdAt));
-}
-
-export async function createTask(input: {
-  title: string;
-  notes?: string;
-  priority?: TaskPriority;
-  dueAt?: Date | null;
-  projectRef?: string | null;
-  featureRef?: string | null;
-}) {
-  const title = input.title.trim();
-  if (!title) throw new Error("Task title is required");
-  const [row] = await db
-    .insert(tasks)
-    .values({
-      title,
-      notes: input.notes?.trim() || null,
-      priority: input.priority ?? "medium",
-      dueAt: input.dueAt ?? null,
-      projectRef: input.projectRef ?? null,
-      featureRef: input.featureRef ?? null,
-    })
-    .returning();
+function revalidateWork(projectRef?: string | null) {
   revalidatePath("/");
   revalidatePath("/m/tasks");
-  return row;
+  if (projectRef?.startsWith("projects:")) revalidatePath(`/m/projects/${projectRef.slice(9)}`);
+}
+
+export async function listTasks(status?: TaskStatus) {
+  return listWorkItems(db, { statuses: status ? [status] : undefined });
+}
+
+export async function createTask(input: WorkItemInput) {
+  const item = await createWorkItem(db, input, "user");
+  recordUsage("work.create", { entityRef: `tasks:${item.id}` });
+  revalidateWork(item.projectRef);
+  return item;
 }
 
 export async function setTaskStatus(id: string, status: TaskStatus) {
-  const [row] = await db
-    .update(tasks)
-    .set({ status, completedAt: status === "done" ? new Date() : null })
-    .where(eq(tasks.id, id))
-    .returning();
-  revalidatePath("/");
-  revalidatePath("/m/tasks");
-  return row;
+  const item = await updateWorkItem(db, id, { status }, "user");
+  revalidateWork(item?.projectRef);
+  return item;
 }
 
-export async function updateTask(
-  id: string,
-  patch: Partial<{
-    title: string;
-    notes: string | null;
-    priority: TaskPriority;
-    dueAt: Date | null;
-    projectRef: string | null;
-    featureRef: string | null;
-  }>,
-) {
-  // Re-embedding on content change is handled by the search-index content-hash
-  // gate — the next sync detects the new text and re-embeds. No column to clear.
-  const [row] = await db
-    .update(tasks)
-    .set(patch)
-    .where(eq(tasks.id, id))
-    .returning();
-  revalidatePath("/");
-  revalidatePath("/m/tasks");
-  return row;
+/** Board drag: new column and/or position in one write. */
+export async function moveTask(id: string, status: TaskStatus, sortOrder: number) {
+  const item = await updateWorkItem(db, id, { status, sortOrder }, "user");
+  revalidateWork(item?.projectRef);
+  return item;
+}
+
+export async function updateTask(id: string, patch: WorkItemPatch) {
+  const item = await updateWorkItem(db, id, patch, "user");
+  revalidateWork(item?.projectRef);
+  return item;
 }
 
 export async function deleteTask(id: string) {
-  await db.delete(tasks).where(eq(tasks.id, id));
-  revalidatePath("/");
-  revalidatePath("/m/tasks");
+  await deleteWorkItem(db, id);
+  revalidateWork();
 }
 
 export async function deleteDoneTasks() {
-  await db.delete(tasks).where(and(eq(tasks.status, "done")));
-  revalidatePath("/");
-  revalidatePath("/m/tasks");
+  const done = await db.select({ id: tasks.id }).from(tasks).where(inArray(tasks.status, ["done", "cancelled"]));
+  for (const t of done) await deleteWorkItem(db, t.id);
+  revalidateWork();
+}
+
+/** Drawer payload: the item, its parent, sub-items, history and the project's features. */
+export async function loadWorkItem(id: string) {
+  const data = await getWorkItem(db, id);
+  if (!data) return null;
+  const projectId = data.item.projectRef?.startsWith("projects:") ? data.item.projectRef.slice(9) : null;
+  const projectFeatures = projectId
+    ? await db
+        .select({ id: features.id, name: features.name, status: features.status })
+        .from(features)
+        .where(eq(features.projectId, projectId))
+        .orderBy(asc(features.sortOrder))
+    : [];
+  return { ...data, features: projectFeatures };
+}
+
+export async function addTaskComment(id: string, body: string) {
+  const row = await addComment(db, id, body, "user");
+  recordUsage("work.comment", { entityRef: `tasks:${id}` });
+  return row;
 }

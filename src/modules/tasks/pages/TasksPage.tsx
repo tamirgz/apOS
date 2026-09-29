@@ -1,9 +1,7 @@
-import { listProjects } from "@/modules/projects/actions";
-import { listTasks } from "../actions";
-import { TaskBoard } from "../components/TaskBoard";
+import { loadWorkData } from "../queries";
+import { WorkView } from "../components/WorkView";
 
+/** /m/tasks — all work across projects: board, list, and the features roadmap. */
 export async function TasksPage() {
-  const [tasks, projects] = await Promise.all([listTasks(), listProjects()]);
-  const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
-  return <TaskBoard tasks={tasks} projectOptions={projectOptions} />;
+  return <WorkView data={await loadWorkData()} />;
 }

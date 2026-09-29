@@ -175,10 +175,10 @@ const GATES: Record<string, Gate> = {
   "Task triage": async () => {
     const rows = await db.execute(dsql`
       select 1 from tasks
-       where status in ('todo','doing')
+       where status in ('todo','doing','review')
          and (
            (due_at is not null and due_at < now())
-           or (created_at < now() - interval '7 days' and priority <> 'high')
+           or (created_at < now() - interval '7 days' and priority not in ('high','urgent'))
          )
        limit 1`);
     return [...rows].length > 0

@@ -1,6 +1,7 @@
 import type { ModuleServerManifest } from "@/core/modules/types.server";
-import { tasks } from "./schema";
+import { taskActivity, tasks, workCounters } from "./schema";
 import { taskTools } from "./tools";
+import { workJobs } from "./jobs";
 import { TasksPage } from "./pages/TasksPage";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
 import { OpenTasksWidget } from "./widgets/OpenTasksWidget";
@@ -31,8 +32,9 @@ export const tasksServerManifest: ModuleServerManifest = {
       span: 4,
     },
   ],
-  schema: { tasks },
+  schema: { tasks, workCounters, taskActivity },
   aiTools: taskTools,
+  jobs: workJobs,
   agentTemplates: [
     {
       id: "task-triage",
@@ -40,8 +42,8 @@ export const tasksServerManifest: ModuleServerManifest = {
       description:
         "Reviews open tasks daily, flags stale or overdue ones by raising their priority.",
       defaultPrompt:
-        "Review my open tasks with tasks.list — each task comes back with a short `ref` (e.g. 't3'). For any task that is clearly stale or overdue, move it with tasks.setStatus, identifying it by its `ref` (never an id). Then summarize what most needs attention today. Use ledger.has / ledger.mark to avoid re-flagging a task you already flagged.",
-      defaultTools: ["tasks.list", "tasks.setStatus"],
+        "Review my open work items with tasks.list — each comes back with a short `ref` (e.g. 't3') and an identifier (e.g. ETHOS-12). States are backlog → todo → doing → review → done (or cancelled). For an item that is clearly stale or overdue, raise its priority with tasks.update or move it with tasks.setStatus (backlog if it is not really committed), and leave a one-line tasks.comment saying why. Identify items by `ref` or identifier, never an id. Then summarize what most needs attention today. Use ledger.has / ledger.mark to avoid re-flagging an item you already flagged.",
+      defaultTools: ["tasks.list", "tasks.setStatus", "tasks.update", "tasks.comment"],
       defaultSchedule: "0 8 * * *",
     },
   ],

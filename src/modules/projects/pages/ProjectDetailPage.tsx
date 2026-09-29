@@ -6,7 +6,6 @@ import { GlassPanel } from "@/core/ui/GlassPanel";
 import {
   completeProjectNextAction,
   listProjectCategories,
-  listProjects,
   setProjectCategory,
   setProjectGoal,
   setProjectNextAction,
@@ -14,20 +13,17 @@ import {
 } from "../actions";
 import { usableRepoPath } from "../repo";
 import { AdvisorPanel } from "../components/AdvisorPanel";
-import { getProjectCockpitById, getProjectTasks } from "../queries";
+import { getProjectCockpitById } from "../queries";
 import { CockpitHeader } from "../components/CockpitHeader";
 import { ProjectAttention } from "../components/ProjectAttention";
 import { DeleteProjectButton } from "../components/DeleteProjectButton";
-import { ProjectTaskQuickAdd } from "../components/ProjectTaskQuickAdd";
 import { ProjectNotes } from "../components/ProjectNotes";
 import { ProjectFiles } from "../components/ProjectFiles";
 import { StatusCycleButton } from "../components/StatusCycleButton";
 import { ProjectTitle } from "../components/ProjectTitle";
-import { TaskBoard } from "../../tasks/components/TaskBoard";
+import { WorkView } from "../../tasks/components/WorkView";
+import { loadWorkData } from "../../tasks/queries";
 import { listProjectFiles } from "../files-actions";
-import { listProjectFeatures } from "../features-actions";
-import { featureRefOf } from "../schema";
-import { ProjectFeatures } from "../components/ProjectFeatures";
 
 // shared: core/ui/time.ts lastActiveLabel
 
@@ -56,28 +52,15 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
 
   const { listNotesForProject } = await import("@/modules/notes/actions");
   const { listAttentionForProject } = await import("@/modules/today/queries");
-  const [projectTasks, projectNotes, attention, allProjects, projectFiles] =
-    await Promise.all([
-      getProjectTasks(id),
-      listNotesForProject(id).catch(() => []),
-      listAttentionForProject(id).catch(() => []),
-      listProjects(),
-      listProjectFiles(id),
-    ]);
-  const [categories, projectFeatures] = await Promise.all([
+  const [work, projectNotes, attention, projectFiles, categories] = await Promise.all([
+    loadWorkData(id),
+    listNotesForProject(id).catch(() => []),
+    listAttentionForProject(id).catch(() => []),
+    listProjectFiles(id),
     listProjectCategories(),
-    listProjectFeatures(id),
   ]);
-  const projectOptions = allProjects.map((p) => ({ id: p.id, name: p.name }));
-  const done = projectTasks.filter((t) => t.status === "done").length;
+  const done = work.items.filter((t) => t.status === "done" || t.status === "cancelled").length;
   const openAttention = attention.filter((a) => a.status === "open");
-
-  // Split the project's tasks into feature groups + loose (standalone) tasks.
-  const featureGroups = projectFeatures.map((feature) => ({
-    feature,
-    tasks: projectTasks.filter((t) => t.featureRef === featureRefOf(feature.id)),
-  }));
-  const looseTasks = projectTasks.filter((t) => !t.featureRef);
 
   return (
     <div className="flex flex-col gap-6">
@@ -92,8 +75,13 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
         <div className="flex flex-wrap items-center gap-3">
           <ProjectTitle id={project.id} name={project.name} />
           <StatusCycleButton id={project.id} status={project.status} />
+          {project.key && (
+            <span className="rounded-md border border-white/10 px-1.5 py-0.5 font-mono text-[10px] tracking-widest text-ink-dim" title="Work-item key — items are numbered KEY-N">
+              {project.key}
+            </span>
+          )}
           <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
-            {done}/{projectTasks.length} tasks
+            {done}/{work.items.length} items
           </span>
           <div className="ml-auto flex items-center gap-2">
             <Link
@@ -159,27 +147,7 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
         }))}
       />
 
-      <ProjectFeatures
-        projectId={project.id}
-        groups={featureGroups}
-        looseTasks={looseTasks.map((t) => ({ id: t.id, title: t.title }))}
-      />
-
-      <div className="flex items-center gap-2 px-1 pt-1">
-        <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
-          tasks
-        </span>
-        <span className="font-mono text-xs tabular-nums text-ink-faint">{looseTasks.length}</span>
-      </div>
-      <ProjectTaskQuickAdd projectId={project.id} />
-
-      <TaskBoard
-        tasks={looseTasks}
-        projectOptions={projectOptions}
-        quickAddProjectRef={`projects:${project.id}`}
-        hideQuickAdd
-        hideProjectBadge
-      />
+      <WorkView data={work} projectId={project.id} />
 
       <ProjectNotes projectId={project.id} notes={projectNotes} />
 

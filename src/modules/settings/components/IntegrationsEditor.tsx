@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 import { CalendarCheck2, Check, Copy, ExternalLink, Unplug } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import {
@@ -15,7 +15,7 @@ import {
   disconnectGoogle,
   listSlackChannels,
   saveIntegration,
-  useObsidianVault,
+  selectObsidianVault,
 } from "../actions";
 
 const detectBtn =
@@ -86,7 +86,7 @@ function DetectPanel({ kind }: { kind: "obsidian" | "mlx" }) {
               className="rounded-lg border border-ion/30 bg-ion/8 px-2.5 py-1 font-mono text-[10px] text-ion transition hover:bg-ion/15 disabled:opacity-40"
               onClick={() =>
                 start(async () => {
-                  await useObsidianVault(v.path);
+                  await selectObsidianVault(v.path);
                   setVaults(null);
                   setMsg(`✓ using "${v.name}"`);
                 })
@@ -259,6 +259,8 @@ function StatusPill({ status }: { status: Status }) {
   );
 }
 
+const noSubscribe = () => () => {};
+
 const stepLink =
   "text-ion underline decoration-ion/40 underline-offset-2 hover:decoration-ion";
 
@@ -272,10 +274,15 @@ function GoogleWizard({
   values: Record<string, string>;
   connected: boolean;
 }) {
-  const [origin, setOrigin] = useState("http://localhost:3777");
+  // The server can't know the browser's origin: it (and hydration) render the
+  // default, then the client's real origin.
+  const origin = useSyncExternalStore(
+    noSubscribe,
+    () => window.location.origin,
+    () => "http://localhost:3777",
+  );
   const [copied, setCopied] = useState(false);
   const [pending, start] = useTransition();
-  useEffect(() => setOrigin(window.location.origin), []);
   const redirect = `${origin}/api/google/callback`;
   const hasCreds = !!values.google_client_id && !!values.google_client_secret;
 

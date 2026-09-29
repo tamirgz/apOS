@@ -140,7 +140,7 @@ export async function detectObsidianVaults(): Promise<
 
 /** Point the Obsidian integration at a detected vault (reuses save's cleanup +
  *  the obsidian_sync NOTIFY). */
-export async function useObsidianVault(path: string) {
+export async function selectObsidianVault(path: string) {
   await saveIntegration("obsidian_vault_path", path);
 }
 

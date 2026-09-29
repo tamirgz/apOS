@@ -1,3 +1,4 @@
+import { createElement } from "react";
 import Link from "next/link";
 import { getServerModule } from "@/modules/registry.server";
 import { resolveModuleRoute } from "@/core/modules/resolve";
@@ -36,5 +37,7 @@ export default async function ModulePage({
   const Route = resolveModuleRoute(mod, rest);
   if (!Route) return <NotFound path={slug.join("/")} />;
 
-  return <Route params={rest} />;
+  // Route is a static entry from the module registry, not a component made
+  // here; createElement says so without tripping react-hooks/static-components.
+  return createElement(Route, { params: rest });
 }

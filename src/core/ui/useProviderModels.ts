@@ -12,15 +12,18 @@ export function useProviderModels(provider: AIProviderId | "") {
   const [models, setModels] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!provider) {
-      setModels([]);
-      setError(null);
-      return;
-    }
-    let cancelled = false;
+  // A new provider starts from an empty list — reset while rendering, not in
+  // the effect (React's "adjust state when a prop changes" pattern).
+  const [prevProvider, setPrevProvider] = useState(provider);
+  if (provider !== prevProvider) {
+    setPrevProvider(provider);
     setModels([]);
     setError(null);
+  }
+
+  useEffect(() => {
+    if (!provider) return;
+    let cancelled = false;
     fetch(`/api/ai/models?provider=${provider}`)
       .then((r) => r.json())
       .then((d: { models: string[]; error?: string }) => {

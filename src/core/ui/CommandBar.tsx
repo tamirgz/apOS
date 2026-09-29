@@ -142,13 +142,31 @@ export function CommandBar() {
     return id ? modules.find((m) => m.id === id && m.searchable) : undefined;
   }, [pathname]);
 
-  useEffect(() => {
-    const term = search.trim();
-    if (!open || !term) {
+  // Closing the bar resets it to a blank command search. Done while rendering
+  // (React's "adjust state when something changes" pattern), not in an effect.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (!open) {
+      setMode("commands");
+      setSearch("");
+    }
+  }
+
+  // No open bar or no term → no hits; cleared the same way.
+  const term = search.trim();
+  const searching = open && !!term;
+  const [wasSearching, setWasSearching] = useState(searching);
+  if (searching !== wasSearching) {
+    setWasSearching(searching);
+    if (!searching) {
       setResults([]);
       setEverywhere([]);
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!searching) return;
     const id = activeModule?.id;
     const t = setTimeout(async () => {
       // Module-scoped hits first (when on a searchable module page), plus the
@@ -163,7 +181,7 @@ export function CommandBar() {
       setEverywhere(all.filter((r) => !seen.has(r.id)).slice(0, 6));
     }, 180);
     return () => clearTimeout(t);
-  }, [open, activeModule, search]);
+  }, [searching, term, activeModule]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -186,13 +204,6 @@ export function CommandBar() {
       window.removeEventListener("aios:commandbar", onOpen);
     };
   }, []);
-
-  useEffect(() => {
-    if (!open) {
-      setMode("commands");
-      setSearch("");
-    }
-  }, [open]);
 
   const go = (href: string) => {
     setOpen(false);

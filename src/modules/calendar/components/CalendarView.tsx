@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
+import { useNow } from "@/core/ui/useNow";
 import { createEvent, deleteEvent, requestIcsSync } from "../actions";
 import type { AgendaItem } from "../agenda";
 import { EventDetail } from "./EventDetail";
@@ -227,10 +228,12 @@ export function CalendarView({
   const [syncPending, startSync] = useTransition();
   const [deletePending, startDelete] = useTransition();
   useLiveEvents(["calendar_changed"]);
+  // Ticks each minute so "upcoming" keeps moving on a calendar left open.
+  const now = useNow(60_000);
 
   const dayItems = items.filter((it) => sameDay(new Date(it.at), selected));
   const upcoming = items
-    .filter((it) => new Date(it.at) >= new Date(Date.now() - 3600_000))
+    .filter((it) => new Date(it.at) >= new Date(now - 3600_000))
     .slice(0, 8);
 
   return (

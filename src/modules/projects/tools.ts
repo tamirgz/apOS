@@ -11,6 +11,7 @@ import { boundProjectId, resolveProjectByName } from "./subject";
 import { usableRepoPath } from "./repo";
 import { projectFiles, projects, PROJECT_HEALTHS, PROJECT_STATUSES } from "./schema";
 import { isClosed } from "../tasks/schema";
+import { ensureProjectKey } from "@/modules/tasks/core";
 
 const DAY = 24 * 60 * 60 * 1000;
 const daysAgo = (d: Date | null) =>
@@ -74,7 +75,9 @@ export const projectTools: AiToolDef[] = [
           description: input.description ?? null,
         })
         .returning();
-      return { created: { id: row.id, name: row.name } };
+      // The key prefixes its work-item identifiers (KEY-12) — derive it now so callers can use it.
+      const key = await ensureProjectKey(db, row.id);
+      return { created: { id: row.id, name: row.name, key } };
     },
   },
   {
@@ -87,6 +90,7 @@ export const projectTools: AiToolDef[] = [
       return rows.map((p) => ({
         id: p.id,
         name: p.name,
+        key: p.key,
         status: p.status,
         goal: p.goal,
         nextAction: p.nextAction,

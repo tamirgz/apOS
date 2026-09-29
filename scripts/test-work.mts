@@ -219,6 +219,52 @@ try {
     const after = await db.select({ n: sql<number>`count(*)::int` }).from(taskActivity).where(inArray(taskActivity.taskId, items.map((t) => t.id)));
     assert.equal(after[0].n, before[0].n, "re-import with no Plane changes writes no history");
   });
+  await check("apos MCP server: projects, modules, cycles, items, relations over stdio", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+    const client = new Client({ name: "zz-test", version: "0" });
+    await client.connect(new StdioClientTransport({ command: "scripts/apos-mcp.sh", env: { ...process.env, APOS_ACTOR: "zz-test" } as Record<string, string>, stderr: "ignore" }));
+    try {
+      const names = (await client.listTools()).tools.map((t) => t.name);
+      for (const n of ["tasks__create", "tasks__relate", "cycles__create", "modules__update", "projects__list"]) assert.ok(names.includes(n), `exposes ${n}`);
+      assert.ok(!names.includes("memory__update"), "only the work-tracker surface");
+      const call = async (name: string, args: Record<string, unknown>) => {
+        const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+        if (r.isError) throw new Error(`${name}: ${r.content[0].text}`);
+        return JSON.parse(r.content[0].text);
+      };
+      const { created: proj } = await call("projects__create", { name: "ZZ MCP Test" });
+      projectIds.push(proj.id);
+      assert.ok(proj.key, "a new project gets a key");
+      const { created: mod } = await call("modules__create", { project: proj.key, name: "ZZ Auth", targetAt: new Date(Date.now() + 14 * DAY).toISOString() });
+      assert.equal(mod.ref, "m1");
+      const now = Date.now();
+      const { created: cyc } = await call("cycles__create", { project: proj.key, name: "ZZ sprint", startsAt: new Date(now - DAY).toISOString(), endsAt: new Date(now + 6 * DAY).toISOString() });
+      assert.equal(cyc.status, "current");
+      const a = (await call("tasks__create", { project: proj.key, title: "ZZ login form", feature: "m1", cycle: "current" })).created;
+      const b = (await call("tasks__create", { project: proj.key, title: "ZZ session store", feature: "ZZ Auth" })).created;
+      assert.match(a.identifier, new RegExp(`^${proj.key}-\\d+$`));
+      const inCycle = await call("tasks__list", { project: proj.key, cycle: "current" });
+      assert.deepEqual(inCycle.map((t: { title: string }) => t.title), ["ZZ login form"]);
+      assert.equal(inCycle[0].module, "ZZ Auth");
+      assert.equal(inCycle[0].cycle, "ZZ sprint");
+      await call("tasks__relate", { ref: a.identifier, relation: "blocked_by", other: b.identifier });
+      await call("tasks__update", { ref: b.identifier, cycle: "ZZ sprint", parent: a.identifier, startAt: new Date(now).toISOString() });
+      const got = await call("tasks__get", { ref: b.identifier });
+      assert.equal(got.parent.identifier, a.identifier);
+      assert.ok(got.activity.some((x: { by: string }) => x.by === "agent:zz-test"), "activity credits the MCP actor");
+      await call("modules__update", { module: "m1", status: "paused", startAt: new Date(now).toISOString() });
+      const [m] = await call("modules__list", { project: proj.key, status: "all" });
+      assert.equal(m.status, "paused");
+      assert.equal(m.items, 2);
+      assert.equal((await call("cycles__rollOver", { from: "c1" })).moved, 2);
+      assert.equal((await call("tasks__unrelate", { ref: a.identifier, other: b.identifier })).removed, 1);
+      const bad = (await client.callTool({ name: "tasks__update", arguments: { ref: "ZZMCP-9999", title: "x" } })) as { isError?: boolean };
+      assert.ok(bad.isError, "unknown identifier is an error, not a silent no-op");
+    } finally {
+      await client.close();
+    }
+  });
 } finally {
   // teardown
   const zzTasks = await db.select({ id: tasks.id }).from(tasks).where(inArray(tasks.projectRef, projectIds.map((id) => `projects:${id}`)));

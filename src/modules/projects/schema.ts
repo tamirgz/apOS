@@ -98,6 +98,8 @@ export const projects = pgTable("projects", {
    * attached repo's recent commits, refreshed on a schedule. Feeds the advisor. */
   repoDigest: text("repo_digest"),
   repoDigestAt: timestamp("repo_digest_at", { withTimezone: true }),
+  /** Commit-linking ledger: the last HEAD scanned for KEY-N mentions (work tracker). */
+  workLinkSha: text("work_link_sha"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -135,6 +137,8 @@ export const features = pgTable(
     /** Target date — the feature's deadline on the roadmap. */
     targetAt: timestamp("target_at", { withTimezone: true }),
     shippedAt: timestamp("shipped_at", { withTimezone: true }),
+    /** Where an imported feature came from, e.g. "plane-module:<uuid>". */
+    externalRef: text("external_ref"),
     /** Manual order within the project's feature list. */
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -2,19 +2,22 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
-import { ArrowUpRight, CornerDownRight, Layers, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { ArrowUpRight, Bot, CornerDownRight, GitCommitHorizontal, Layers, Link2, MessageSquare, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { timeAgo } from "@/core/ui/time";
 import {
   addTaskComment,
   createTask,
+  delegateTask,
   deleteTask,
   loadWorkItem,
+  relateTask,
+  unrelateTask,
   updateTask,
 } from "../actions";
 import type { WorkItemPatch } from "../core";
 import { TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } from "../schema";
-import { ESTIMATES, PRIORITY_META, STATUS_META } from "../states";
+import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, type RelationSide } from "../states";
 import type { WorkProject } from "../queries";
 
 type Loaded = NonNullable<Awaited<ReturnType<typeof loadWorkItem>>>;
@@ -42,7 +45,10 @@ const FIELD_LABEL: Record<string, string> = {
   estimate: "estimate",
   labels: "labels",
   notes: "description",
+  cycleId: "cycle",
 };
+
+const RELATION_SIDES = Object.keys(RELATION_SIDE_LABEL) as RelationSide[];
 
 function Prop({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -86,6 +92,11 @@ export function WorkItemDetail({
   const [comment, setComment] = useState("");
   const [subTitle, setSubTitle] = useState("");
   const [armedDelete, setArmedDelete] = useState(false);
+  const [relSide, setRelSide] = useState<RelationSide>("blocked_by");
+  const [relTarget, setRelTarget] = useState("");
+  const [delegating, setDelegating] = useState(false);
+  const [delegateNote, setDelegateNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
 
   const apply = useCallback((d: Loaded | null) => {
@@ -113,12 +124,20 @@ export function WorkItemDetail({
     el.style.height = `${Math.max(el.scrollHeight, 96)}px`;
   }, [notes, data]);
 
-  const save = (patch: WorkItemPatch) =>
+  const save = (patch: WorkItemPatch) => act(() => updateTask(id, patch));
+  /** Any write: run it, surface a readable error, reload the item, tell the host. */
+  function act(fn: () => Promise<unknown>) {
     start(async () => {
-      await updateTask(id, patch);
+      setError(null);
+      try {
+        await fn();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
       await reload();
       onChanged?.();
     });
+  }
 
   if (data === undefined) {
     return <p className="p-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint">loading…</p>;
@@ -127,7 +146,10 @@ export function WorkItemDetail({
     return <p className="p-2 font-mono text-[10px] uppercase tracking-widest text-flare">item not found — it may have been deleted</p>;
   }
 
-  const { item, children, parent, activity, features } = data;
+  const { item, children, parent, activity, features, relations, links, cycles } = data;
+  const isOpen = item.status !== "done" && item.status !== "cancelled";
+  const commits = links.filter((l) => l.kind === "commit");
+  const runs = links.filter((l) => l.kind === "workbench");
   const projectId = item.projectRef?.startsWith("projects:") ? item.projectRef.slice(9) : "";
   const featureId = item.featureRef?.startsWith("features:") ? item.featureRef.slice(9) : "";
   const doneChildren = children.filter((c) => c.status === "done" || c.status === "cancelled").length;
@@ -271,7 +293,21 @@ export function WorkItemDetail({
             </select>
           </Prop>
         )}
+        {(cycles.length > 0 || item.cycleId) && (
+          <Prop label="Cycle">
+            <select value={item.cycleId ?? ""} onChange={(e) => save({ cycleId: e.target.value || null })} className={control}>
+              <option value="">none</option>
+              {cycles.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.status === "current" ? " (current)" : c.status === "completed" ? " (completed)" : ""}
+                </option>
+              ))}
+            </select>
+          </Prop>
+        )}
       </div>
+      {error && <p className="rounded-lg bg-flare/8 px-3 py-2 text-xs text-flare">{error}</p>}
 
       {/* description */}
       <textarea
@@ -283,6 +319,56 @@ export function WorkItemDetail({
         placeholder="Add a description…"
         className="max-h-[50vh] min-h-24 w-full resize-y rounded-lg bg-white/4 px-3 py-2 text-sm leading-relaxed text-ink-dim outline-none placeholder:text-ink-faint focus:bg-white/6"
       />
+
+      {/* Workbench hand-off */}
+      {isOpen && (
+        <section className="flex flex-col gap-2">
+          {!delegating ? (
+            <button
+              type="button"
+              onClick={() => setDelegating(true)}
+              className="flex w-fit items-center gap-1.5 rounded-lg border border-violet/25 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-widest text-violet transition hover:bg-violet/10"
+              title="A background executor works on this item; the result comes back for your review"
+            >
+              <Bot className="size-3.5" /> hand to Workbench
+            </button>
+          ) : (
+            <div className="flex flex-col gap-2 rounded-xl border border-violet/25 p-3">
+              <p className="text-xs text-ink-faint">
+                The Workbench gets the title, description{children.length ? " and open sub-items" : ""}. It runs in an isolated copy of the
+                project&apos;s repo (if one is attached) and the item moves to In review when it finishes.
+              </p>
+              <textarea
+                dir="auto"
+                value={delegateNote}
+                onChange={(e) => setDelegateNote(e.target.value)}
+                rows={2}
+                placeholder="Extra instructions (optional)"
+                className="w-full resize-y rounded-lg bg-white/4 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint focus:bg-white/6"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() =>
+                    act(async () => {
+                      await delegateTask(item.id, delegateNote);
+                      setDelegating(false);
+                      setDelegateNote("");
+                    })
+                  }
+                  className="rounded-lg bg-violet/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-violet transition hover:bg-violet/25 disabled:opacity-40"
+                >
+                  start run
+                </button>
+                <button type="button" onClick={() => setDelegating(false)} className="px-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint hover:text-ink">
+                  cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* sub-items */}
       <section className="flex flex-col gap-1.5">
@@ -328,6 +414,89 @@ export function WorkItemDetail({
         </form>
       </section>
 
+      {/* relations */}
+      <section className="flex flex-col gap-1.5">
+        <h3 className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
+          <Link2 className="size-3" /> relations
+        </h3>
+        {relations.map((rel) => (
+          <div key={rel.id} className="group flex items-center gap-2 rounded-md px-1.5 py-1 text-sm">
+            <span className={cn("w-24 shrink-0 text-xs", rel.side === "blocked_by" && isOpen && rel.other.status !== "done" && rel.other.status !== "cancelled" ? "text-flare" : "text-ink-faint")}>
+              {RELATION_SIDE_LABEL[rel.side]}
+            </span>
+            <button type="button" onClick={() => onOpenItem?.(rel.other.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left transition hover:text-ion">
+              <span className="size-2 shrink-0 rounded-full" style={{ background: STATUS_META[rel.other.status].color }} />
+              <span className="font-mono text-[10px] text-ink-faint">{rel.other.identifier}</span>
+              <span className="truncate text-ink-dim">{rel.other.title}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => act(() => unrelateTask(rel.id))}
+              aria-label="Remove relation"
+              className="rounded p-0.5 text-ink-faint opacity-0 transition hover:text-flare group-hover:opacity-100 focus:opacity-100"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        ))}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!relTarget.trim()) return;
+            act(async () => {
+              await relateTask(item.id, relSide, relTarget);
+              setRelTarget("");
+            });
+          }}
+          className="flex items-center gap-2 px-1.5"
+        >
+          <select value={relSide} onChange={(e) => setRelSide(e.target.value as RelationSide)} aria-label="Relation" className="rounded-md border border-white/8 bg-panel px-1.5 py-1 text-xs text-ink-dim outline-none">
+            {RELATION_SIDES.map((sd) => (
+              <option key={sd} value={sd}>{RELATION_SIDE_LABEL[sd]}</option>
+            ))}
+          </select>
+          <input
+            value={relTarget}
+            onChange={(e) => setRelTarget(e.target.value)}
+            placeholder="item id, e.g. GL-4"
+            aria-label="Related item identifier"
+            className="h-7 min-w-0 flex-1 bg-transparent font-mono text-xs text-ink outline-none placeholder:text-ink-faint"
+          />
+        </form>
+      </section>
+
+      {/* evidence: commits + Workbench runs */}
+      {(commits.length > 0 || runs.length > 0) && (
+        <section className="flex flex-col gap-1">
+          <h3 className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
+            <GitCommitHorizontal className="size-3" /> linked work
+          </h3>
+          {runs.map((l) => (
+            <Link key={l.id} href={l.url ?? `/m/workbench/${l.ref}`} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm transition hover:bg-white/4">
+              <Bot className="size-3.5 shrink-0 text-violet" />
+              <span className="truncate text-ink-dim">{l.title ?? "Workbench run"}</span>
+              <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">{(l.state ?? "queued").replace("_", " ")}</span>
+            </Link>
+          ))}
+          {commits.map((l) => {
+            const body = (
+              <>
+                <span className="shrink-0 font-mono text-[10px] text-ion">{l.ref.slice(0, 7)}</span>
+                <span className="truncate text-ink-dim">{l.title}</span>
+                <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">{timeAgo(l.createdAt)}</span>
+              </>
+            );
+            return l.url ? (
+              <a key={l.id} href={l.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm transition hover:bg-white/4">
+                {body}
+              </a>
+            ) : (
+              <div key={l.id} className="flex items-center gap-2 px-1.5 py-1 text-sm">{body}</div>
+            );
+          })}
+        </section>
+      )}
+
       {/* activity + comments */}
       <section className="flex flex-col gap-2">
         <h3 className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
@@ -350,6 +519,10 @@ export function WorkItemDetail({
                   <span>created this</span>
                 ) : a.field === "notes" ? (
                   <span>edited the description</span>
+                ) : a.field === "relation" ? (
+                  <span>
+                    marked this <span className="text-ink-dim">{a.toValue}</span>
+                  </span>
                 ) : (
                   <span>
                     {a.toValue ? "set" : "cleared"} {FIELD_LABEL[a.field ?? ""] ?? a.field}

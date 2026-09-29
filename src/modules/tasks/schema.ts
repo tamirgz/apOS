@@ -65,6 +65,8 @@ export const tasks = pgTable(
     sortOrder: doublePrecision("sort_order").notNull().default(0),
     /** Where an imported item came from, e.g. "plane:<uuid>" — makes re-import idempotent. */
     externalRef: text("external_ref"),
+    /** The cycle (time-boxed iteration) this item is planned into. No FK. */
+    cycleId: uuid("cycle_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -77,6 +79,7 @@ export const tasks = pgTable(
     index("tasks_project").on(t.projectRef),
     index("tasks_parent").on(t.parentId),
     index("tasks_feature").on(t.featureRef),
+    index("tasks_cycle").on(t.cycleId),
     uniqueIndex("tasks_external_ref").on(t.externalRef).where(sql`${t.externalRef} is not null`),
   ],
 );
@@ -124,3 +127,82 @@ export const taskActivity = pgTable(
 );
 
 export type TaskActivity = typeof taskActivity.$inferSelect;
+
+/**
+ * A time-boxed iteration (Plane "cycle", a.k.a. sprint). projectId null = a
+ * cross-project cycle (e.g. "this week"). Items join via tasks.cycle_id.
+ * Status is derived from the dates — upcoming / current / completed.
+ */
+export const cycles = pgTable(
+  "cycles",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id"),
+    name: text("name").notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    externalRef: text("external_ref"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("cycles_project").on(t.projectId),
+    uniqueIndex("cycles_external_ref").on(t.externalRef).where(sql`${t.externalRef} is not null`),
+  ],
+);
+
+export type Cycle = typeof cycles.$inferSelect;
+
+/**
+ * Item ↔ item relations. Stored once, read from both sides:
+ *   blocks      from blocks to   (to is "blocked by" from)
+ *   relates     symmetric
+ *   duplicates  from duplicates to
+ */
+export const RELATION_KINDS = ["blocks", "relates", "duplicates"] as const;
+export type RelationKind = (typeof RELATION_KINDS)[number];
+
+export const taskRelations = pgTable(
+  "task_relations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    fromId: uuid("from_id").notNull(),
+    toId: uuid("to_id").notNull(),
+    kind: text("kind", { enum: RELATION_KINDS }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("task_relations_pair").on(t.fromId, t.toId, t.kind),
+    index("task_relations_to").on(t.toId),
+  ],
+);
+
+export type TaskRelation = typeof taskRelations.$inferSelect;
+
+/**
+ * Evidence attached to an item: commits that mention its identifier, and the
+ * Workbench runs it was delegated to. `ref` is the sha / workbench task id;
+ * `state` is the last Workbench status written back (so a status is applied
+ * to the item once, on transition).
+ */
+export const LINK_KINDS = ["commit", "workbench"] as const;
+export type LinkKind = (typeof LINK_KINDS)[number];
+
+export const taskLinks = pgTable(
+  "task_links",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    taskId: uuid("task_id").notNull(),
+    kind: text("kind", { enum: LINK_KINDS }).notNull(),
+    ref: text("ref").notNull(),
+    title: text("title"),
+    url: text("url"),
+    state: text("state"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("task_links_unique").on(t.taskId, t.kind, t.ref),
+    index("task_links_ref").on(t.kind, t.ref),
+  ],
+);
+
+export type TaskLink = typeof taskLinks.$inferSelect;

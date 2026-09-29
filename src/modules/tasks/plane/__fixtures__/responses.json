@@ -1,0 +1,56 @@
+{
+  "_source": "Shapes from makeplane/plane apps/api serializers (preview branch) — NOT captured from a live instance yet. Replace with a real capture on first connect.",
+  "projects": {
+    "total_count": 2, "next_cursor": "100:1:0", "prev_cursor": "100:0:0", "next_page_results": false, "prev_page_results": false,
+    "count": 2, "total_pages": 1, "total_results": 2, "extra_stats": null,
+    "results": [
+      { "id": "p-1111", "name": "ETHOS", "identifier": "ETHOS", "description": "Ethos platform", "archived_at": null, "network": 2 },
+      { "id": "p-2222", "name": "Old Experiments", "identifier": "OLDEXPERIMENT", "description": "", "archived_at": "2026-01-01T00:00:00Z", "network": 0 }
+    ]
+  },
+  "states": {
+    "next_page_results": false, "next_cursor": "100:1:0",
+    "results": [
+      { "id": "s-bl", "name": "Backlog", "group": "backlog" },
+      { "id": "s-td", "name": "Todo", "group": "unstarted" },
+      { "id": "s-ip", "name": "In Progress", "group": "started" },
+      { "id": "s-rv", "name": "In Review", "group": "started" },
+      { "id": "s-dn", "name": "Done", "group": "completed" },
+      { "id": "s-cx", "name": "Cancelled", "group": "cancelled" }
+    ]
+  },
+  "labels": {
+    "next_page_results": false,
+    "results": [ { "id": "l-bug", "name": "Bug" }, { "id": "l-api", "name": "API Layer" } ]
+  },
+  "modules": {
+    "next_page_results": false,
+    "results": [
+      { "id": "m-auth", "name": "Auth rewrite", "description": "SSO + sessions", "status": "in-progress", "start_date": "2026-09-01", "target_date": "2026-10-15", "archived_at": null },
+      { "id": "m-done", "name": "Billing v1", "description": null, "status": "completed", "start_date": null, "target_date": "2026-08-01", "archived_at": null }
+    ]
+  },
+  "module_issues": {
+    "m-auth": { "next_page_results": false, "results": [ { "id": "i-1", "bridge_id": "b1" }, { "id": "i-2", "bridge_id": "b2" } ] },
+    "m-done": { "next_page_results": false, "results": [ { "id": "i-3", "bridge_id": "b3" } ] }
+  },
+  "cycles": {
+    "next_page_results": false,
+    "results": [
+      { "id": "c-1", "name": "Sprint 14", "start_date": "2026-09-22T00:00:00Z", "end_date": "2026-10-05T00:00:00Z", "archived_at": null },
+      { "id": "c-draft", "name": "Someday", "start_date": null, "end_date": null, "archived_at": null }
+    ]
+  },
+  "cycle_issues": {
+    "c-1": { "next_page_results": false, "results": [ { "id": "i-1" }, { "id": "i-4" } ] }
+  },
+  "work_items": {
+    "total_count": 4, "next_cursor": "100:1:0", "next_page_results": false, "count": 4, "total_results": 4,
+    "results": [
+      { "id": "i-1", "name": "SSO with Google", "description_html": "<p>Use <strong>OIDC</strong>.</p><ul><li>login</li><li>logout</li></ul>", "priority": "high", "sequence_id": 41, "state": "s-ip", "labels": ["l-api"], "parent": null, "estimate_point": null, "start_date": "2026-09-23", "target_date": "2026-10-01", "completed_at": null, "archived_at": null, "is_draft": false, "sort_order": 65535.0, "created_at": "2026-09-20T08:00:00Z", "updated_at": "2026-09-28T10:00:00Z" },
+      { "id": "i-2", "name": "Session expiry bug", "description_html": "<p></p>", "priority": "urgent", "sequence_id": 42, "state": "s-rv", "labels": ["l-bug", "l-api"], "parent": "i-1", "estimate_point": "ep-9", "start_date": null, "target_date": null, "completed_at": null, "archived_at": null, "is_draft": false, "sort_order": 75535.0, "created_at": "2026-09-21T08:00:00Z", "updated_at": "2026-09-28T10:00:00Z" },
+      { "id": "i-3", "name": "Stripe webhooks", "description_html": null, "priority": "none", "sequence_id": 30, "state": "s-dn", "labels": [], "parent": null, "estimate_point": null, "start_date": null, "target_date": null, "completed_at": "2026-07-30T12:00:00Z", "archived_at": null, "is_draft": false, "sort_order": 55535.0, "created_at": "2026-07-01T08:00:00Z", "updated_at": "2026-07-30T12:00:00Z" },
+      { "id": "i-4", "name": "Idea: passkeys", "description_html": "<p>maybe &amp; later</p>", "priority": "low", "sequence_id": 43, "state": "s-bl", "labels": [], "parent": null, "estimate_point": null, "start_date": null, "target_date": null, "completed_at": null, "archived_at": null, "is_draft": false, "sort_order": 85535.0, "created_at": "2026-09-25T08:00:00Z", "updated_at": "2026-09-25T08:00:00Z" }
+    ]
+  }
+}

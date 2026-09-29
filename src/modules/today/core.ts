@@ -166,13 +166,20 @@ export async function insertAttentionItem(input: RaiseInput) {
   // anchor by another agent, which the content key can't catch. Best-effort:
   // if embedding is unavailable (Ollama down), fall through to a plain insert
   // rather than blocking the raise.
+  //
+  // Skipped for a caller-owned `fixedDedupeKey`: that key IS the card's
+  // identity, and templated titles ("Set up or archive AlgoTick?" / "…
+  // AeroMantis?") sit close enough in embedding space that one project's card
+  // would swallow the next.
   let embedding: number[] | null = null;
   try {
     embedding = await embedText(input.title.trim());
     // Compare against sibling OPEN cards via the unified index. Joined back to
     // attention_items on status='open' so a card closed within the last sync
     // window can't resurface as a false duplicate.
-    const [near] = await db.execute<{ id: string; distance: number }>(dsql`
+    const [near] = input.fixedDedupeKey
+      ? []
+      : await db.execute<{ id: string; distance: number }>(dsql`
       select a.id, (si.embedding <=> ${toVec(embedding)}::vector) as distance
       from search_index si
       join attention_items a on a.id::text = si.source_id and a.status = 'open'

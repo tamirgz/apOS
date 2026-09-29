@@ -1,6 +1,10 @@
 import type { ModuleJob } from "@/core/modules/types.server";
+import { sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
+import { notes } from "../notes/schema";
+import { tasks } from "../tasks/schema";
 import { getProjectCockpit } from "./queries";
+import { projects } from "./schema";
 
 const IDLE_DAYS = 14;
 const DAY = 24 * 60 * 60 * 1000;
@@ -23,7 +27,19 @@ export async function raiseSetupCards(): Promise<number> {
   for (const p of rows) {
     if (p.status !== "active" || p.kind === "area" || p.repoUrl) continue;
     if (p.taskCounts.open > 0) continue;
-    const idle = p.lastActivityAt ? Math.floor((Date.now() - +p.lastActivityAt) / DAY) : null;
+    // Idle is measured on HUMAN signals only. The cockpit's lastActivityAt also
+    // counts attention cards, so the agents' own coaching cards would keep an
+    // untouched project looking busy forever.
+    const [row] = (await db.execute(sql`
+      select greatest(
+        ${projects.updatedAt},
+        (select max(coalesce(${tasks.completedAt}, ${tasks.createdAt})) from ${tasks} where ${tasks.projectRef} = ${`projects:${p.id}`}),
+        (select max(${notes.updatedAt}) from ${notes} where ${notes.projectRefs} @> ${JSON.stringify([`projects:${p.id}`])}::jsonb)
+      ) as last
+      from ${projects} where ${projects.id} = ${p.id}
+    `)) as unknown as { last: string | null }[];
+    const last = row?.last ? new Date(row.last) : null;
+    const idle = last ? Math.floor((Date.now() - +last) / DAY) : null;
     if (idle !== null && idle < IDLE_DAYS) continue;
     const before = Date.now();
     const card = await insertAttentionItem({

@@ -4,6 +4,7 @@ import { MotionProvider } from "@/core/ui/MotionProvider";
 import { Sidebar } from "@/core/ui/Sidebar";
 import { Toasts } from "@/core/ui/Toasts";
 import { TopBar } from "@/core/ui/TopBar";
+import { UsageBeacon } from "@/core/ui/UsageBeacon";
 
 export default function ShellLayout({
   children,
@@ -14,6 +15,7 @@ export default function ShellLayout({
         <AnimatedBg />
         <CommandBar />
         <Toasts />
+        <UsageBeacon />
         <Sidebar />
         <main className="min-w-0 flex-1 p-3 pl-5 max-md:pl-14">
           <div className="mx-auto max-w-7xl">

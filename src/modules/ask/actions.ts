@@ -3,12 +3,14 @@
 import { desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/core/db/client";
+import { recordUsage } from "@/core/usage";
 import { clipToObsidianRaw } from "@/core/obsidian-clip";
 import { answerQuestion, type AskAnswer } from "./answer";
 import { askHistory, type AskHistoryEntry, type AskSource } from "./schema";
 
 /** Ask a question, and persist it so revisiting it later is instant. */
 export async function ask(query: string): Promise<AskAnswer & { historyId: string | null }> {
+  recordUsage("ask.query");
   const result = await answerQuestion(query);
   const q = query.trim();
   if (!q) return { ...result, historyId: null };

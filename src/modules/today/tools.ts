@@ -5,7 +5,7 @@ import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
 import { registerRefs, resolveRef } from "@/core/ai/refs";
 import { projects } from "@/modules/projects/schema";
 import { resolveProjectTarget } from "@/modules/projects/subject";
-import { insertAttentionItem } from "./core";
+import { insertAttentionItem, isoWeek } from "./core";
 import { attentionItems, ATTENTION_TYPES } from "./schema";
 
 /**
@@ -70,13 +70,37 @@ export const todayTools: AiToolDef[] = [
         projectRef = `projects:${t.id}`;
         if (!href) href = `/m/projects/${t.id}`;
       }
+      // Pulse guard — enforced in code because the local model ignores the
+      // prompt's "stalled/blocked only" rule (on 2026-09-28 it raised 10 cards,
+      // most for on-track projects, each under a fresh content key). A
+      // health-writing sweep (focusRequireHealth = Project pulse) may raise a
+      // card for the focused project only when its recorded health is stalled
+      // or blocked, and at most ONE per project per ISO week — ever, so a
+      // dismissed card doesn't come back the next morning.
+      let fixedDedupeKey: string | undefined;
+      if (ctx.focusRequireHealth && fromFocus && ctx.subject) {
+        const [p] = await db
+          .select({ health: projects.health })
+          .from(projects)
+          .where(eq(projects.id, ctx.subject.id))
+          .limit(1);
+        if (p?.health !== "stalled" && p?.health !== "blocked") {
+          return {
+            skipped: true,
+            reason: `'${ctx.subject.name}' is ${p?.health ?? "without a recorded health"} — cards are only raised for stalled or blocked projects. Record projects.setHealth first; if it is not stalled/blocked, raise nothing and move on.`,
+          };
+        }
+        fixedDedupeKey = `pulse:${ctx.subject.id}:${isoWeek()}`;
+      }
       const row = await insertAttentionItem({
         ...i,
         projectRef,
         href,
-        source: "agent",
+        source: ctx.agentName ? `agent:${ctx.agentName}` : "agent",
         // Trust the anchor only when the backbone bound it (focused run).
         trustProjectRef: fromFocus,
+        fixedDedupeKey,
+        oncePerKey: !!fixedDedupeKey,
       });
       return { id: row.id, raised: true };
     },

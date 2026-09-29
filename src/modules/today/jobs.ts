@@ -1,5 +1,5 @@
 import type { ModuleJob } from "@/core/modules/types.server";
-import { pruneAttention, wakeSnoozed } from "./core";
+import { expireStaleAgentCards, pruneAttention, wakeSnoozed } from "./core";
 
 /**
  * Heartbeat maintenance for the attention spine. Re-opens snoozed cards when
@@ -12,6 +12,8 @@ export const todayJobs: ModuleJob[] = [
     schedule: "*/5 * * * *",
     handle: async () => {
       await wakeSnoozed();
+      const expired = await expireStaleAgentCards();
+      if (expired) console.log(`[attention_sweep] expired ${expired} stale agent card(s)`);
       await pruneAttention();
     },
   },

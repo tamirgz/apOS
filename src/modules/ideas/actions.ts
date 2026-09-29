@@ -3,6 +3,7 @@
 import { desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
+import { recordUsage } from "@/core/usage";
 import { ideas, type IdeaCategory, type IdeaStage } from "./schema";
 
 function revalidate(id?: string) {
@@ -22,6 +23,7 @@ export async function createIdea(input: {
 }) {
   const title = input.title.trim();
   if (!title) throw new Error("idea title required");
+  recordUsage("ideas.create");
   const [row] = await db
     .insert(ideas)
     .values({

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
 import { chatRuns } from "@/core/db/schema/chat-runs";
+import { recordUsage } from "@/core/usage";
 import { getAllTools } from "@/core/ai/tool-registry";
 import { ensureDefaultRoutes, resolveRoute } from "@/core/ai/routing";
 import type { ChatMessage } from "@/core/ai/provider";
@@ -106,6 +107,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "invalid JSON body" }, { status: 400 });
   }
   const { messages, route: routeKey } = body;
+  recordUsage("chat.send", { meta: { route: routeKey ?? null } });
   if (
     !Array.isArray(messages) ||
     !messages.length ||

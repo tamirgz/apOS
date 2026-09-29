@@ -10,7 +10,7 @@
     "worker": "tsx src/worker/index.ts",
     "test:tools": "tsx scripts/test-tools.mts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx scripts/migrate.mts",
     "db:studio": "drizzle-kit studio",
     "test:memory": "tsx scripts/test-memory.mts"
   },

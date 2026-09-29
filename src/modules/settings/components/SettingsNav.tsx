@@ -11,6 +11,7 @@ const TABS = [
   { href: "/m/settings/appearance", label: "Appearance", match: ["appearance"] },
   { href: "/m/settings/memory", label: "Memory", match: ["memory"] },
   { href: "/m/settings/usage", label: "Usage", match: ["usage"] },
+  { href: "/m/settings/activity", label: "Activity", match: ["activity"] },
 ];
 
 export function SettingsNav() {

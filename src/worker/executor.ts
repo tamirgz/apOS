@@ -366,6 +366,7 @@ async function runClaimed(
           toolCtx: {
             db,
             agentRunId: runId,
+            agentName: agent.name,
             ledger,
             subject: null,
             subjectCursor: null,

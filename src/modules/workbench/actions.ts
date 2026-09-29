@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
+import { recordUsage } from "@/core/usage";
 import { clipToObsidianRaw } from "@/core/obsidian-clip";
 import { deleteBranchIfMerged, removeIsolation } from "./git";
 import { pickExecutor } from "./queries";
@@ -113,6 +114,7 @@ export async function createTask(input: {
 }) {
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error("a task needs a prompt");
+  recordUsage("workbench.create", { meta: { taskType: input.taskType, from: input.createdFrom } });
 
   const [task] = await db
     .insert(workbenchTasks)

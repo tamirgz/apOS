@@ -33,6 +33,9 @@ export const ATTENTION_STATUSES = [
   "snoozed",
   "done",
   "dismissed",
+  // An agent-raised card nobody acted on within its TTL (see
+  // expireStaleAgentCards) — kept apart from a user 'dismissed' for telemetry.
+  "expired",
 ] as const;
 export type AttentionStatus = (typeof ATTENTION_STATUSES)[number];
 

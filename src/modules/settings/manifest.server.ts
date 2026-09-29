@@ -3,6 +3,7 @@ import { ModelsPage } from "./pages/ModelsPage";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { MemoryPage } from "./pages/MemoryPage";
 import { UsagePage } from "./pages/UsagePage";
+import { ActivityPage } from "./pages/ActivityPage";
 import { AppearancePage } from "./pages/AppearancePage";
 import { connectionHealthJobs } from "./connection-health";
 
@@ -17,6 +18,7 @@ export const settingsServerManifest: ModuleServerManifest = {
     appearance: AppearancePage,
     memory: MemoryPage,
     usage: UsagePage,
+    activity: ActivityPage,
   },
   widgets: [],
   schema: {},

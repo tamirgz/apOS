@@ -5,20 +5,27 @@
  *
  * Worker-safe: no "use server", no revalidatePath, db passed in.
  */
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "@/core/db/client";
 import { features, projects } from "@/modules/projects/schema";
 import {
+  cycles,
   isClosed,
   taskActivity,
+  taskLinks,
+  taskRelations,
   tasks,
   workCounters,
+  type LinkKind,
+  type RelationKind,
   type Task,
   type TaskPriority,
   type TaskStatus,
 } from "./schema";
 import { deriveKey, formatIdentifier, LOOSE_KEY, LOOSE_SCOPE, parseIdentifier } from "./keys";
-import { STATUS_META } from "./states";
+import { RELATION_SIDE_LABEL, STATUS_META, type RelationSide } from "./states";
+
+export type { RelationSide };
 
 /** "user" | "agent:<name>" | "system:<source>" */
 export type Actor = string;
@@ -38,6 +45,7 @@ export interface WorkItemInput {
   estimate?: number | null;
   labels?: string[];
   externalRef?: string | null;
+  cycleId?: string | null;
   sortOrder?: number;
   /** For imports that carry their own history. */
   createdAt?: Date;
@@ -195,6 +203,10 @@ async function displayValue(db: Db, field: string, v: unknown): Promise<string |
       const [f] = await db.select({ name: features.name }).from(features).where(eq(features.id, fid));
       return f?.name ?? null;
     }
+    case "cycleId": {
+      const [c] = await db.select({ name: cycles.name }).from(cycles).where(eq(cycles.id, v as string));
+      return c?.name ?? null;
+    }
     case "parentId": {
       const [t] = await db.select().from(tasks).where(eq(tasks.id, v as string));
       if (!t) return null;
@@ -214,6 +226,7 @@ const TRACKED: (keyof WorkItemPatch)[] = [
   "projectRef",
   "featureRef",
   "parentId",
+  "cycleId",
   "estimate",
   "labels",
   "notes",
@@ -279,6 +292,7 @@ export async function createWorkItem(db: Db, input: WorkItemInput, actor: Actor)
       estimate: input.estimate ?? null,
       labels: cleanLabels(input.labels),
       externalRef: input.externalRef ?? null,
+      cycleId: input.cycleId ?? null,
       sortOrder: input.sortOrder ?? Date.now() / 1000,
       number,
       createdAt: input.createdAt ?? new Date(),
@@ -371,8 +385,99 @@ export async function deleteWorkItem(db: Db, id: string): Promise<boolean> {
   // Children survive as top-level items; history goes with the item.
   await db.update(tasks).set({ parentId: null }).where(eq(tasks.parentId, id));
   await db.delete(taskActivity).where(eq(taskActivity.taskId, id));
+  await db.delete(taskLinks).where(eq(taskLinks.taskId, id));
+  await db.delete(taskRelations).where(or(eq(taskRelations.fromId, id), eq(taskRelations.toId, id)));
   await syncFeatureStatus(db, row.featureRef);
   return true;
+}
+
+// ── relations ──────────────────────────────────────────────────────────────
+
+
+/** Store a relation the way a user states it from `id`'s side. */
+export async function addRelation(db: Db, id: string, side: RelationSide, otherId: string, actor: Actor) {
+  if (id === otherId) throw new Error("An item can't relate to itself");
+  const [fromId, toId, kind]: [string, string, RelationKind] =
+    side === "blocks" ? [id, otherId, "blocks"]
+    : side === "blocked_by" ? [otherId, id, "blocks"]
+    : side === "duplicates" ? [id, otherId, "duplicates"]
+    : side === "duplicated_by" ? [otherId, id, "duplicates"]
+    : [id, otherId, "relates"];
+  if (kind === "blocks") {
+    const [reverse] = await db
+      .select({ id: taskRelations.id })
+      .from(taskRelations)
+      .where(and(eq(taskRelations.fromId, toId), eq(taskRelations.toId, fromId), eq(taskRelations.kind, "blocks")));
+    if (reverse) throw new Error("Those two items would block each other");
+  }
+  const [row] = await db.insert(taskRelations).values({ fromId, toId, kind }).onConflictDoNothing().returning();
+  if (row) {
+    const keys = await projectKeyMap(db);
+    const [other] = await db.select().from(tasks).where(eq(tasks.id, otherId));
+    await db.insert(taskActivity).values({
+      taskId: id,
+      actor,
+      kind: "changed",
+      field: "relation",
+      toValue: `${RELATION_SIDE_LABEL[side]} ${other ? (identifierOf(other, keys) ?? other.title) : "?"}`,
+    });
+  }
+  return row ?? null;
+}
+
+export async function removeRelation(db: Db, relationId: string) {
+  await db.delete(taskRelations).where(eq(taskRelations.id, relationId));
+}
+
+/** Every relation touching `id`, read from its side, with the other item. */
+export async function listRelations(db: Db, id: string) {
+  const rows = await db
+    .select()
+    .from(taskRelations)
+    .where(or(eq(taskRelations.fromId, id), eq(taskRelations.toId, id)));
+  if (!rows.length) return [];
+  const otherIds = rows.map((r) => (r.fromId === id ? r.toId : r.fromId));
+  const others = await withIdentifiers(db, await db.select().from(tasks).where(inArray(tasks.id, otherIds)));
+  const byId = new Map(others.map((o) => [o.id, o]));
+  return rows
+    .map((r) => {
+      const outgoing = r.fromId === id;
+      const side: RelationSide =
+        r.kind === "relates" ? "relates"
+        : r.kind === "blocks" ? (outgoing ? "blocks" : "blocked_by")
+        : outgoing ? "duplicates" : "duplicated_by";
+      const other = byId.get(outgoing ? r.toId : r.fromId);
+      return other ? { id: r.id, side, other } : null;
+    })
+    .filter((r) => r !== null);
+}
+
+/** Ids of open items that still have an open blocker. */
+export async function blockedItemIds(db: Db): Promise<Set<string>> {
+  const rows = await db.execute<{ id: string }>(sql`
+    select r.to_id as id
+    from task_relations r
+    join tasks b on b.id = r.from_id
+    join tasks t on t.id = r.to_id
+    where r.kind = 'blocks'
+      and b.status not in ('done','cancelled')
+      and t.status not in ('done','cancelled')`);
+  return new Set(rows.map((r) => r.id));
+}
+
+// ── links (commits, Workbench runs) ────────────────────────────────────────
+
+export async function addLink(
+  db: Db,
+  taskId: string,
+  link: { kind: LinkKind; ref: string; title?: string | null; url?: string | null; state?: string | null },
+) {
+  const [row] = await db
+    .insert(taskLinks)
+    .values({ taskId, ...link })
+    .onConflictDoNothing()
+    .returning();
+  return row ?? null;
 }
 
 // ── reads ──────────────────────────────────────────────────────────────────
@@ -380,9 +485,11 @@ export async function deleteWorkItem(db: Db, id: string): Promise<boolean> {
 export async function getWorkItem(db: Db, id: string) {
   const [row] = await db.select().from(tasks).where(eq(tasks.id, id));
   if (!row) return null;
-  const [children, activity] = await Promise.all([
+  const [children, activity, relations, links] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.parentId, id)).orderBy(asc(tasks.sortOrder)),
     listActivity(db, id),
+    listRelations(db, id),
+    db.select().from(taskLinks).where(eq(taskLinks.taskId, id)).orderBy(desc(taskLinks.createdAt)),
   ]);
   const parent = row.parentId
     ? (await db.select().from(tasks).where(eq(tasks.id, row.parentId)))[0] ?? null
@@ -393,6 +500,8 @@ export async function getWorkItem(db: Db, id: string) {
     children: rest.slice(0, children.length),
     parent: parent ? rest[children.length] : null,
     activity,
+    relations,
+    links,
   };
 }
 

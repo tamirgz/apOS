@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.mts",
     "db:studio": "drizzle-kit studio",
-    "test:memory": "tsx scripts/test-memory.mts"
+    "test:memory": "tsx scripts/test-memory.mts",
+    "test:work": "tsx --env-file=.env.local scripts/test-work.mts"
   },
   "dependencies": {
     "3d-force-graph": "^1.80.0",

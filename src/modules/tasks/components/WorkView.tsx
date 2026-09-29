@@ -4,12 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  Ban,
+  Bot,
   CalendarClock,
+  CalendarRange,
   ChevronDown,
   Columns3,
+  Download,
   Layers,
   List,
   Plus,
+  Repeat,
   Search,
   Signal,
   X,
@@ -23,10 +28,14 @@ import { parseQuick } from "../parse";
 import type { WorkData } from "../queries";
 import { TASK_STATUSES, type TaskPriority, type TaskStatus } from "../schema";
 import { BOARD_STATUSES, PRIORITY_META, STATUS_META } from "../states";
+import { CyclesView } from "./CyclePanel";
 import { FeatureRoadmap, FeatureStrip } from "./FeaturePanel";
+import { PlaneImport } from "./PlaneImport";
+import { Timeline } from "./Timeline";
 import { WorkItemDetail } from "./WorkItemDetail";
 
-type View = "board" | "list" | "features";
+type View = "board" | "list" | "cycles" | "timeline" | "features";
+const ALL_VIEWS: View[] = ["board", "list", "cycles", "timeline", "features"];
 const DONE_WINDOW_DAYS = 14;
 const DAY = 86_400_000;
 const closed = (s: TaskStatus) => s === "done" || s === "cancelled";
@@ -84,6 +93,25 @@ function Labels({ labels }: { labels: string[] }) {
           {l}
         </span>
       ))}
+    </>
+  );
+}
+
+/** Blocked by open work / handed to the Workbench — the two "why isn't this moving" signals. */
+function Flags({ blocked, delegated }: { blocked?: boolean; delegated?: string }) {
+  const live = delegated && delegated !== "done" && delegated !== "cancelled";
+  return (
+    <>
+      {blocked && (
+        <span className="inline-flex items-center gap-1 font-mono text-[10px] text-flare" title="Blocked by an open item">
+          <Ban className="size-3" /> blocked
+        </span>
+      )}
+      {live && (
+        <span className="inline-flex items-center gap-1 font-mono text-[10px] text-violet" title={`Workbench: ${delegated}`}>
+          <Bot className="size-3" /> {delegated === "needs_input" ? "needs input" : delegated}
+        </span>
+      )}
     </>
   );
 }
@@ -182,6 +210,8 @@ function QuickCreate({
 function Card({
   item,
   subCount,
+  blocked,
+  delegated,
   dragging,
   onOpen,
   onDragStart,
@@ -190,6 +220,8 @@ function Card({
 }: {
   item: WorkItem;
   subCount?: { done: number; total: number };
+  blocked?: boolean;
+  delegated?: string;
   dragging: boolean;
   onOpen: () => void;
   onDragStart: () => void;
@@ -239,8 +271,9 @@ function Card({
       <p dir="auto" className={cn("text-sm leading-snug", closed(item.status) ? "text-ink-faint line-through" : "text-ink-dim group-hover:text-ink")}>
         {item.title}
       </p>
-      {(item.labels.length > 0 || item.dueAt || subCount) && (
+      {(item.labels.length > 0 || item.dueAt || subCount || blocked || delegated) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <Flags blocked={blocked} delegated={delegated} />
           <Labels labels={item.labels} />
           {subCount && (
             <span className="inline-flex items-center gap-1 font-mono text-[10px] tabular-nums text-ink-faint" title="Sub-items">
@@ -260,11 +293,13 @@ function Card({
 function Board({
   items,
   all,
+  flags,
   onOpen,
   onMove,
 }: {
   items: WorkItem[];
   all: WorkItem[];
+  flags: { blocked: Set<string>; delegated: Record<string, string> };
   onOpen: (id: string) => void;
   onMove: (id: string, status: TaskStatus, sortOrder: number) => void;
 }) {
@@ -357,6 +392,8 @@ function Board({
                 key={t.id}
                 item={t}
                 subCount={subCounts.get(t.id)}
+                blocked={flags.blocked.has(t.id)}
+                delegated={flags.delegated[t.id]}
                 dragging={dragId === t.id}
                 onOpen={() => onOpen(t.id)}
                 onDragStart={() => setDragId(t.id)}
@@ -388,11 +425,13 @@ function Board({
 function ListView({
   items,
   data,
+  flags,
   showProject,
   onOpen,
 }: {
   items: WorkItem[];
   data: WorkData;
+  flags: { blocked: Set<string>; delegated: Record<string, string> };
   showProject: boolean;
   onOpen: (id: string) => void;
 }) {
@@ -448,6 +487,7 @@ function ListView({
                           {t.title}
                         </span>
                         <span className="hidden items-center gap-1.5 sm:flex">
+                          <Flags blocked={flags.blocked.has(t.id)} delegated={flags.delegated[t.id]} />
                           <Labels labels={t.labels} />
                         </span>
                         {t.estimate != null && <span className="font-mono text-[10px] tabular-nums text-ink-faint">{t.estimate}p</span>}
@@ -495,7 +535,7 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
   const prefKey = projectId ? "work.view.project" : "work.view.all";
   const [view, setView] = useState<View>("board");
   // eslint-disable-next-line react-hooks/set-state-in-effect -- restore the remembered view after hydration (localStorage is client-only)
-  useEffect(() => setView(readPref<View>(prefKey, "board", ["board", "list", "features"])), [prefKey]);
+  useEffect(() => setView(readPref<View>(prefKey, "board", ALL_VIEWS)), [prefKey]);
   const pickView = (v: View) => {
     setView(v);
     writePref(prefKey, v);
@@ -505,6 +545,10 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
   const [label, setLabel] = useState("");
   const [project, setProject] = useState("");
   const [feature, setFeature] = useState<string | null>(null);
+  const [cycle, setCycle] = useState("");
+  const [planeOpen, setPlaneOpen] = useState(false);
+  const flags = useMemo(() => ({ blocked: new Set(data.blocked), delegated: data.delegated }), [data.blocked, data.delegated]);
+  const currentCycles = useMemo(() => new Set(data.cycles.filter((c) => c.status === "current").map((c) => c.id)), [data.cycles]);
   const [openId, setOpenId] = useState<string | null>(null);
   const quickRef = useRef<HTMLInputElement>(null);
 
@@ -531,9 +575,11 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
         (!needle || t.title.toLowerCase().includes(needle) || t.identifier?.toLowerCase() === needle) &&
         (!label || t.labels.includes(label)) &&
         (!project || (project === "none" ? !t.projectRef : t.projectRef === `projects:${project}`)) &&
-        (!feature || t.featureRef === `features:${feature}`),
+        (!feature || t.featureRef === `features:${feature}`) &&
+        (!cycle ||
+          (cycle === "current" ? !!t.cycleId && currentCycles.has(t.cycleId) : cycle === "none" ? !t.cycleId : t.cycleId === cycle)),
     );
-  }, [items, q, label, project, feature]);
+  }, [items, q, label, project, feature, cycle, currentCycles]);
 
   const refresh = useCallback(() => router.refresh(), [router]);
 
@@ -555,8 +601,11 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
   const views: { id: View; label: string; icon: typeof List }[] = [
     { id: "board", label: "Board", icon: Columns3 },
     { id: "list", label: "List", icon: List },
+    { id: "cycles", label: "Cycles", icon: Repeat },
+    { id: "timeline", label: "Timeline", icon: CalendarRange },
     ...(projectId ? [] : [{ id: "features" as View, label: "Features", icon: Layers }]),
   ];
+  const itemView = view === "board" || view === "list" || view === "timeline";
 
   return (
     <div className="flex flex-col gap-4">
@@ -570,7 +619,7 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
         />
       )}
 
-      {view !== "features" && <QuickCreate inputRef={quickRef} data={data} projectId={projectId} featureId={feature} />}
+      {itemView && <QuickCreate inputRef={quickRef} data={data} projectId={projectId} featureId={feature} />}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg border border-white/8 p-0.5" role="tablist" aria-label="View">
@@ -591,7 +640,7 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
             </button>
           ))}
         </div>
-        {view !== "features" && (
+        {itemView && (
           <>
             <label className="flex items-center gap-1.5 rounded-lg border border-white/8 px-2 py-1">
               <Search className="size-3.5 text-ink-faint" />
@@ -637,17 +686,66 @@ export function WorkView({ data, projectId }: { data: WorkData; projectId?: stri
                 ))}
               </select>
             )}
+            {data.cycles.length > 0 && (
+              <select
+                value={cycle}
+                onChange={(e) => setCycle(e.target.value)}
+                aria-label="Cycle"
+                className="rounded-lg border border-white/8 bg-panel px-2 py-1 text-xs text-ink-dim outline-none"
+              >
+                <option value="">all cycles</option>
+                {currentCycles.size > 0 && <option value="current">current cycle</option>}
+                <option value="none">no cycle</option>
+                {data.cycles.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            )}
             <span className="ml-auto font-mono text-[10px] tabular-nums text-ink-faint">
               {filtered.filter((t) => !closed(t.status)).length} open
             </span>
           </>
         )}
+        {!projectId && (
+          <button
+            type="button"
+            onClick={() => setPlaneOpen(true)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:bg-white/5 hover:text-ink",
+              !itemView && "ml-auto",
+            )}
+          >
+            <Download className="size-3.5" /> import from Plane
+          </button>
+        )}
       </div>
 
       {view === "board" && (
-        <Board items={filtered} all={items} onOpen={setOpenId} onMove={onMove} />
+        <Board items={filtered} all={items} flags={flags} onOpen={setOpenId} onMove={onMove} />
       )}
-      {view === "list" && <ListView items={filtered} data={data} showProject={!projectId} onOpen={setOpenId} />}
+      {view === "list" && <ListView items={filtered} data={data} flags={flags} showProject={!projectId} onOpen={setOpenId} />}
+      {view === "cycles" && (
+        <CyclesView
+          cycles={data.cycles}
+          items={items}
+          projectId={projectId}
+          projects={data.projects}
+          onSelect={(id) => {
+            setCycle(id);
+            pickView("board");
+          }}
+        />
+      )}
+      {view === "timeline" && (
+        <Timeline
+          items={filtered}
+          features={projectId ? data.features : data.features.filter((f) => f.status !== "shipped")}
+          projects={data.projects}
+          byFeature={!!projectId}
+          onOpen={setOpenId}
+        />
+      )}
+      {planeOpen && <PlaneImport onClose={() => setPlaneOpen(false)} />}
       {view === "features" && <FeatureRoadmap features={data.features} items={items} projects={data.projects} />}
 
       <AnimatePresence>

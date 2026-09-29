@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, Layers, Pencil, Plus, Rocket, Trash2, X } from "lucide-react";
+import { Bot, Check, ChevronDown, Layers, Pencil, Plus, Rocket, Trash2, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { shortDate } from "@/core/ui/time";
 import { useNow } from "@/core/ui/useNow";
 import { createFeature, deleteFeature, updateFeature } from "@/modules/projects/features-actions";
 import type { FeatureStatus } from "@/modules/projects/schema";
+import { delegateFeatureAction } from "../actions";
 import type { WorkItem } from "../core";
 import type { WorkFeature, WorkProject } from "../queries";
 
@@ -84,9 +85,16 @@ function FeatureRow({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(f.name);
   const [armed, setArmed] = useState(false);
+  const [armedRun, setArmedRun] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const run = (fn: () => Promise<unknown>) =>
     start(async () => {
-      await fn();
+      setError(null);
+      try {
+        await fn();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
       router.refresh();
     });
 
@@ -132,6 +140,31 @@ function FeatureRow({
         >
           <Check className="size-4" />
         </button>
+        {(p?.open ?? 0) > 0 && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              if (!armedRun) {
+                setArmedRun(true);
+                setTimeout(() => setArmedRun(false), 4000);
+                return;
+              }
+              run(async () => {
+                await delegateFeatureAction(f.id);
+                setEditing(false);
+              });
+            }}
+            className={cn(
+              "flex items-center gap-1 rounded-lg px-2 py-1.5 font-mono text-[10px] uppercase tracking-widest transition",
+              armedRun ? "border border-violet/40 text-violet" : "text-ink-faint hover:text-violet",
+            )}
+            title="One Workbench run takes all the feature's open items; they move to In review when it finishes"
+          >
+            <Bot className="size-3.5" />
+            {armedRun ? `again to hand ${p!.open} item${p!.open === 1 ? "" : "s"} over` : "workbench"}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -151,6 +184,7 @@ function FeatureRow({
           <Trash2 className="size-3.5" />
           {armed && "again to delete"}
         </button>
+        {error && <p className="w-full text-xs text-flare">{error}</p>}
       </div>
     );
   }

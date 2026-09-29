@@ -21,3 +21,14 @@ export const PRIORITY_META: Record<TaskPriority, { label: string; className: str
 };
 
 export const ESTIMATES = [1, 2, 3, 5, 8, 13] as const;
+
+/** How an item relation reads from one side (stored once as blocks / relates / duplicates). */
+export type RelationSide = "blocks" | "blocked_by" | "relates" | "duplicates" | "duplicated_by";
+
+export const RELATION_SIDE_LABEL: Record<RelationSide, string> = {
+  blocks: "blocks",
+  blocked_by: "blocked by",
+  relates: "relates to",
+  duplicates: "duplicates",
+  duplicated_by: "duplicated by",
+};

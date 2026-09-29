@@ -7,13 +7,14 @@
  * never again exist in the UI but be unsaveable (the mlx_base_url/mlx_models
  * bug class). Adding an integration = one entry here.
  */
-export type IntegrationCategory = "ai" | "knowledge" | "calendar" | "chat";
+export type IntegrationCategory = "ai" | "knowledge" | "calendar" | "chat" | "work";
 
 export const CATEGORY_LABEL: Record<IntegrationCategory, string> = {
   ai: "AI providers",
   knowledge: "Knowledge & search",
   calendar: "Calendar & mail",
   chat: "Chat",
+  work: "Work tracking",
 };
 
 export const CATEGORY_ORDER: IntegrationCategory[] = [
@@ -21,6 +22,7 @@ export const CATEGORY_ORDER: IntegrationCategory[] = [
   "knowledge",
   "calendar",
   "chat",
+  "work",
 ];
 
 export type FieldKind = "text" | "secret" | "toggle";
@@ -244,6 +246,35 @@ export const INTEGRATIONS: Integration[] = [
         kind: "text",
         placeholder: "C0ABCDEFG",
         hint: "Comma-separated channel IDs the bot has been invited to. Every new message is captured to the Inbox and auto-triaged into a task, note, idea, etc. Keep separate from report channels.",
+      },
+    ],
+  },
+  {
+    id: "plane",
+    label: "Plane",
+    category: "work",
+    blurb: "Import projects, modules, cycles and work items from Plane into Work.",
+    fields: [
+      {
+        key: "plane_url",
+        label: "Plane URL",
+        kind: "text",
+        placeholder: "https://app.plane.so",
+        hint: "Your Plane address. Plane Cloud: leave blank (or app.plane.so). Self-hosted: the address you open Plane at, e.g. https://plane.example.com.",
+      },
+      {
+        key: "plane_workspace",
+        label: "Workspace slug",
+        kind: "text",
+        placeholder: "my-team",
+        hint: "The part of your Plane URL after the host: app.plane.so/<slug>/projects.",
+      },
+      {
+        key: "plane_api_key",
+        label: "API key",
+        kind: "secret",
+        placeholder: "plane_api_…",
+        hint: "Plane → Profile settings → Personal access tokens → Add token. Read access is all the import needs. Then run the import from Work → Import from Plane.",
       },
     ],
   },

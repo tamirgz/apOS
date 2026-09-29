@@ -414,6 +414,13 @@
       "when": 1790704457033,
       "tag": "0058_wide_loki",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1790705586748,
+      "tag": "0059_slow_joshua_kane",
+      "breakpoints": true
     }
   ]
 }

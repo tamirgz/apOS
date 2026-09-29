@@ -134,6 +134,8 @@ export const features = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     status: text("status", { enum: FEATURE_STATUSES }).notNull().default("active"),
+    /** When work on it starts — with targetAt, the feature's span on the timeline. */
+    startAt: timestamp("start_at", { withTimezone: true }),
     /** Target date — the feature's deadline on the roadmap. */
     targetAt: timestamp("target_at", { withTimezone: true }),
     shippedAt: timestamp("shipped_at", { withTimezone: true }),

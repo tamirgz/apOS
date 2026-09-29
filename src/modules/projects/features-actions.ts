@@ -25,7 +25,7 @@ export async function listProjectFeatures(projectId: string) {
 export async function createFeature(
   projectId: string,
   name: string,
-  opts: { targetAt?: Date | null } = {},
+  opts: { startAt?: Date | null; targetAt?: Date | null } = {},
 ) {
   const trimmed = name.trim();
   if (!trimmed) return;
@@ -38,7 +38,7 @@ export async function createFeature(
   const nextOrder = existing.reduce((m, r) => Math.max(m, r.sortOrder + 1), 0);
   const [row] = await db
     .insert(features)
-    .values({ projectId, name: trimmed, sortOrder: nextOrder, status: "planned", targetAt: opts.targetAt ?? null })
+    .values({ projectId, name: trimmed, sortOrder: nextOrder, status: "planned", startAt: opts.startAt ?? null, targetAt: opts.targetAt ?? null })
     .returning();
   revalidateProject(projectId);
   return row;
@@ -47,7 +47,7 @@ export async function createFeature(
 export async function updateFeature(
   id: string,
   projectId: string,
-  patch: Partial<{ name: string; description: string | null; status: FeatureStatus; targetAt: Date | null }>,
+  patch: Partial<{ name: string; description: string | null; status: FeatureStatus; startAt: Date | null; targetAt: Date | null }>,
 ) {
   // A manual status wins over the automatic lifecycle until items move again.
   const statusPatch =
@@ -59,6 +59,7 @@ export async function updateFeature(
     .set({
       ...(patch.name !== undefined && patch.name.trim() ? { name: patch.name.trim() } : {}),
       ...("description" in patch ? { description: patch.description?.trim() || null } : {}),
+      ...("startAt" in patch ? { startAt: patch.startAt ?? null } : {}),
       ...("targetAt" in patch ? { targetAt: patch.targetAt ?? null } : {}),
       ...statusPatch,
       updatedAt: new Date(),

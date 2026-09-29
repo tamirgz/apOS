@@ -18,6 +18,7 @@ export interface WorkFeature {
   name: string;
   description: string | null;
   status: FeatureStatus;
+  startAt: Date | null;
   targetAt: Date | null;
   shippedAt: Date | null;
   sortOrder: number;
@@ -50,6 +51,7 @@ export async function loadWorkData(projectId?: string): Promise<WorkData> {
         name: features.name,
         description: features.description,
         status: features.status,
+        startAt: features.startAt,
         targetAt: features.targetAt,
         shippedAt: features.shippedAt,
         sortOrder: features.sortOrder,

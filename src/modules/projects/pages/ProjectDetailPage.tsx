@@ -15,6 +15,7 @@ import { usableRepoPath } from "../repo";
 import { AdvisorPanel } from "../components/AdvisorPanel";
 import { getProjectCockpitById } from "../queries";
 import { CockpitHeader } from "../components/CockpitHeader";
+import { HealthChip } from "../components/HealthChip";
 import { ProjectAttention } from "../components/ProjectAttention";
 import { DeleteProjectButton } from "../components/DeleteProjectButton";
 import { ProjectNotes } from "../components/ProjectNotes";
@@ -83,6 +84,12 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
           <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
             {done}/{work.items.length} items
           </span>
+          <Link href="?tab=overview" className="flex items-center gap-2" title={project.resolvedHealth.reason}>
+            <HealthChip health={project.resolvedHealth.health} reason={project.resolvedHealth.reason} />
+            {openAttention.length > 0 && (
+              <span className="font-mono text-[10px] uppercase tracking-widest text-solar">{openAttention.length} needs you</span>
+            )}
+          </Link>
           <div className="ml-auto flex items-center gap-2">
             <Link
               href={`/m/ask?q=${encodeURIComponent(`Everything on ${project.name} — current status, open work, and risks`)}`}
@@ -102,56 +109,58 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
         )}
       </header>
 
-      <CockpitHeader
-        id={project.id}
-        status={project.status}
-        goal={project.goal}
-        category={project.category}
-        categories={categories}
-        nextAction={project.nextAction}
-        repoUrl={project.repoUrl}
-        repoReady={!!usableRepoPath(project.id, project.repoUrl)}
-        repoDigest={project.repoDigest}
-        health={project.resolvedHealth.health}
-        healthReason={project.resolvedHealth.reason}
-        healthSource={project.resolvedHealth.source}
-        stats={{
-          open: project.taskCounts.open,
-          done: project.taskCounts.done,
-          overdue: project.taskCounts.overdue,
-          notes: project.noteCount,
-          attention: openAttention.length,
-        }}
-        lastActive={lastActiveLabel(project.lastActivityAt)}
-        setGoal={setProjectGoal}
-        setCategory={setProjectCategory}
-        setNextAction={setProjectNextAction}
-        setRepo={setProjectRepo}
-        completeNextAction={completeProjectNextAction}
-      />
-
-      <AdvisorPanel
+      <WorkView
+        data={work}
         projectId={project.id}
-        state={project.advisorState}
-        blocker={project.advisorBlocker}
-        next={project.advisorNext}
-        updatedAt={project.advisorUpdatedAt}
+        overview={
+          <div className="flex flex-col gap-6">
+            <CockpitHeader
+              id={project.id}
+              status={project.status}
+              goal={project.goal}
+              category={project.category}
+              categories={categories}
+              nextAction={project.nextAction}
+              repoUrl={project.repoUrl}
+              repoReady={!!usableRepoPath(project.id, project.repoUrl)}
+              repoDigest={project.repoDigest}
+              health={project.resolvedHealth.health}
+              healthReason={project.resolvedHealth.reason}
+              healthSource={project.resolvedHealth.source}
+              stats={{
+                open: project.taskCounts.open,
+                done: project.taskCounts.done,
+                overdue: project.taskCounts.overdue,
+                notes: project.noteCount,
+                attention: openAttention.length,
+              }}
+              lastActive={lastActiveLabel(project.lastActivityAt)}
+              setGoal={setProjectGoal}
+              setCategory={setProjectCategory}
+              setNextAction={setProjectNextAction}
+              setRepo={setProjectRepo}
+              completeNextAction={completeProjectNextAction}
+            />
+            <AdvisorPanel
+              projectId={project.id}
+              state={project.advisorState}
+              blocker={project.advisorBlocker}
+              next={project.advisorNext}
+              updatedAt={project.advisorUpdatedAt}
+            />
+            <ProjectAttention
+              items={openAttention.map((a) => ({
+                id: a.id,
+                type: a.type,
+                title: a.title,
+                body: a.body,
+              }))}
+            />
+            <ProjectNotes projectId={project.id} notes={projectNotes} />
+            <ProjectFiles projectId={project.id} files={projectFiles} />
+          </div>
+        }
       />
-
-      <ProjectAttention
-        items={openAttention.map((a) => ({
-          id: a.id,
-          type: a.type,
-          title: a.title,
-          body: a.body,
-        }))}
-      />
-
-      <WorkView data={work} projectId={project.id} />
-
-      <ProjectNotes projectId={project.id} notes={projectNotes} />
-
-      <ProjectFiles projectId={project.id} files={projectFiles} />
     </div>
   );
 }

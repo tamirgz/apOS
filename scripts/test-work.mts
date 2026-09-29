@@ -208,9 +208,14 @@ try {
     assert.deepEqual(byTitle.get("Session expiry bug")!.labels, ["bug", "api-layer"]);
     const [billing] = await db.select().from(features).where(eq(features.name, "Billing v1"));
     assert.equal(billing.status, "shipped");
+    // Managed here now: a local edit survives a re-import.
+    await db.update(tasks).set({ title: "ZZ edited locally", priority: "low" }).where(eq(tasks.id, byTitle.get("SSO with Google")!.id));
     const before = await db.select({ n: sql<number>`count(*)::int` }).from(taskActivity).where(inArray(taskActivity.taskId, items.map((t) => t.id)));
     const r2 = await importPlane(db, get, new Progress("import", false));
     assert.equal(r2.created, 0);
+    const [kept] = await db.select().from(tasks).where(eq(tasks.id, byTitle.get("SSO with Google")!.id));
+    assert.equal(kept.title, "ZZ edited locally", "re-import must not overwrite local edits");
+    assert.equal(kept.priority, "low");
     const after = await db.select({ n: sql<number>`count(*)::int` }).from(taskActivity).where(inArray(taskActivity.taskId, items.map((t) => t.id)));
     assert.equal(after[0].n, before[0].n, "re-import with no Plane changes writes no history");
   });

@@ -100,8 +100,8 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
           <>
             <p className="text-sm text-ink-faint">
               Modules become features, cycles become cycles, work items keep their state, priority, labels, dates, description and
-              sub-items. Re-running updates what changed in Plane (it overwrites those fields here). Comments, assignees and
-              estimates aren&apos;t imported.
+              sub-items. Once imported, a project is managed here: re-running only adds what&apos;s new in Plane and fills blank
+              dates — it never overwrites your changes. Comments, assignees and estimates aren&apos;t imported.
             </p>
 
             {plan && (
@@ -159,7 +159,7 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
             {status?.mode === "import" && status.state === "done" && status.result && (
               <p className="rounded-xl bg-plasma/8 px-3 py-2 text-sm text-plasma">
                 Imported {status.result.projects} project{status.result.projects === 1 ? "" : "s"}: {status.result.created} new items,{" "}
-                {status.result.updated} already here (synced), {status.result.features} features, {status.result.cycles} cycles.
+                {status.result.updated} already here (left as they are), {status.result.features} features, {status.result.cycles} cycles.
               </p>
             )}
             {status?.state === "failed" && <p className="rounded-xl bg-flare/8 px-3 py-2 text-sm text-flare">{status.error}</p>}

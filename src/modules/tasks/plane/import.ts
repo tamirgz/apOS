@@ -157,10 +157,17 @@ async function upsertFeature(db: Db, projectId: string, m: PlaneModule): Promise
   const fields = {
     name: m.name.trim(),
     description: m.description?.trim() || null,
+    startAt: planeDate(m.start_date),
     targetAt: planeDate(m.target_date),
   };
   if (cur) {
-    await db.update(features).set({ ...fields, updatedAt: new Date() }).where(eq(features.id, cur.id));
+    // The project lives here now: only fill what's still blank, never overwrite.
+    const blanks = {
+      ...(cur.description == null && fields.description ? { description: fields.description } : {}),
+      ...(cur.startAt == null && fields.startAt ? { startAt: fields.startAt } : {}),
+      ...(cur.targetAt == null && fields.targetAt ? { targetAt: fields.targetAt } : {}),
+    };
+    if (Object.keys(blanks).length) await db.update(features).set({ ...blanks, updatedAt: new Date() }).where(eq(features.id, cur.id));
     return cur.id;
   }
   const status = mapModuleStatus(m.status);
@@ -177,10 +184,7 @@ async function upsertCycle(db: Db, projectId: string, c: PlaneCycle): Promise<st
   if (!startsAt || !endsAt) return null; // draft cycle — nothing to plan against
   const ref = `plane-cycle:${c.id}`;
   const [cur] = await db.select().from(cycles).where(eq(cycles.externalRef, ref));
-  if (cur) {
-    await db.update(cycles).set({ name: c.name.trim(), startsAt, endsAt }).where(eq(cycles.id, cur.id));
-    return cur.id;
-  }
+  if (cur) return cur.id; // already here — local edits win
   return (await createCycle(db, { name: c.name, startsAt, endsAt, projectId, externalRef: ref })).id;
 }
 
@@ -232,6 +236,7 @@ export async function importPlane(
     await progress.step(`${p.identifier}: work items`);
     const items = (await listAll<PlaneWorkItem>(get, itemsPath(p.id))).filter((i) => !i.is_draft && !i.archived_at);
     const localOf = new Map<string, string>();
+    const fresh = new Set<string>();
     for (const i of items) {
       const ref = `plane:${i.id}`;
       const status = mapState(i.state ? stateById.get(i.state) : undefined);
@@ -246,31 +251,30 @@ export async function importPlane(
         featureRef: featureOf.get(i.id) ?? null,
         cycleId: cycleOf.get(i.id) ?? null,
       };
-      const [cur] = await db.select().from(tasks).where(eq(tasks.externalRef, ref));
+      const [cur] = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.externalRef, ref));
       if (cur) {
-        // Moved out of this project locally? Leave it where the user put it.
-        const patch = cur.projectRef === projectRef ? fields : { ...fields, featureRef: undefined };
-        await updateWorkItem(db, cur.id, { ...patch, completedAt: planeDate(i.completed_at) ?? undefined }, ACTOR);
+        // Already imported — the item is managed here now; a re-import never overwrites it.
         localOf.set(i.id, cur.id);
         result.updated++;
-      } else {
-        const created = await createWorkItem(
-          db,
-          {
-            ...fields,
-            title: fields.title!,
-            projectRef,
-            externalRef: ref,
-            createdAt: planeDate(i.created_at) ?? undefined,
-            completedAt: planeDate(i.completed_at),
-            sortOrder: (planeDate(i.created_at)?.getTime() ?? Date.now()) / 1000,
-          },
-          ACTOR,
-        );
-        await addComment(db, created.id, `Imported from Plane (${p.identifier}-${i.sequence_id ?? "?"}).`, ACTOR);
-        localOf.set(i.id, created.id);
-        result.created++;
+        continue;
       }
+      const created = await createWorkItem(
+        db,
+        {
+          ...fields,
+          title: fields.title!,
+          projectRef,
+          externalRef: ref,
+          createdAt: planeDate(i.created_at) ?? undefined,
+          completedAt: planeDate(i.completed_at),
+          sortOrder: (planeDate(i.created_at)?.getTime() ?? Date.now()) / 1000,
+        },
+        ACTOR,
+      );
+      await addComment(db, created.id, `Imported from Plane (${p.identifier}-${i.sequence_id ?? "?"}).`, ACTOR);
+      localOf.set(i.id, created.id);
+      fresh.add(created.id);
+      result.created++;
     }
 
     // parents, once every item exists locally
@@ -278,7 +282,7 @@ export async function importPlane(
       if (!i.parent) continue;
       const id = localOf.get(i.id);
       const parentId = localOf.get(i.parent);
-      if (id && parentId) {
+      if (id && parentId && fresh.has(id)) {
         await updateWorkItem(db, id, { parentId }, ACTOR).catch(() => {}); // a cycle in Plane data → skip
       }
     }

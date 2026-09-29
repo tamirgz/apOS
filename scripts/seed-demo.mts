@@ -246,7 +246,7 @@ async function main() {
     union all select 'calendar', count(*) from calendar_events
     union all select 'inbox', count(*) from inbox_items
     union all select 'search_index', count(*) from search_index`;
-  console.log("seeded:", Object.fromEntries(counts.map((r: any) => [r.t, Number(r.c)])));
+  console.log("seeded:", Object.fromEntries(counts.map((r) => [r.t, Number(r.c)])));
   await sql.end();
   console.log("✓ done");
 }

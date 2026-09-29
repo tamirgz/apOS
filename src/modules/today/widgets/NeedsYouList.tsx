@@ -31,7 +31,7 @@ export function NeedsYouList({ items }: { items: NeedsYouItem[] }) {
   if (items.length === 0) {
     return (
       <p className="font-mono text-[11px] uppercase tracking-widest text-ink-faint">
-        you're clear — nothing needs you
+        you&apos;re clear — nothing needs you
       </p>
     );
   }

@@ -172,12 +172,12 @@ export function TelegramView({
                   <div className="flex flex-col gap-3 border-t border-white/6 p-3">
                     <p className="font-mono text-[9px] leading-relaxed text-ink-faint">
                       One topic per line. Keep each specific — the gate matches a
-                      post's <span className="text-ink-dim">core subject</span> against these, so precise
+                      post&apos;s <span className="text-ink-dim">core subject</span> against these, so precise
                       lines mean fewer mistakes.
                     </p>
                     <div>
                       <label className="mb-1 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-widest text-plasma/80">
-                        <Check className="size-2.5" /> relevant — a post's subject must be one of these
+                        <Check className="size-2.5" /> relevant — a post&apos;s subject must be one of these
                       </label>
                       <textarea
                         value={editInclude}
@@ -189,7 +189,7 @@ export function TelegramView({
                     </div>
                     <div>
                       <label className="mb-1 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-widest text-flare/80">
-                        <X className="size-2.5" /> not relevant — skip even if it's cybersecurity
+                        <X className="size-2.5" /> not relevant — skip even if it&apos;s cybersecurity
                       </label>
                       <textarea
                         value={editExclude}

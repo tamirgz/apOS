@@ -428,6 +428,13 @@
       "when": 1790711452534,
       "tag": "0060_fancy_vulture",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1790712380794,
+      "tag": "0061_bouncy_captain_america",
+      "breakpoints": true
     }
   ]
 }

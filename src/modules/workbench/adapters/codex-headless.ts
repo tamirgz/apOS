@@ -17,6 +17,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { childPath, resolveBin } from "./opencode-env";
+import { codexMcpArgs } from "./apos-mcp";
 import { harnessEnv } from "./sandbox";
 import type { Adapter, AdapterContext, AdapterEvent, AdapterResult } from "./types";
 
@@ -112,6 +113,8 @@ export const codexHeadlessAdapter: Adapter = {
       sandboxFor(ctx.taskType),
       "-C",
       ctx.workdir,
+      // The apOS work tracker as MCP tools, declared for this run only.
+      ...codexMcpArgs("workbench-codex"),
     ];
     if (ctx.model) args.push("-m", ctx.model);
     args.push(ctx.prompt);

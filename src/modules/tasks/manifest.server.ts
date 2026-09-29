@@ -1,5 +1,6 @@
 import type { ModuleServerManifest } from "@/core/modules/types.server";
-import { cycles, taskActivity, taskLinks, taskRelations, tasks, workCounters } from "./schema";
+import { cycles, taskActivity, taskLinks, taskRelations, tasks, workCounters, workViews } from "./schema";
+import { planningTools } from "./planning-tools";
 import { taskTools } from "./tools";
 import { workJobs } from "./jobs";
 import { TasksPage } from "./pages/TasksPage";
@@ -32,8 +33,8 @@ export const tasksServerManifest: ModuleServerManifest = {
       span: 4,
     },
   ],
-  schema: { tasks, workCounters, taskActivity, cycles, taskRelations, taskLinks },
-  aiTools: taskTools,
+  schema: { tasks, workCounters, taskActivity, cycles, taskRelations, taskLinks, workViews },
+  aiTools: [...taskTools, ...planningTools],
   jobs: workJobs,
   agentTemplates: [
     {

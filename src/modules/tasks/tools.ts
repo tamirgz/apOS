@@ -1,21 +1,27 @@
 import { z } from "zod";
-import { and, asc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
 import { registerRefs, resolveRef } from "@/core/ai/refs";
 import { resolveProjectByName } from "@/modules/projects/subject";
 import { features, projects } from "@/modules/projects/schema";
 import {
   addComment,
+  addRelation,
   createWorkItem,
   deleteWorkItem,
   findByIdentifier,
   getWorkItem,
+  listRelations,
+  removeRelation,
   updateWorkItem,
   withIdentifiers,
   type WorkItemPatch,
 } from "./core";
+import { cycleStatus } from "./cycles";
+import { delegateWorkItem } from "./delegate";
 import { parseIdentifier } from "./keys";
 import {
+  cycles,
   OPEN_STATUSES,
   priorityRank,
   tasks,
@@ -24,10 +30,12 @@ import {
   type Task,
 } from "./schema";
 
-const actorOf = (ctx: AiToolContext) => (ctx.agentName ? `agent:${ctx.agentName}` : "agent");
+const RELATION_SIDES = ["blocks", "blocked_by", "relates", "duplicates", "duplicated_by"] as const;
+
+export const actorOf = (ctx: AiToolContext) => (ctx.agentName ? `agent:${ctx.agentName}` : "agent");
 
 /** A work item is targeted by its list `ref` (t3) or its identifier (ETHOS-12) — never a raw id. */
-async function resolveTask(ctx: AiToolContext, ref: string): Promise<{ id: string } | { error: string }> {
+export async function resolveTask(ctx: AiToolContext, ref: string): Promise<{ id: string } | { error: string }> {
   if (parseIdentifier(ref)) {
     const t = await findByIdentifier(ctx.db, ref);
     return t ? { id: t.id } : { error: `No work item ${ref.toUpperCase()}` };
@@ -36,7 +44,7 @@ async function resolveTask(ctx: AiToolContext, ref: string): Promise<{ id: strin
 }
 
 /** Project by name, by key (ETHOS), or — when omitted — the focused subject. */
-async function resolveProject(
+export async function resolveProject(
   ctx: AiToolContext,
   name: string | undefined,
 ): Promise<{ id: string } | { error: string } | null> {
@@ -48,13 +56,38 @@ async function resolveProject(
   return resolveProjectByName(ctx, name);
 }
 
-async function resolveFeature(ctx: AiToolContext, projectId: string, name: string) {
+/** A module/feature by its list ref (m2) or its NAME within the project. */
+export async function resolveFeature(ctx: AiToolContext, projectId: string | null, name: string) {
+  if (/^m\d+$/.test(name.trim())) {
+    const r = resolveRef(ctx, "module", name);
+    return "error" in r ? r : { ref: `features:${r.id}` };
+  }
+  if (!projectId) return { error: "a module needs a project" };
   const [f] = await ctx.db
     .select({ id: features.id })
     .from(features)
     .where(and(eq(features.projectId, projectId), sql`lower(${features.name}) = ${name.trim().toLowerCase()}`));
-  return f ? { ref: `features:${f.id}` } : { error: `No feature "${name}" in that project` };
+  return f ? { ref: `features:${f.id}` } : { error: `No module "${name}" in that project` };
 }
+
+/**
+ * A cycle by its list ref (c1), "current" (the project's running cycle, else a
+ * cross-project one), or its NAME (case-insensitive).
+ */
+export async function resolveCycle(ctx: AiToolContext, projectId: string | null, name: string): Promise<{ id: string } | { error: string }> {
+  const key = name.trim();
+  if (/^c\d+$/.test(key)) return resolveRef(ctx, "cycle", key);
+  const rows = await ctx.db.select().from(cycles);
+  const scoped = rows.filter((c) => !c.projectId || !projectId || c.projectId === projectId);
+  if (key.toLowerCase() === "current") {
+    const cur = scoped.filter((c) => cycleStatus(c) === "current").sort((a, b) => Number(!!b.projectId) - Number(!!a.projectId));
+    return cur[0] ? { id: cur[0].id } : { error: "No cycle is running now" };
+  }
+  const hit = scoped.find((c) => c.name.toLowerCase() === key.toLowerCase());
+  return hit ? { id: hit.id } : { error: `No cycle "${name}"` };
+}
+
+const projectIdOfRef = (ref: string | null | undefined) => (ref?.startsWith("projects:") ? ref.slice(9) : null);
 
 const summary = (t: Task & { identifier: string | null }) => ({
   id: t.id,
@@ -64,6 +97,7 @@ const summary = (t: Task & { identifier: string | null }) => ({
   priority: t.priority,
   estimate: t.estimate,
   labels: t.labels,
+  startAt: t.startAt,
   dueAt: t.dueAt,
   completedAt: t.completedAt,
   hasParent: !!t.parentId,
@@ -84,11 +118,13 @@ export const taskTools: AiToolDef[] = [
       estimate: z.number().int().min(0).max(100).optional().describe("Size in points (1,2,3,5,8)"),
       labels: z.array(z.string()).optional(),
       dueAt: z.string().optional().describe("Due date-time in ISO 8601, if known"),
+      startAt: z.string().optional().describe("Start date in ISO 8601 (with dueAt, its bar on the timeline)"),
       project: z
         .string()
         .optional()
         .describe("Project/area NAME or key (validated) — never a raw id. Omit to use the focused project."),
-      feature: z.string().optional().describe("Feature NAME within that project"),
+      feature: z.string().optional().describe("Module (feature) NAME within that project, or its ref from modules.list ('m2')"),
+      cycle: z.string().optional().describe("Cycle NAME, its ref from cycles.list ('c1'), or 'current'"),
       parent: z.string().optional().describe("Parent item (ref like 't3' or identifier like 'ETHOS-4') to make this a sub-item"),
     }),
     async execute(input, ctx) {
@@ -96,10 +132,15 @@ export const taskTools: AiToolDef[] = [
       if (p && "error" in p) return p;
       let featureRef: string | null = null;
       if (input.feature) {
-        if (!p) return { error: "a feature needs a project" };
-        const f = await resolveFeature(ctx, p.id, input.feature);
+        const f = await resolveFeature(ctx, p?.id ?? null, input.feature);
         if ("error" in f) return f;
         featureRef = f.ref;
+      }
+      let cycleId: string | null = null;
+      if (input.cycle) {
+        const c = await resolveCycle(ctx, p?.id ?? null, input.cycle);
+        if ("error" in c) return c;
+        cycleId = c.id;
       }
       let parentId: string | null = null;
       if (input.parent) {
@@ -117,8 +158,10 @@ export const taskTools: AiToolDef[] = [
           estimate: input.estimate,
           labels: input.labels,
           dueAt: input.dueAt ? new Date(input.dueAt) : null,
+          startAt: input.startAt ? new Date(input.startAt) : null,
           projectRef: p ? `projects:${p.id}` : null,
           featureRef,
+          cycleId,
           parentId,
         },
         actorOf(ctx),
@@ -138,11 +181,31 @@ export const taskTools: AiToolDef[] = [
       project: z.string().optional().describe("Project NAME or key; omit for the focused project (or all)"),
       search: z.string().optional().describe("Case-insensitive title filter"),
       label: z.string().optional(),
+      module: z.string().optional().describe("Only items in this module (NAME or 'm2'); 'none' = items in no module"),
+      cycle: z.string().optional().describe("Only items in this cycle (NAME, 'c1' or 'current'); 'none' = unplanned"),
       limit: z.number().int().min(1).max(100).default(50),
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
       if (p && "error" in p) return p;
+      let moduleFilter;
+      if (input.module) {
+        if (input.module === "none") moduleFilter = isNull(tasks.featureRef);
+        else {
+          const f = await resolveFeature(ctx, p?.id ?? null, input.module);
+          if ("error" in f) return f;
+          moduleFilter = eq(tasks.featureRef, f.ref);
+        }
+      }
+      let cycleFilter;
+      if (input.cycle) {
+        if (input.cycle === "none") cycleFilter = isNull(tasks.cycleId);
+        else {
+          const c = await resolveCycle(ctx, p?.id ?? null, input.cycle);
+          if ("error" in c) return c;
+          cycleFilter = eq(tasks.cycleId, c.id);
+        }
+      }
       const statusFilter =
         input.status === "all"
           ? undefined
@@ -154,6 +217,8 @@ export const taskTools: AiToolDef[] = [
         p ? eq(tasks.projectRef, `projects:${p.id}`) : undefined,
         input.search ? ilike(tasks.title, `%${input.search}%`) : undefined,
         input.label ? sql`${input.label.toLowerCase()} = any(${tasks.labels})` : undefined,
+        moduleFilter,
+        cycleFilter,
       ].filter((f) => f !== undefined);
       const rows = await ctx.db
         .select()
@@ -162,7 +227,22 @@ export const taskTools: AiToolDef[] = [
         .orderBy(priorityRank, asc(tasks.sortOrder))
         .limit(input.limit);
       const items = await withIdentifiers(ctx.db, rows);
-      return registerRefs(ctx, "task", "t", items.map(summary));
+      const [featureNames, cycleNames] = await Promise.all([
+        ctx.db.select({ id: features.id, name: features.name }).from(features),
+        ctx.db.select({ id: cycles.id, name: cycles.name }).from(cycles),
+      ]);
+      const fName = new Map(featureNames.map((f) => [`features:${f.id}`, f.name]));
+      const cName = new Map(cycleNames.map((c) => [c.id, c.name]));
+      return registerRefs(
+        ctx,
+        "task",
+        "t",
+        items.map((t) => ({
+          ...summary(t),
+          module: t.featureRef ? (fName.get(t.featureRef) ?? null) : null,
+          cycle: t.cycleId ? (cName.get(t.cycleId) ?? null) : null,
+        })),
+      );
     },
   },
   {
@@ -218,7 +298,9 @@ export const taskTools: AiToolDef[] = [
       dueAt: z.string().optional().describe("ISO 8601; empty string clears it"),
       startAt: z.string().optional().describe("ISO 8601; empty string clears it"),
       project: z.string().optional().describe("Project NAME or key to move it to; empty string unfiles"),
-      feature: z.string().optional().describe("Feature NAME in its project; empty string detaches"),
+      feature: z.string().optional().describe("Module (feature) NAME in its project or 'm2'; empty string detaches"),
+      cycle: z.string().optional().describe("Cycle NAME, 'c1' or 'current'; empty string takes it out of its cycle"),
+      parent: z.string().optional().describe("Parent item ('t3' / 'ETHOS-4') to nest it under; empty string makes it top-level"),
     }),
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
@@ -250,12 +332,32 @@ export const taskTools: AiToolDef[] = [
         else {
           if (projectId === undefined) {
             const [cur] = await ctx.db.select({ projectRef: tasks.projectRef }).from(tasks).where(eq(tasks.id, t.id));
-            projectId = cur?.projectRef?.startsWith("projects:") ? cur.projectRef.slice(9) : null;
+            projectId = projectIdOfRef(cur?.projectRef);
           }
-          if (!projectId) return { error: "a feature needs the item to be in a project" };
           const f = await resolveFeature(ctx, projectId, input.feature);
           if ("error" in f) return f;
           patch.featureRef = f.ref;
+        }
+      }
+      if (input.cycle !== undefined) {
+        if (input.cycle === "") patch.cycleId = null;
+        else {
+          if (projectId === undefined) {
+            const [cur] = await ctx.db.select({ projectRef: tasks.projectRef }).from(tasks).where(eq(tasks.id, t.id));
+            projectId = projectIdOfRef(cur?.projectRef);
+          }
+          const c = await resolveCycle(ctx, projectId, input.cycle);
+          if ("error" in c) return c;
+          patch.cycleId = c.id;
+        }
+      }
+      if (input.parent !== undefined) {
+        if (input.parent === "") patch.parentId = null;
+        else {
+          const parent = await resolveTask(ctx, input.parent);
+          if ("error" in parent) return parent;
+          if (parent.id === t.id) return { error: "an item can't be its own parent" };
+          patch.parentId = parent.id;
         }
       }
       if (Object.values(patch).every((v) => v === undefined)) return { error: "nothing to update" };
@@ -275,6 +377,65 @@ export const taskTools: AiToolDef[] = [
       if ("error" in t) return t;
       await addComment(ctx.db, t.id, input.body, actorOf(ctx));
       return { commented: true };
+    },
+  },
+  {
+    name: "tasks.relate",
+    description:
+      "Link two work items: 'blocks' / 'blocked_by' (dependencies — a blocked item shows as blocked until its blocker closes), 'relates', 'duplicates' / 'duplicated_by'. Read as: <ref> <relation> <other>.",
+    input: z.object({
+      ref: z.string().describe("The item ('t3' or 'ETHOS-12')"),
+      relation: z.enum(RELATION_SIDES),
+      other: z.string().describe("The other item ('t5' or 'ETHOS-14')"),
+    }),
+    async execute(input, ctx) {
+      const a = await resolveTask(ctx, input.ref);
+      if ("error" in a) return a;
+      const b = await resolveTask(ctx, input.other);
+      if ("error" in b) return b;
+      try {
+        const row = await addRelation(ctx.db, a.id, input.relation, b.id, actorOf(ctx));
+        return { related: !!row, note: row ? undefined : "they were already related that way" };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+  },
+  {
+    name: "tasks.unrelate",
+    description: "Remove every relation between two work items.",
+    input: z.object({
+      ref: z.string().describe("The item ('t3' or 'ETHOS-12')"),
+      other: z.string().describe("The other item ('t5' or 'ETHOS-14')"),
+    }),
+    async execute(input, ctx) {
+      const a = await resolveTask(ctx, input.ref);
+      if ("error" in a) return a;
+      const b = await resolveTask(ctx, input.other);
+      if ("error" in b) return b;
+      const hits = (await listRelations(ctx.db, a.id)).filter((r) => r.other.id === b.id);
+      for (const r of hits) await removeRelation(ctx.db, r.id);
+      return { removed: hits.length };
+    },
+  },
+  {
+    name: "tasks.delegate",
+    description:
+      "Hand a work item (and its open sub-items) to the Workbench: starts a coding/research agent run in the project's repo, moves the item to In progress, and writes the outcome back (review → In review, done → Done). Starts real work — use only when asked.",
+    risk: "approval",
+    input: z.object({
+      ref: z.string().describe("The item ('t3' or 'ETHOS-12')"),
+      instructions: z.string().optional().describe("Extra instructions for the run"),
+    }),
+    async execute(input, ctx) {
+      const t = await resolveTask(ctx, input.ref);
+      if ("error" in t) return t;
+      try {
+        const wb = await delegateWorkItem(ctx.db, t.id, actorOf(ctx), input.instructions);
+        return { delegated: true, workbenchTask: wb.id };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
     },
   },
   {

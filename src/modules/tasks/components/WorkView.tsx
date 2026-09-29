@@ -7,6 +7,7 @@ import {
   Ban,
   Bot,
   CalendarClock,
+  CalendarDays,
   CalendarRange,
   ChevronDown,
   Columns3,
@@ -18,43 +19,31 @@ import {
   Repeat,
   Search,
   Signal,
+  Bookmark,
   X,
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { shortDate } from "@/core/ui/time";
 import { useNow } from "@/core/ui/useNow";
-import { createTask, moveTask } from "../actions";
+import { createTask, deleteWorkView, moveTask, saveWorkView } from "../actions";
 import type { WorkItem } from "../core";
 import { parseQuick } from "../parse";
 import type { WorkData } from "../queries";
-import { TASK_STATUSES, type TaskPriority, type TaskStatus } from "../schema";
+import { TASK_STATUSES, type TaskPriority, type TaskStatus, type WorkView as SavedView, type WorkViewFilters } from "../schema";
 import { BOARD_STATUSES, PRIORITY_META, STATUS_META, plainTitle } from "../states";
+import { CalendarView } from "./CalendarView";
 import { CycleHeader, CyclesView, nextCycleFor } from "./CyclePanel";
 import { ModuleHeader, ModulesView } from "./ModulesView";
 import { PlaneImport } from "./PlaneImport";
 import { Timeline } from "./Timeline";
 import { WorkItemDetail } from "./WorkItemDetail";
+import { readPref, writePref } from "./prefs";
 
 const DONE_WINDOW_DAYS = 14;
 const BOARD_CAP = 25;
 const DAY = 86_400_000;
 const closed = (s: TaskStatus) => s === "done" || s === "cancelled";
 
-function readPref<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
-  try {
-    const v = localStorage.getItem(key) as T | null;
-    return v && allowed.includes(v) ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function writePref(key: string, v: string) {
-  try {
-    localStorage.setItem(key, v);
-  } catch {
-    /* private mode — preference just isn't remembered */
-  }
-}
 
 function PriorityIcon({ p }: { p: TaskPriority }) {
   return (
@@ -530,8 +519,8 @@ function ListView({
 // ── the view ───────────────────────────────────────────────────────────────
 
 type Tab = "items" | "cycles" | "modules" | "timeline" | "overview";
-type Layout = "board" | "list";
-const LAYOUTS: Layout[] = ["board", "list"];
+type Layout = "board" | "list" | "calendar";
+const LAYOUTS: Layout[] = ["board", "list", "calendar"];
 
 /** Tab + detail selection live in the URL (?tab=modules&module=…) so a module or cycle page is linkable. */
 function useWorkUrl(hasOverview: boolean) {
@@ -641,6 +630,17 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
 
   const refresh = useCallback(() => router.refresh(), [router]);
 
+  // Saved views capture the Work-items filters + layout (not a module / cycle page's scope).
+  const currentFilters: WorkViewFilters = { q, label, project, feature, cycle, layout };
+  const applyView = (f: WorkViewFilters) => {
+    setQ(f.q ?? "");
+    setLabel(f.label ?? "");
+    setProject(f.project ?? "");
+    setFeature(f.feature ?? "");
+    setCycle(f.cycle ?? "");
+    if (f.layout && LAYOUTS.includes(f.layout)) pickLayout(f.layout);
+  };
+
   const onMove = (id: string, status: TaskStatus, sortOrder: number) => {
     // Optimistic: the card lands immediately; the server write + refresh reconcile.
     setItems((prev) =>
@@ -733,6 +733,7 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
           projects={data.projects}
           byFeature={!!projectId}
           onOpen={setOpenId}
+          onOpenModule={(id) => go({ tab: "modules", module: id })}
         />
       )}
 
@@ -740,11 +741,22 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
         <>
           <QuickCreate inputRef={quickRef} data={data} projectId={projectId} featureId={openModule?.id ?? (feature && feature !== "none" ? feature : null)} cycleId={openCycle?.id ?? null} />
 
+          {tab === "items" && (
+            <SavedViews
+              views={data.views}
+              current={currentFilters}
+              projectId={projectId ?? null}
+              onApply={applyView}
+              onChanged={refresh}
+            />
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded-lg border border-white/8 p-0.5" role="radiogroup" aria-label="Layout">
               {([
                 { id: "board", label: "Board", icon: Columns3 },
                 { id: "list", label: "List", icon: List },
+                { id: "calendar", label: "Calendar", icon: CalendarDays },
               ] as const).map((v) => (
                 <button
                   key={v.id}
@@ -822,6 +834,7 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
 
           {layout === "board" && <Board items={filtered} all={items} flags={flags} onOpen={setOpenId} onMove={onMove} />}
           {layout === "list" && <ListView items={filtered} data={data} flags={flags} showProject={!projectId} onOpen={setOpenId} />}
+          {layout === "calendar" && <CalendarView items={filtered} onOpen={setOpenId} />}
         </>
       )}
 
@@ -869,6 +882,106 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
           </>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ── saved views ────────────────────────────────────────────────────────────
+
+const FILTER_KEYS = ["q", "label", "project", "feature", "cycle"] as const;
+const sameFilters = (a: WorkViewFilters, b: WorkViewFilters) =>
+  FILTER_KEYS.every((k) => (a[k] ?? "") === (b[k] ?? "")) && (!b.layout || a.layout === b.layout);
+
+/** Named filter sets: a chip per view restores its filters and layout; "save view" names the current ones. */
+function SavedViews({
+  views,
+  current,
+  projectId,
+  onApply,
+  onChanged,
+}: {
+  views: SavedView[];
+  current: WorkViewFilters;
+  projectId: string | null;
+  onApply: (f: WorkViewFilters) => void;
+  onChanged: () => void;
+}) {
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const [pending, start] = useTransition();
+  const filtered = FILTER_KEYS.some((k) => current[k]);
+  const active = views.find((v) => sameFilters(current, v.filters));
+  if (!views.length && !filtered) return null;
+
+  const save = () =>
+    start(async () => {
+      if (!name.trim()) return;
+      await saveWorkView(projectId, name, current);
+      setName("");
+      setNaming(false);
+      onChanged();
+    });
+
+  const chip = "flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-widest transition";
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" aria-label="Saved views">
+      <Bookmark className="size-3.5 text-ink-faint" />
+      <button
+        type="button"
+        onClick={() => onApply({ layout: current.layout })}
+        className={cn(chip, !filtered ? "border-ion/40 bg-ion/10 text-ion" : "border-white/8 text-ink-faint hover:text-ink")}
+      >
+        everything
+      </button>
+      {views.map((v) => (
+        <span key={v.id} className={cn(chip, "group pr-1", active?.id === v.id ? "border-ion/40 bg-ion/10 text-ion" : "border-white/8 text-ink-dim hover:text-ink")}>
+          <button type="button" onClick={() => onApply(v.filters)} className="normal-case tracking-normal">
+            {v.name}
+          </button>
+          <button
+            type="button"
+            aria-label={`Delete view ${v.name}`}
+            title="Delete this view"
+            onClick={() =>
+              start(async () => {
+                await deleteWorkView(v.id);
+                onChanged();
+              })
+            }
+            className="rounded-full p-0.5 text-ink-faint opacity-0 transition group-hover:opacity-100 hover:text-flare focus-visible:opacity-100"
+          >
+            <X className="size-3" />
+          </button>
+        </span>
+      ))}
+      {filtered && !active && !naming && (
+        <button type="button" onClick={() => setNaming(true)} className={cn(chip, "border-dashed border-white/12 text-ink-faint hover:text-ink")}>
+          <Plus className="size-3" /> save view
+        </button>
+      )}
+      {naming && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+          className="flex items-center gap-1"
+        >
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setNaming(false)}
+            placeholder="View name…"
+            aria-label="View name"
+            maxLength={60}
+            className="w-36 rounded-full border border-white/12 bg-transparent px-2.5 py-0.5 text-xs text-ink outline-none placeholder:text-ink-faint focus:border-ion/50"
+          />
+          <button type="submit" disabled={pending || !name.trim()} className={cn(chip, "border-ion/40 text-ion disabled:opacity-40")}>
+            save
+          </button>
+        </form>
+      )}
     </div>
   );
 }

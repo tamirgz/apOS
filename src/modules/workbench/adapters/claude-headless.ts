@@ -14,6 +14,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { claudeMcpArgs } from "./apos-mcp";
 import { harnessEnv } from "./sandbox";
 import type { Adapter, AdapterContext, AdapterEvent, AdapterResult } from "./types";
 
@@ -129,6 +130,8 @@ export const claudeHeadlessAdapter: Adapter = {
 
   async run(ctx: AdapterContext, emit): Promise<AdapterResult> {
     const bin = resolveClaudeBin();
+    // The apOS work tracker as MCP tools — comment progress, file follow-ups.
+    const apos = claudeMcpArgs("workbench-claude");
     const args = [
       "-p",
       ctx.prompt,
@@ -141,8 +144,10 @@ export const claudeHeadlessAdapter: Adapter = {
       "acceptEdits",
       "--allowedTools",
       ...(ALLOWED_TOOLS[ctx.taskType] ?? ALLOWED_TOOLS.custom),
+      ...apos.allowed,
       "--max-turns",
       "60",
+      ...apos.args,
     ];
     if (ctx.model) args.push("--model", ctx.model);
 

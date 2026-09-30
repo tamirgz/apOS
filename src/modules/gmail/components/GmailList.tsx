@@ -3,11 +3,11 @@
 import { timeAgo } from "@/core/ui/time";
 
 import Link from "next/link";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ExternalLink, Mail, RefreshCw } from "lucide-react";
+import { ExternalLink, ListPlus, Mail, RefreshCw, Sparkles } from "lucide-react";
 import { cn } from "@/core/ui/cn";
-import { resyncGmail } from "../actions";
+import { mailToWorkItem, resyncGmail } from "../actions";
 import type { GmailMessage } from "../schema";
 
 const ago = (d: Date | null) => timeAgo(d, { compact: true });
@@ -66,45 +66,49 @@ export function GmailList({
       <div className="flex flex-col gap-1.5">
         <AnimatePresence mode="popLayout">
           {messages.map((m) => (
-            <motion.a
+            <motion.div
               key={m.id}
               layout
-              href={m.link ?? undefined}
-              target={m.link ? "_blank" : undefined}
-              rel={m.link ? "noopener noreferrer" : undefined}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ type: "spring", stiffness: 420, damping: 34 }}
               className="glass group flex items-center gap-3 rounded-xl p-3 transition hover:bg-white/4"
             >
-              <span
-                className={cn(
-                  "size-1.5 shrink-0 rounded-full",
-                  m.unread ? "bg-flare" : "bg-transparent",
-                )}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span
-                    className={cn(
-                      "truncate text-sm",
-                      m.unread ? "font-medium text-ink" : "text-ink-dim",
-                    )}
-                  >
-                    {m.fromName ?? m.fromEmail ?? "unknown"}
-                  </span>
-                  <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">
-                    {ago(m.receivedAt)}
-                  </span>
+              <a
+                href={m.link ?? undefined}
+                target={m.link ? "_blank" : undefined}
+                rel={m.link ? "noopener noreferrer" : undefined}
+                className="flex min-w-0 flex-1 items-center gap-3"
+              >
+                <span
+                  className={cn(
+                    "size-1.5 shrink-0 rounded-full",
+                    m.unread ? "bg-flare" : "bg-transparent",
+                  )}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-2">
+                    <span
+                      className={cn(
+                        "truncate text-sm",
+                        m.unread ? "font-medium text-ink" : "text-ink-dim",
+                      )}
+                    >
+                      {m.fromName ?? m.fromEmail ?? "unknown"}
+                    </span>
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">
+                      {ago(m.receivedAt)}
+                    </span>
+                  </div>
+                  <p className="truncate text-sm text-ink-dim">{m.subject ?? "(no subject)"}</p>
+                  {m.snippet && (
+                    <p className="truncate text-xs text-ink-faint">{m.snippet}</p>
+                  )}
                 </div>
-                <p className="truncate text-sm text-ink-dim">{m.subject ?? "(no subject)"}</p>
-                {m.snippet && (
-                  <p className="truncate text-xs text-ink-faint">{m.snippet}</p>
-                )}
-              </div>
-              <ExternalLink className="size-3.5 shrink-0 text-ink-faint opacity-0 transition group-hover:opacity-100" />
-            </motion.a>
+              </a>
+              <MailActions message={m} />
+            </motion.div>
           ))}
         </AnimatePresence>
         {messages.length === 0 && (
@@ -113,6 +117,65 @@ export function GmailList({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Per-message actions: make it a work item, ask about it, open in Gmail. */
+function MailActions({ message: m }: { message: GmailMessage }) {
+  const [pending, start] = useTransition();
+  const [itemId, setItemId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const askQ = `What does the mail "${m.subject ?? ""}" from ${m.fromName ?? m.fromEmail ?? "this sender"} need from me?`;
+  const btn =
+    "rounded-md p-1.5 text-ink-faint transition hover:bg-white/5 focus-visible:opacity-100 disabled:opacity-40";
+
+  return (
+    <div className="flex shrink-0 items-center gap-0.5">
+      {itemId ? (
+        <Link
+          href={`/m/tasks/${itemId}`}
+          className="rounded-md border border-plasma/30 px-2 py-1 font-mono text-[9px] uppercase tracking-widest text-plasma transition hover:bg-plasma/10"
+        >
+          open item
+        </Link>
+      ) : (
+        <button
+          type="button"
+          title={error ?? "Make a work item (Reply: …) with the Gmail link"}
+          disabled={pending}
+          onClick={() =>
+            start(async () => {
+              try {
+                setItemId((await mailToWorkItem(m.id)).id);
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "failed");
+              }
+            })
+          }
+          className={cn(btn, "opacity-0 group-hover:opacity-100 hover:text-plasma", error && "text-flare opacity-100")}
+        >
+          <ListPlus className="size-3.5" />
+        </button>
+      )}
+      <Link
+        href={`/m/ask?q=${encodeURIComponent(askQ)}`}
+        title="Ask about this mail"
+        className={cn(btn, "opacity-0 group-hover:opacity-100 hover:text-ion")}
+      >
+        <Sparkles className="size-3.5" />
+      </Link>
+      {m.link && (
+        <a
+          href={m.link}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open in Gmail"
+          className={cn(btn, "opacity-0 group-hover:opacity-100 hover:text-ink")}
+        >
+          <ExternalLink className="size-3.5" />
+        </a>
+      )}
     </div>
   );
 }

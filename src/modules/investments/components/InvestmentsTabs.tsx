@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { LineChart, MessageSquare, type LucideIcon } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 
@@ -38,7 +39,8 @@ function TabBtn({
  * Chat tabs. Both children stay MOUNTED — hidden via CSS, not unmounted — so the
  * chat keeps its scroll/input/history when you switch away and the overview
  * doesn't refetch iSentry. Server components are passed in as props (children),
- * which is allowed from a client boundary.
+ * which is allowed from a client boundary. The tab lives in the URL (?tab=chat)
+ * so a reload or a shared link lands on the same tab.
  */
 export function InvestmentsTabs({
   overview,
@@ -50,7 +52,10 @@ export function InvestmentsTabs({
   /** Portfolio-tab-only header controls (e.g. the Report button + status). */
   actions?: ReactNode;
 }) {
-  const [tab, setTab] = useState<"portfolio" | "chat">("portfolio");
+  const sp = useSearchParams();
+  const tab: "portfolio" | "chat" = sp.get("tab") === "chat" ? "chat" : "portfolio";
+  const setTab = (t: "portfolio" | "chat") =>
+    window.history.pushState(null, "", t === "chat" ? "?tab=chat" : window.location.pathname);
 
   return (
     <div className="flex flex-col gap-4">

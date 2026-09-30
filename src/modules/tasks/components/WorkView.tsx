@@ -21,6 +21,7 @@ import {
   Signal,
   Bookmark,
   X,
+  Rows3,
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { shortDate } from "@/core/ui/time";
@@ -209,8 +210,10 @@ function Card({
   onDragStart,
   onDragEnd,
   onDropBefore,
+  compact = false,
 }: {
   item: WorkItem;
+  compact?: boolean;
   subCount?: { done: number; total: number };
   blocked?: boolean;
   delegated?: string;
@@ -246,11 +249,28 @@ function Card({
       role="button"
       tabIndex={0}
       className={cn(
-        "glass group relative cursor-grab rounded-xl p-3 outline-none transition active:cursor-grabbing focus-visible:ring-1 focus-visible:ring-ion/50",
+        "glass group relative cursor-grab rounded-xl outline-none transition active:cursor-grabbing focus-visible:ring-1 focus-visible:ring-ion/50",
+        compact ? "px-2.5 py-1.5" : "p-3",
         dragging && "opacity-30",
         over && "before:absolute before:inset-x-2 before:-top-1.5 before:h-0.5 before:rounded-full before:bg-ion",
       )}
     >
+      {compact ? (
+        // Compact density: one row — priority, id, one-line title, flags.
+        <div className="flex items-center gap-2">
+          <PriorityIcon p={item.priority} />
+          <span className="shrink-0 font-mono text-[10px] text-ink-faint">{item.identifier}</span>
+          <span
+            dir="auto"
+            title={plainTitle(item.title)}
+            className={cn("min-w-0 flex-1 truncate text-xs", closed(item.status) ? "text-ink-faint line-through" : "text-ink-dim group-hover:text-ink")}
+          >
+            {plainTitle(item.title)}
+          </span>
+          <Flags blocked={blocked} delegated={delegated} />
+        </div>
+      ) : (
+      <>
       <div className="mb-1.5 flex items-center gap-2">
         <PriorityIcon p={item.priority} />
         <span className="font-mono text-[10px] text-ink-faint">{item.identifier}</span>
@@ -284,6 +304,8 @@ function Card({
           </span>
         </div>
       )}
+      </>
+      )}
     </div>
   );
 }
@@ -294,7 +316,9 @@ function Board({
   flags,
   onOpen,
   onMove,
+  compact = false,
 }: {
+  compact?: boolean;
   items: WorkItem[];
   all: WorkItem[];
   flags: { blocked: Set<string>; delegated: Record<string, string> };
@@ -428,6 +452,7 @@ function Board({
               <Card
                 key={t.id}
                 item={t}
+                compact={compact}
                 subCount={subCounts.get(t.id)}
                 blocked={flags.blocked.has(t.id)}
                 delegated={flags.delegated[t.id]}
@@ -565,17 +590,22 @@ type Tab = "items" | "cycles" | "modules" | "timeline" | "overview";
 type Layout = "board" | "list" | "calendar";
 const LAYOUTS: Layout[] = ["board", "list", "calendar"];
 
-/** Tab + detail selection live in the URL (?tab=modules&module=…) so a module or cycle page is linkable. */
+/**
+ * Tab + detail selection live in the URL (?tab=modules&module=…) so a module or
+ * cycle page is linkable. A project page opens on its Overview (the cockpit);
+ * the all-work page opens on Work items.
+ */
 function useWorkUrl(hasOverview: boolean) {
   const sp = useSearchParams();
   const raw = sp.get("tab");
   const tabs: Tab[] = ["items", "cycles", "modules", "timeline", ...(hasOverview ? (["overview"] as Tab[]) : [])];
-  const tab: Tab = raw && (tabs as string[]).includes(raw) ? (raw as Tab) : "items";
+  const fallback: Tab = hasOverview ? "overview" : "items";
+  const tab: Tab = raw && (tabs as string[]).includes(raw) ? (raw as Tab) : fallback;
   const go = useCallback(
     (next: { tab?: Tab; module?: string | null; cycle?: string | null }) => {
       const p = new URLSearchParams(sp.toString());
       const t = next.tab ?? tab;
-      if (t === "items") p.delete("tab");
+      if (t === fallback) p.delete("tab");
       else p.set("tab", t);
       for (const k of ["module", "cycle"] as const) {
         const v = next[k];
@@ -586,7 +616,7 @@ function useWorkUrl(hasOverview: boolean) {
       const qs = p.toString();
       window.history.pushState(null, "", qs ? `?${qs}` : window.location.pathname);
     },
-    [sp, tab],
+    [sp, tab, fallback],
   );
   return { tab, moduleId: tab === "modules" ? sp.get("module") : null, cycleId: tab === "cycles" ? sp.get("cycle") : null, go };
 }
@@ -618,6 +648,15 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
   const pickLayout = (v: Layout) => {
     setLayout(v);
     writePref(prefKey, v);
+  };
+
+  // Board density: comfortable (2-line cards) or compact (one row per item).
+  const [compact, setCompact] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- restore the remembered density after hydration (localStorage is client-only)
+  useEffect(() => setCompact(readPref("work.board.density", "comfortable", ["comfortable", "compact"]) === "compact"), []);
+  const toggleCompact = () => {
+    writePref("work.board.density", compact ? "comfortable" : "compact");
+    setCompact(!compact);
   };
 
   const [q, setQ] = useState("");
@@ -701,11 +740,11 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
 
   const liveFeatures = data.features.filter((f) => f.status === "planned" || f.status === "active" || f.status === "paused");
   const tabs: { id: Tab; label: string; icon: typeof List; count?: number }[] = [
+    ...(overview ? [{ id: "overview" as Tab, label: "Overview", icon: Gauge }] : []),
     { id: "items", label: "Work items", icon: Columns3, count: items.filter((t) => !closed(t.status)).length },
     { id: "cycles", label: "Cycles", icon: Repeat, count: data.cycles.filter((c) => c.status !== "completed").length },
     { id: "modules", label: "Modules", icon: Layers, count: liveFeatures.length },
     { id: "timeline", label: "Timeline", icon: CalendarRange },
-    ...(overview ? [{ id: "overview" as Tab, label: "Overview", icon: Gauge }] : []),
   ];
   const selectCls = "rounded-lg border border-white/8 bg-panel px-2 py-1 text-xs text-ink-dim outline-none";
 
@@ -817,6 +856,21 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
                 </button>
               ))}
             </div>
+            {layout === "board" && (
+              <button
+                type="button"
+                onClick={toggleCompact}
+                aria-pressed={compact}
+                title={compact ? "Comfortable cards" : "Compact cards — one row per item"}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition",
+                  compact ? "border-ion/30 bg-ion/10 text-ion" : "border-white/8 text-ink-faint hover:text-ink-dim",
+                )}
+              >
+                <Rows3 className="size-3.5" />
+                compact
+              </button>
+            )}
             <label className="flex items-center gap-1.5 rounded-lg border border-white/8 px-2 py-1">
               <Search className="size-3.5 text-ink-faint" />
               <input
@@ -875,7 +929,7 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
             </span>
           </div>
 
-          {layout === "board" && <Board items={filtered} all={items} flags={flags} onOpen={setOpenId} onMove={onMove} />}
+          {layout === "board" && <Board items={filtered} all={items} flags={flags} onOpen={setOpenId} onMove={onMove} compact={compact} />}
           {layout === "list" && <ListView items={filtered} data={data} flags={flags} showProject={!projectId} onOpen={setOpenId} />}
           {layout === "calendar" && <CalendarView items={filtered} onOpen={setOpenId} />}
         </>

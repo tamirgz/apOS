@@ -220,12 +220,22 @@ function JudgePanel({
   );
 }
 
+/** A work item this run came from — shown as a backlink chip in the header. */
+export interface LinkedWorkItem {
+  id: string;
+  identifier: string | null;
+  title: string;
+  status: string;
+}
+
 export function TaskDetailView({
   detail,
   projectOptions = [],
+  workItems = [],
 }: {
   detail: Detail;
   projectOptions?: ProjectOption[];
+  workItems?: LinkedWorkItem[];
 }) {
   const { task, attempts, events, diff } = detail;
   const [pending, start] = useTransition();
@@ -341,6 +351,23 @@ export function TaskDetailView({
             )}
             {latest?.costUsd && <span>${Number(latest.costUsd).toFixed(2)}</span>}
           </div>
+          {workItems.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="font-mono text-[9px] uppercase tracking-widest text-ink-faint">for</span>
+              {workItems.map((w) => (
+                <Link
+                  key={w.id}
+                  href={`/m/tasks/${w.id}`}
+                  title={w.title}
+                  className="inline-flex max-w-md items-center gap-1.5 rounded-md border border-white/10 px-2 py-0.5 text-xs text-ink-dim transition hover:border-ion/40 hover:text-ion"
+                >
+                  <span className="shrink-0 font-mono text-[10px] text-ink-faint">{w.identifier ?? "item"}</span>
+                  <span className="truncate">{w.title}</span>
+                  <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest text-ink-faint">{w.status}</span>
+                </Link>
+              ))}
+            </div>
+          )}
           <div className="mt-2">
             <ProjectMultiPicker
               options={projectOptions}

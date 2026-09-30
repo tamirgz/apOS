@@ -1,3 +1,4 @@
+import { displayName } from "../display";
 import Link from "next/link";
 import { ArrowLeft, CalendarClock } from "lucide-react";
 import type { ModuleRouteProps } from "@/core/modules/types.server";
@@ -50,7 +51,7 @@ export async function PersonDetailPage({ params }: ModuleRouteProps) {
           people
         </Link>
         <h1 className="font-display text-3xl font-semibold text-ink">
-          {person.name ?? person.email}
+          {displayName(person)}
         </h1>
         <p className="mt-1 font-mono text-xs text-ink-dim">{person.email}</p>
         <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint">

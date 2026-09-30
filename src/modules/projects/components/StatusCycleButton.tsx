@@ -31,7 +31,7 @@ export function StatusCycleButton({
       disabled={pending}
       title={`Status: ${status} (click to cycle)`}
       className={cn(
-        "rounded-md border px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest transition hover:brightness-125 disabled:opacity-40",
+        "rounded-full border px-2.5 py-[3px] text-[12px] capitalize leading-[1.4] transition hover:brightness-125 disabled:opacity-40",
         STATUS_CHIP[status],
       )}
     >

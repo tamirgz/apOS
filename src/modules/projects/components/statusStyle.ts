@@ -8,6 +8,6 @@ import type { ProjectStatus } from "../schema";
 export const STATUS_CHIP: Record<ProjectStatus, string> = {
   active: "border-plasma/30 bg-plasma/10 text-plasma",
   paused: "border-violet/30 bg-violet/10 text-violet",
-  done: "border-white/8 bg-white/4 text-ink-faint",
-  archived: "border-dashed border-white/8 bg-white/2 text-ink-faint/70",
+  done: "border-ion/12 bg-ink/4 text-ink-faint",
+  archived: "border-dashed border-ion/12 bg-ink/2 text-ink-faint/70",
 };

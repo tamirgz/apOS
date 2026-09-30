@@ -109,7 +109,7 @@ export function ProjectFiles({
           "mb-3 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed py-6 font-mono text-[11px] uppercase tracking-widest transition",
           dragOver
             ? "border-ion/50 bg-ion/5 text-ion"
-            : "border-white/8 text-ink-faint hover:border-white/16 hover:text-ink-dim",
+            : "border-ion/12 text-ink-faint hover:border-ion/24 hover:text-ink-dim",
         )}
       >
         <UploadCloud className="size-4" />
@@ -127,7 +127,7 @@ export function ProjectFiles({
       </div>
 
       {files.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/6 py-8 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+        <div className="rounded-xl border border-dashed border-ion/10 py-8 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
           no files attached yet
         </div>
       ) : (

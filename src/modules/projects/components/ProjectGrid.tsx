@@ -5,12 +5,12 @@ import { lastActiveLabel } from "@/core/ui/time";
 import Link from "next/link";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
-import { ArrowRight, ChevronDown, Compass, FolderPlus, GripVertical } from "lucide-react";
+import { ArrowRight, ChevronDown, Compass, FolderPlus, GripVertical, ListChecks } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { act } from "@/core/ui/feedback";
 import { createProject, setProjectCategoryOrder } from "../actions";
 import type { ProjectCockpit } from "../queries";
-import { HealthChip } from "./HealthChip";
+import { HEALTH_META } from "../health";
 import { STATUS_CHIP } from "./statusStyle";
 import { categoryColor } from "./categoryColor";
 
@@ -35,22 +35,19 @@ function NewProjectForm() {
         e.preventDefault();
         submit();
       }}
-      className="glass mb-5 flex items-center gap-2 rounded-xl p-2 pl-4 focus-within:glass-edge"
+      className="flex min-w-72 items-center gap-2 rounded-[10px] border border-ion/20 bg-raise/60 py-1 pl-3 pr-1 transition focus-within:border-plasma/50"
     >
-      <FolderPlus className="size-4 text-solar" />
+      <FolderPlus className="size-3.5 shrink-0 text-plasma" />
       <input
         ref={inputRef}
-        placeholder="Start a new project… (Enter to commit)"
-        className="h-9 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
-        disabled={pending}
+        placeholder="New project…"
+        aria-label="New project name"
         autoFocus
-      />
-      <button
-        type="submit"
+        className="h-7 min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
         disabled={pending}
-        className="rounded-lg bg-solar/15 px-4 py-2 font-mono text-[11px] uppercase tracking-widest text-solar transition hover:bg-solar/25 disabled:opacity-40"
-      >
-        {pending ? "…" : "create"}
+      />
+      <button type="submit" disabled={pending} className="wk-btn primary !py-1 text-xs disabled:opacity-40">
+        {pending ? "…" : "Create"}
       </button>
     </form>
   );
@@ -65,6 +62,7 @@ function ProjectCard({
 }) {
   const { total, done, overdue } = project.taskCounts;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const health = HEALTH_META[project.resolvedHealth.health];
 
   return (
     <motion.div
@@ -77,35 +75,35 @@ function ProjectCard({
     >
       <Link
         href={`/m/projects/${project.id}`}
-        className="glass block rounded-xl p-4 transition hover:bg-white/4 hover:opacity-100"
+        className="glass flex h-full flex-col rounded-2xl p-4 transition hover:bg-ink/4 hover:opacity-100"
       >
-        <div className="flex items-start justify-between gap-3">
-          <h2 className="font-display text-base font-medium text-ink">
-            {project.name}
-          </h2>
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-mono text-[11.5px] text-ink-faint">{project.key ?? (project.kind === "area" ? "area" : "—")}</span>
           {project.status === "active" ? (
-            <HealthChip
-              health={project.resolvedHealth.health}
-              reason={project.resolvedHealth.reason}
-            />
-          ) : (
             <span
-              className={cn(
-                "shrink-0 rounded-md border px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest",
-                STATUS_CHIP[project.status],
-              )}
+              title={project.resolvedHealth.reason}
+              className="wk-chip !px-2 !py-px !text-[11.5px]"
+              style={{ color: health.accent, borderColor: `color-mix(in oklab, ${health.accent} 35%, transparent)` }}
             >
+              <span className="dot" />
+              {health.label}
+            </span>
+          ) : (
+            <span className={cn("shrink-0 rounded-full border px-2 py-px text-[11.5px] capitalize", STATUS_CHIP[project.status])}>
               {project.status}
             </span>
           )}
         </div>
+        <h2 dir="auto" className="mt-1 font-display text-[17px] font-semibold leading-snug text-ink [text-wrap:balance]">
+          {project.name}
+        </h2>
 
         {project.nextAction ? (
-          <p className="mt-2 flex items-start gap-1.5 text-sm leading-snug text-ink-dim">
+          <p className="mt-2 flex items-start gap-1.5 text-[13px] leading-snug text-ink-dim">
             <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-solar" />
             <span className="line-clamp-2">
               {project.nextActionSource === "advisor" && (
-                <span className="mr-1.5 rounded border border-ion/30 px-1 py-px align-[1px] font-mono text-[10px] uppercase tracking-wider text-ion">
+                <span className="mr-1.5 rounded border border-ion/30 px-1 py-px align-[1px] font-mono text-[10.5px] text-ion">
                   advisor
                 </span>
               )}
@@ -113,30 +111,30 @@ function ProjectCard({
             </span>
           </p>
         ) : project.description ? (
-          <p className="mt-1.5 line-clamp-2 text-sm leading-snug text-ink-dim">
+          <p className="mt-2 line-clamp-2 text-[13px] leading-snug text-ink-dim">
             {project.description}
           </p>
         ) : null}
 
-        <div className="mt-4">
+        <div className="mt-auto pt-4">
           {/* No work items yet: a dashed track + "not started", not an empty 0/0 bar. */}
           {total === 0 ? (
-            <div className="h-1.5 rounded-full border border-dashed border-white/10" />
+            <div className="h-1.5 rounded-full border border-dashed border-ion/15" />
           ) : (
-          <div className="h-1.5 overflow-hidden rounded-full bg-white/6">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${pct}%` }}
-              transition={{ type: "spring", stiffness: 120, damping: 24 }}
-              className="h-full rounded-full bg-gradient-to-r from-plasma-dim to-plasma"
-            />
-          </div>
+            <div className="wk-bar !h-1.5">
+              <motion.b
+                initial={{ width: 0 }}
+                animate={{ width: `${pct}%` }}
+                transition={{ type: "spring", stiffness: 120, damping: 24 }}
+                className="rounded-full bg-plasma"
+              />
+            </div>
           )}
-          <div className="mt-1.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+          <div className="mt-2 flex items-center justify-between font-mono text-[11px] text-ink-faint">
             <span>{lastActiveLabel(project.lastActivityAt)}</span>
             <span className="tabular-nums">
               {overdue > 0 && <span className="text-flare">{overdue} overdue · </span>}
-              {total === 0 ? "not started" : `${done}/${total} tasks`}
+              {total === 0 ? "no items yet" : `${done}/${total} done · ${pct}%`}
             </span>
           </div>
         </div>
@@ -153,7 +151,7 @@ function ProjectSection({
   muted?: boolean;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 xl:grid-cols-3">
       <AnimatePresence mode="popLayout">
         {projects.map((p) => (
           <ProjectCard key={p.id} project={p} muted={muted} />
@@ -173,11 +171,9 @@ function InactiveProjects({ projects }: { projects: ProjectCockpit[] }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="mb-3 flex w-full items-center gap-2 border-t border-white/6 pt-5 text-left"
+        className="mb-3 flex w-full items-center gap-2 border-t border-ion/10 pt-5 text-left"
       >
-        <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
-          paused · done · archived
-        </span>
+        <span className="wk-sec-h">Paused · done · archived</span>
         <span className="font-mono text-xs tabular-nums text-ink-faint">
           {projects.length}
         </span>
@@ -198,9 +194,7 @@ function GroupHeader({ label, count, color }: { label: string; count: number; co
   return (
     <div className="mb-3 flex items-center gap-2 px-1">
       {color && <span className="size-2 rounded-full" style={{ background: color }} />}
-      <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink-dim">
-        {label}
-      </span>
+      <span className="wk-sec-h !text-ink-dim">{label}</span>
       <span className="font-mono text-xs tabular-nums text-ink-faint">{count}</span>
     </div>
   );
@@ -221,7 +215,7 @@ function CategoryGroup({ name, items }: { name: string; items: ProjectCockpit[] 
           <GripVertical className="size-3.5" />
         </button>
         <span className="size-2 rounded-full" style={{ background: categoryColor(name) }} />
-        <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink-dim">{name}</span>
+        <span className="wk-sec-h !text-ink-dim">{name}</span>
         <span className="font-mono text-xs tabular-nums text-ink-faint">{items.length}</span>
       </div>
       <ProjectSection projects={items} />
@@ -278,9 +272,43 @@ export function ProjectGrid({
     });
   };
 
+  const overdueTotal = projects.reduce((n, p) => n + (p.status === "active" ? p.taskCounts.overdue : 0), 0);
+  const openTotal = projects.reduce((n, p) => n + (p.status === "active" ? p.taskCounts.open : 0), 0);
+
   return (
     <div>
-      <NewProjectForm />
+      <header className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div className="min-w-0">
+          <div className="font-mono text-xs text-ink-faint">
+            <Link href="/m/tasks" className="transition hover:text-ink">
+              Work
+            </Link>{" "}
+            / Projects
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2.5">
+            <h2 className="font-display text-[26px] font-semibold leading-tight tracking-[0.02em] text-ink">Projects</h2>
+            <span className="wk-chip">
+              <span className="font-mono tabular-nums text-ink">{activeCount}</span> active
+            </span>
+            <span className="wk-chip">
+              <span className="font-mono tabular-nums text-ink">{openTotal}</span> open items
+            </span>
+            {overdueTotal > 0 && (
+              <span className="wk-chip" style={{ color: "var(--color-flare)", borderColor: "color-mix(in oklab, var(--color-flare) 35%, transparent)" }}>
+                <span className="dot" />
+                {overdueTotal} overdue
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex-1" />
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/m/tasks" className="wk-btn">
+            <ListChecks className="size-3.5 text-ion" /> All work
+          </Link>
+          <NewProjectForm />
+        </div>
+      </header>
 
       <div className="flex flex-col gap-7">
         <Reorder.Group axis="y" values={display} onReorder={handleReorder} className="flex flex-col gap-7">
@@ -299,12 +327,10 @@ export function ProjectGrid({
         )}
 
         {areas.length > 0 && (
-          <div className="border-t border-white/8 pt-6">
+          <div className="border-t border-ion/12 pt-6">
             <div className="mb-3 flex items-center gap-2 px-1">
               <Compass className="size-3.5 text-plasma" />
-              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-plasma">
-                Areas of development
-              </span>
+              <span className="wk-sec-h !text-plasma">Areas of development</span>
               <span className="font-mono text-xs tabular-nums text-ink-faint">
                 {areas.length}
               </span>
@@ -315,12 +341,12 @@ export function ProjectGrid({
       </div>
 
       {projects.length === 0 && (
-        <div className="rounded-xl border border-dashed border-white/6 py-12 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+        <div className="rounded-xl border border-dashed border-ion/10 py-12 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
           no projects yet — start one above
         </div>
       )}
       {projects.length > 0 && activeCount === 0 && (
-        <div className="rounded-xl border border-dashed border-white/6 py-8 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+        <div className="rounded-xl border border-dashed border-ion/10 py-8 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
           no active projects — see paused/done/archived below
         </div>
       )}

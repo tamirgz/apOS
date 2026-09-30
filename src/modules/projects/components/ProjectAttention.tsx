@@ -68,7 +68,7 @@ export function ProjectAttention({ items }: { items: Item[] }) {
                 title="Dismiss — not relevant"
                 disabled={pending}
                 onClick={() => resolve(dismissAttention, a.id)}
-                className="rounded-md p-1.5 text-ink-faint transition hover:bg-white/6 hover:text-ink disabled:opacity-40"
+                className="rounded-md p-1.5 text-ink-faint transition hover:bg-ink/6 hover:text-ink disabled:opacity-40"
               >
                 <X className="size-3.5" />
               </button>

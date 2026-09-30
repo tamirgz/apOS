@@ -25,6 +25,7 @@ import { ProjectFiles } from "../components/ProjectFiles";
 import { StatusCycleButton } from "../components/StatusCycleButton";
 import { ProjectTitle } from "../components/ProjectTitle";
 import { WorkView } from "../../tasks/components/WorkView";
+import { MilestoneStrip } from "../../tasks/components/MilestonesView";
 import { loadWorkData } from "../../tasks/queries";
 import { listProjectFiles } from "../files-actions";
 
@@ -129,6 +130,7 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
         overview={
           <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,1fr)]">
             <div className="flex min-w-0 flex-col gap-5">
+              <MilestoneStrip bundle={work.milestones} items={work.items} />
               <ProjectPlan
                 id={project.id}
                 goal={project.goal}

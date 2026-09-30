@@ -22,9 +22,9 @@ const { db, sql } = await import("@/core/db/client");
 type AiToolContext = import("@/core/modules/types.server").AiToolContext;
 type ZodObject = import("zod").ZodObject<import("zod").ZodRawShape>;
 
-/** The work-tracker surface: everything under tasks./cycles./modules., plus project basics. */
+/** The work-tracker surface: everything under tasks./cycles./modules./milestones., plus project basics. */
 const EXPOSED = (name: string) =>
-  /^(tasks|cycles|modules)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
+  /^(tasks|cycles|modules|milestones)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
 
 const actor = process.env.APOS_ACTOR?.trim() || "mcp";
 // One context for the whole session, so list refs (t1, c1, m1) stay valid across calls.
@@ -34,8 +34,9 @@ const server = new McpServer(
   { name: "apos", version: "1.0.0" },
   {
     instructions:
-      "apOS work tracker. Work items have identifiers like ETHOS-12 (project key + number); list tools also return short refs (t3, c1, m2) valid for this session. " +
+      "apOS work tracker. Work items have identifiers like ETHOS-12 (project key + number); list tools also return short refs (t3, c1, m2, ms1) valid for this session. " +
       "States: backlog → todo → doing → review → done (or cancelled). Modules are a project's features (start → target, status planned/active/paused/shipped/cancelled); cycles are time-boxed sprints. " +
+      "Milestones are a project's named product stages (e.g. Visibility → MVP), each built from capabilities and delivery content: whole modules, single items from partly-in-scope modules, other milestones and any other apOS entity; their progress, forecast and readiness are computed from that content. " +
       "Name projects by NAME or key, never by id. When you commit code for an item, put its identifier in the commit message — apOS links the commit to it.",
   },
 );

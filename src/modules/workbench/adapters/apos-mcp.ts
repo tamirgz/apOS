@@ -24,6 +24,8 @@ const RUN_TOOLS = [
   "tasks__unrelate",
   "cycles__list",
   "modules__list",
+  "milestones__list",
+  "milestones__get",
   "projects__list",
 ];
 

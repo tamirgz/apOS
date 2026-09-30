@@ -3,6 +3,7 @@ import {
   doublePrecision,
   index,
   integer,
+  boolean,
   jsonb,
   pgTable,
   text,
@@ -241,3 +242,96 @@ export const workViews = pgTable(
 );
 
 export type WorkView = typeof workViews.$inferSelect;
+
+/**
+ * Milestones — a named product stage (Visibility, MVP, …) in one project,
+ * made of capabilities and delivery content. Unlike a module (one feature's
+ * items) a milestone cuts across modules: it takes whole modules, single
+ * items from partly-in-scope modules, other milestones, and any other apOS
+ * entity. Progress is resolved from the content at read time.
+ */
+export const MILESTONE_STATUSES = ["planned", "active", "done", "cancelled"] as const;
+export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
+
+/** One exit criterion — a checkbox the milestone must tick besides its content. */
+export interface MilestoneCriterion {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
+export const milestones = pgTable(
+  "milestones",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    name: text("name").notNull(),
+    /** The goal — what reaching this stage means, markdown. */
+    description: text("description"),
+    status: text("status", { enum: MILESTONE_STATUSES }).notNull().default("planned"),
+    targetAt: timestamp("target_at", { withTimezone: true }),
+    /** Milestones that must be reached first (the readiness gate). No FK. */
+    requires: uuid("requires").array().notNull().default(sql`'{}'::uuid[]`),
+    criteria: jsonb("criteria").$type<MilestoneCriterion[]>().notNull().default([]),
+    /** Order on the project's roadmap — Visibility before MVP. */
+    sortOrder: integer("sort_order").notNull().default(0),
+    doneAt: timestamp("done_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("milestones_project").on(t.projectId)],
+);
+
+export type Milestone = typeof milestones.$inferSelect;
+
+/** A named capability inside a milestone — the unit its content is grouped by. */
+export const milestoneCapabilities = pgTable(
+  "milestone_capabilities",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    milestoneId: uuid("milestone_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("milestone_capabilities_milestone").on(t.milestoneId)],
+);
+
+export type MilestoneCapability = typeof milestoneCapabilities.$inferSelect;
+
+/**
+ * What a milestone delivers, one row each:
+ *   module     a whole module — its items, live (items filed later count too)
+ *   item       one work item (task, bug, phase…)
+ *   milestone  another milestone's whole scope (the MVP contains Visibility)
+ *   entity     any other apOS entity (a note, a knowledge item…), with its own
+ *              done flag; `entityKind` is its search-index kind
+ * `exclude` takes a module or item OUT of what the rest brings in — "all of
+ * S17 except S17.9". `label` snapshots the title for entities.
+ */
+export const MILESTONE_CONTENT_KINDS = ["module", "item", "milestone", "entity"] as const;
+export type MilestoneContentKind = (typeof MILESTONE_CONTENT_KINDS)[number];
+
+export const milestoneContent = pgTable(
+  "milestone_content",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    milestoneId: uuid("milestone_id").notNull(),
+    capabilityId: uuid("capability_id"),
+    kind: text("kind", { enum: MILESTONE_CONTENT_KINDS }).notNull(),
+    targetId: text("target_id").notNull(),
+    entityKind: text("entity_kind"),
+    label: text("label"),
+    exclude: boolean("exclude").notNull().default(false),
+    done: boolean("done").notNull().default(false),
+    doneAt: timestamp("done_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("milestone_content_target").on(t.milestoneId, t.kind, t.targetId),
+    index("milestone_content_capability").on(t.capabilityId),
+  ],
+);
+
+export type MilestoneContent = typeof milestoneContent.$inferSelect;

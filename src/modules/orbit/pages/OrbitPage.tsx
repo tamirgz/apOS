@@ -1,5 +1,6 @@
 import { orbitGraph } from "../queries";
 import { OrbitGraph } from "../components/OrbitGraph";
+import { packOrbit } from "../wire";
 import { SectionTabs } from "@/core/ui/SectionTabs";
 
 export async function OrbitPage() {
@@ -7,7 +8,7 @@ export async function OrbitPage() {
   return (
     <>
       <SectionTabs section="library" />
-      <OrbitGraph data={data} />
+      <OrbitGraph wire={packOrbit(data)} />
     </>
   );
 }

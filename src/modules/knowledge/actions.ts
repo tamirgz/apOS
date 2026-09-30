@@ -1,6 +1,6 @@
 "use server";
 
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, getTableColumns } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
 import { recordUsage } from "@/core/usage";
@@ -9,10 +9,12 @@ import { findDuplicateKnowledge, type KnowledgeDuplicate } from "./dedup";
 import { knowledgeItems, type KnowledgeItem } from "./schema";
 
 export async function listKnowledge() {
-  return db
-    .select()
-    .from(knowledgeItems)
-    .orderBy(desc(knowledgeItems.createdAt));
+  // `raw` is the fetched source (a README, a page's text) — the bulk of the
+  // board's payload, and only the item's own page shows it.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped from the select on purpose
+  const { raw: _raw, ...cols } = getTableColumns(knowledgeItems);
+  const rows = await db.select(cols).from(knowledgeItems).orderBy(desc(knowledgeItems.createdAt));
+  return rows.map((r) => ({ ...r, raw: null }));
 }
 
 export type CaptureResult =

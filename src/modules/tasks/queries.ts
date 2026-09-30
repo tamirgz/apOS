@@ -53,7 +53,9 @@ export interface WorkData {
 /** Everything a Work view needs: items (+identifiers), the project picker, features. */
 export async function loadWorkData(projectId?: string): Promise<WorkData> {
   const [items, projectRows, featureRows, cycleRows, blocked, wbLinks, views, depRows, commitRows] = await Promise.all([
-    listWorkItems(db, { projectId }),
+    // Descriptions are ~60% of the table's bytes and only the drawer shows one
+    // (it loads its item fresh), so the list goes without.
+    listWorkItems(db, { projectId, notes: false }),
     db
       .select({ id: projects.id, name: projects.name, key: projects.key, kind: projects.kind })
       .from(projects)

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { and, asc, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { ACTIVE_STATUSES, cycles, priorityRank, tasks } from "../schema";
-import { withIdentifiers } from "../core";
+import { identifierOf, projectKeyMap } from "../core";
 import { STATUS_META, displayTitle } from "../states";
 import { cn } from "@/core/ui/cn";
 
@@ -26,23 +26,24 @@ function dueLabel(dueAt: Date | null, now: number): string | null {
 
 export async function UpNextWidget() {
   const now = new Date();
-  // Current cycles (derived from dates) — their items outrank the open pool.
-  const current = await db
-    .select({ id: cycles.id })
-    .from(cycles)
-    .where(and(lte(cycles.startsAt, now), gte(cycles.endsAt, now)));
-  const cycleIds = current.map((c) => c.id);
-  const inCycle = cycleIds.length
-    ? sql`${tasks.cycleId} in (${sql.join(cycleIds.map((id) => sql`${id}`), sql`, `)})`
-    : sql`false`;
   const soon = new Date(now.getTime() + 3 * DAY);
+  const nowIso = now.toISOString();
+  // Current cycles (derived from dates) — their items outrank the open pool.
+  // A subquery rather than a first round trip: cycles, items and project keys
+  // all come back together (the DB is remote — each trip is ~60 ms).
+  const inCycle = sql`${tasks.cycleId} in (select ${cycles.id} from ${cycles}
+    where ${cycles.startsAt} <= ${nowIso}::timestamptz and ${cycles.endsAt} >= ${nowIso}::timestamptz)`;
 
   // The work in play, committed items only (not the backlog): review, then
   // in progress, then overdue / due within 3 days, then the current cycle,
   // then priority.
-  const rows = await withIdentifiers(
-    db,
-    await db
+  const [current, keys, picked] = await Promise.all([
+    db
+      .select({ id: cycles.id })
+      .from(cycles)
+      .where(and(lte(cycles.startsAt, now), gte(cycles.endsAt, now))),
+    projectKeyMap(db),
+    db
       .select()
       .from(tasks)
       .where(inArray(tasks.status, [...ACTIVE_STATUSES]))
@@ -54,7 +55,9 @@ export async function UpNextWidget() {
         asc(tasks.sortOrder),
       )
       .limit(5),
-  );
+  ]);
+  const cycleIds = current.map((c) => c.id);
+  const rows = picked.map((t) => ({ ...t, identifier: identifierOf(t, keys) }));
   const inCycleSet = new Set(cycleIds);
 
   if (rows.length === 0) {

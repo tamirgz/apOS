@@ -4,7 +4,7 @@
  *
  * Worker-safe: db passed in.
  */
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import type { Db } from "@/core/db/client";
 import { cycles, isClosed, tasks, type Cycle } from "./schema";
 
@@ -54,22 +54,26 @@ export function burndown(
 }
 
 export async function listCycles(db: Db, opts: { projectId?: string } = {}): Promise<CycleSummary[]> {
-  const rows = await db
-    .select()
-    .from(cycles)
-    .where(opts.projectId ? eq(cycles.projectId, opts.projectId) : undefined)
-    .orderBy(desc(cycles.startsAt));
+  // One round trip: every planned item's few columns come with the cycles
+  // rather than after them (the DB is remote — each trip is ~60 ms).
+  const [rows, members] = await Promise.all([
+    db
+      .select()
+      .from(cycles)
+      .where(opts.projectId ? eq(cycles.projectId, opts.projectId) : undefined)
+      .orderBy(desc(cycles.startsAt)),
+    db
+      .select({
+        cycleId: tasks.cycleId,
+        status: tasks.status,
+        estimate: tasks.estimate,
+        createdAt: tasks.createdAt,
+        completedAt: tasks.completedAt,
+      })
+      .from(tasks)
+      .where(isNotNull(tasks.cycleId)),
+  ]);
   if (!rows.length) return [];
-  const members = await db
-    .select({
-      cycleId: tasks.cycleId,
-      status: tasks.status,
-      estimate: tasks.estimate,
-      createdAt: tasks.createdAt,
-      completedAt: tasks.completedAt,
-    })
-    .from(tasks)
-    .where(inArray(tasks.cycleId, rows.map((c) => c.id)));
   const now = Date.now();
   return rows.map((c) => {
     const items = members.filter((m) => m.cycleId === c.id && m.status !== "cancelled");

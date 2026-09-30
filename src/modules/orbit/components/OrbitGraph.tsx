@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { errorText, failed } from "@/core/ui/feedback";
-import type { OrbitGraph as Graph, OrbitNode, OrbitRegion } from "../queries";
+import type { OrbitNode, OrbitRegion } from "../queries";
+import { unpackOrbit, type OrbitWire } from "../wire";
 
 // One colour per source kind — the legend and the stars share this map.
 const KIND_COLORS: Record<string, string> = {
@@ -123,7 +124,8 @@ type GNode = OrbitNode & {
   fz?: number;
 };
 
-export function OrbitGraph({ data }: { data: Graph }) {
+export function OrbitGraph({ wire }: { wire: OrbitWire }) {
+  const data = useMemo(() => unpackOrbit(wire), [wire]);
   const router = useRouter();
   const holderRef = useRef<HTMLDivElement>(null);
   // Overlay for per-node labels that appear when you zoom into the map.
@@ -434,14 +436,28 @@ export function OrbitGraph({ data }: { data: Graph }) {
       disposed = true;
       if (onResize) window.removeEventListener("resize", onResize);
       if (g) {
+        const graph = g;
+        const objs = atlasObjsRef.current;
+        atlasObjsRef.current = [];
         try {
-          g.__ro?.disconnect?.();
-          clearAtlasObjects(g.scene?.() ?? { remove() {} }, atlasObjsRef.current);
-          atlasObjsRef.current = [];
-          g._destructor?.();
+          graph.__ro?.disconnect?.();
+          graph.pauseAnimation?.();
         } catch {
           /* best effort */
         }
+        // Disposing thousands of meshes blocks the main thread for hundreds of
+        // ms; done inline, the page you're navigating TO couldn't paint until it
+        // finished. Pause now, tear down after the next frame is on screen.
+        requestAnimationFrame(() =>
+          setTimeout(() => {
+            try {
+              clearAtlasObjects(graph.scene?.() ?? { remove() {} }, objs);
+              graph._destructor?.();
+            } catch {
+              /* best effort */
+            }
+          }, 0),
+        );
       }
       graphRef.current = null;
     };

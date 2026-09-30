@@ -1,5 +1,6 @@
 "use client";
 
+import { act } from "@/core/ui/feedback";
 import { useTransition } from "react";
 import { RefreshCw } from "lucide-react";
 import { cn } from "@/core/ui/cn";
@@ -57,7 +58,7 @@ export function VaultControls({
         disabled={pending}
         onClick={() =>
           startTransition(async () => {
-            await requestVaultSync();
+            await act(requestVaultSync, { failed: "Couldn't start the vault sync", done: "Vault sync started" });
           })
         }
         className="ml-auto flex items-center gap-1.5 rounded-lg border border-violet/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-violet transition hover:bg-violet/10 disabled:opacity-40"

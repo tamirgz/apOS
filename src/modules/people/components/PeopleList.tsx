@@ -1,5 +1,6 @@
 "use client";
 
+import { act } from "@/core/ui/feedback";
 import { displayName } from "../display";
 import { dayAgo } from "@/core/ui/time";
 
@@ -34,7 +35,14 @@ export function PeopleList({ people }: { people: PersonWithFollowups[] }) {
         </p>
         <button
           type="button"
-          onClick={() => start(async () => void (await resyncPeople()))}
+          onClick={() =>
+            start(async () =>
+              void (await act(resyncPeople, {
+                failed: "Couldn't sync people",
+                done: (r) => `People synced · ${r.synced} from your calendar`,
+              })),
+            )
+          }
           disabled={pending}
           className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:bg-white/5 disabled:opacity-40"
         >

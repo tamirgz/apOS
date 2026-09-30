@@ -187,7 +187,14 @@ export function TelegramView({
                   <button
                     type="button"
                     disabled={pending}
-                    onClick={() => start(async () => void (await ingestNow(c.id)))}
+                    onClick={() =>
+                      start(async () =>
+                        void (await act(() => ingestNow(c.id), {
+                          failed: "Couldn't start the ingest",
+                          done: `Ingesting @${c.username}`,
+                        })),
+                      )
+                    }
                     title="Ingest now"
                     className="rounded-md p-1.5 text-ink-faint transition hover:text-ion"
                   >

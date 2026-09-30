@@ -1,5 +1,6 @@
 "use client";
 
+import { act } from "@/core/ui/feedback";
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -228,7 +229,10 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
             onSubmit={(e) => {
               e.preventDefault();
               startTransition(async () => {
-                await updateIdeaNotes(idea.id, notesRef.current?.value ?? "");
+                await act(() => updateIdeaNotes(idea.id, notesRef.current?.value ?? ""), {
+                  failed: "Couldn't save the notes",
+                  done: "Notes saved",
+                });
               });
             }}
             className="flex flex-col gap-2"

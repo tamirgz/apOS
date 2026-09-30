@@ -356,7 +356,8 @@ export function ModuleHeader({
     setArmed(k);
     setTimeout(() => setArmed((a) => (a === k ? null : a)), 4000);
   };
-  const save = (patch: Parameters<typeof updateFeature>[2]) => run(() => updateFeature(f.id, f.projectId, patch));
+  const save = (patch: Parameters<typeof updateFeature>[2], saved?: string) =>
+    run(() => updateFeature(f.id, f.projectId, patch), saved ? () => done(saved) : undefined);
   const day = (v: string) => (v ? new Date(`${v}T12:00:00`) : null);
 
   return (
@@ -414,7 +415,7 @@ export function ModuleHeader({
             dir="auto"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onBlur={() => name.trim() && name.trim() !== f.name && save({ name })}
+            onBlur={() => name.trim() && name.trim() !== f.name && save({ name }, "Module renamed")}
             onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
             aria-label="Module name"
             className="rounded-lg bg-transparent px-1 font-display text-xl text-ink outline-none transition hover:bg-white/4 focus:bg-white/6"
@@ -423,7 +424,7 @@ export function ModuleHeader({
             dir="auto"
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
-            onBlur={() => desc.trim() !== (f.description ?? "").trim() && save({ description: desc })}
+            onBlur={() => desc.trim() !== (f.description ?? "").trim() && save({ description: desc }, "Description saved")}
             placeholder="What ships in this module, and when it counts as done…"
             aria-label="Description"
             rows={Math.min(6, Math.max(2, desc.split("\n").length))}

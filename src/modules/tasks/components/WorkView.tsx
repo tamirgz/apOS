@@ -359,7 +359,11 @@ export function WorkView({
     <div className="flex flex-col gap-4">
       <Header head={header} onNew={() => setCreating(true)} />
 
-      <nav className="-mx-1 flex items-center gap-1 overflow-x-auto border-b wk-line px-1" role="tablist" aria-label="Sections">
+      <nav
+        className="-mx-1 flex items-center gap-1 overflow-x-auto overflow-y-hidden px-1 shadow-[inset_0_-1px_0_color-mix(in_oklab,var(--color-ion)_12%,transparent)]"
+        role="tablist"
+        aria-label="Sections"
+      >
         {sections.map((t) => (
           <button
             key={t.id}
@@ -368,7 +372,7 @@ export function WorkView({
             aria-selected={t.active}
             onClick={() => go({ tab: t.id, module: null, cycle: null })}
             className={cn(
-              "-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] transition",
+              "flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] transition",
               t.active ? "border-plasma text-ink" : "border-transparent text-ink-faint hover:text-ink-dim",
             )}
           >

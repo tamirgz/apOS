@@ -10,6 +10,7 @@ import {
   ChartGantt,
   Columns3,
   Download,
+  Flag,
   Gauge,
   Kanban,
   Layers,
@@ -32,6 +33,7 @@ import { CalendarView } from "./CalendarView";
 import { CycleHeader, CyclesView, nextCycleFor } from "./CyclePanel";
 import { CycleStrip } from "./CycleStrip";
 import { ListView } from "./ListView";
+import { MilestonePage, MilestonesView } from "./MilestonesView";
 import { ModuleHeader, ModulesView } from "./ModulesView";
 import { MyWork } from "./MyWork";
 import { PlaneImport } from "./PlaneImport";
@@ -45,7 +47,7 @@ const DAY = 86_400_000;
 
 // ── URL state ──────────────────────────────────────────────────────────────
 
-type Tab = "items" | "cycles" | "modules" | "timeline" | "mywork" | "overview";
+type Tab = "items" | "cycles" | "modules" | "milestones" | "timeline" | "mywork" | "overview";
 type Layout = "board" | "list" | "calendar";
 const LAYOUTS: Layout[] = ["board", "list", "calendar"];
 
@@ -61,6 +63,7 @@ function useWorkUrl(hasOverview: boolean, hasMyWork: boolean) {
     "items",
     "cycles",
     "modules",
+    "milestones",
     "timeline",
     ...(hasMyWork ? (["mywork"] as Tab[]) : []),
     ...(hasOverview ? (["overview"] as Tab[]) : []),
@@ -68,12 +71,12 @@ function useWorkUrl(hasOverview: boolean, hasMyWork: boolean) {
   const fallback: Tab = hasOverview ? "overview" : "items";
   const tab: Tab = raw && (tabs as string[]).includes(raw) ? (raw as Tab) : fallback;
   const go = useCallback(
-    (next: { tab?: Tab; module?: string | null; cycle?: string | null }) => {
+    (next: { tab?: Tab; module?: string | null; cycle?: string | null; milestone?: string | null }) => {
       const p = new URLSearchParams(sp.toString());
       const t = next.tab ?? tab;
       if (t === fallback) p.delete("tab");
       else p.set("tab", t);
-      for (const k of ["module", "cycle"] as const) {
+      for (const k of ["module", "cycle", "milestone"] as const) {
         const v = next[k];
         if (v === undefined && next.tab && next.tab !== tab) p.delete(k);
         else if (v === null) p.delete(k);
@@ -84,7 +87,13 @@ function useWorkUrl(hasOverview: boolean, hasMyWork: boolean) {
     },
     [sp, tab, fallback],
   );
-  return { tab, moduleId: tab === "modules" ? sp.get("module") : null, cycleId: tab === "cycles" ? sp.get("cycle") : null, go };
+  return {
+    tab,
+    moduleId: tab === "modules" ? sp.get("module") : null,
+    cycleId: tab === "cycles" ? sp.get("cycle") : null,
+    milestoneId: tab === "milestones" ? sp.get("milestone") : null,
+    go,
+  };
 }
 
 // ── header ─────────────────────────────────────────────────────────────────
@@ -170,7 +179,7 @@ export function WorkView({
   }
   const now = useNow();
   const [, startMove] = useTransition();
-  const { tab, moduleId, cycleId, go } = useWorkUrl(!!overview, !projectId);
+  const { tab, moduleId, cycleId, milestoneId, go } = useWorkUrl(!!overview, !projectId);
 
   const prefKey = projectId ? "work.layout.project" : "work.layout.all";
   const [layout, setLayout] = useState<Layout>("board");
@@ -209,6 +218,7 @@ export function WorkView({
 
   const openModule = moduleId ? data.features.find((f) => f.id === moduleId) : undefined;
   const openCycle = cycleId ? data.cycles.find((c) => c.id === cycleId) : undefined;
+  const openMilestone = milestoneId ? data.milestones.milestones.find((m) => m.id === milestoneId) : undefined;
   // The item surface shows on Work items and on a module / cycle page.
   const itemSurface = tab === "items" || !!openModule || !!openCycle;
   const workSurface = itemSurface || tab === "timeline" || tab === "mywork";
@@ -291,6 +301,13 @@ export function WorkView({
     { id: "items", label: "Work items", icon: Kanban, count: openItems.length, active: workSurface && !openModule && !openCycle },
     { id: "cycles", label: "Cycles", icon: Repeat, count: data.cycles.filter((c) => c.status !== "completed").length, active: tab === "cycles" },
     { id: "modules", label: "Modules", icon: Layers, count: liveFeatures.length, active: tab === "modules" },
+    {
+      id: "milestones",
+      label: "Milestones",
+      icon: Flag,
+      count: data.milestones.milestones.filter((m) => m.status === "planned" || m.status === "active").length,
+      active: tab === "milestones",
+    },
   ];
 
   // The all-work page's own header; a project page passes its own.
@@ -370,7 +387,7 @@ export function WorkView({
             type="button"
             role="tab"
             aria-selected={t.active}
-            onClick={() => go({ tab: t.id, module: null, cycle: null })}
+            onClick={() => go({ tab: t.id, module: null, cycle: null, milestone: null })}
             className={cn(
               "flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] transition",
               t.active ? "border-plasma text-ink" : "border-transparent text-ink-faint hover:text-ink-dim",
@@ -396,6 +413,28 @@ export function WorkView({
           onBack={() => go({ module: null })}
           onDeleted={() => go({ module: null })}
         />
+      )}
+
+      {tab === "milestones" && !openMilestone && (
+        <MilestonesView bundle={data.milestones} items={items} projects={data.projects} projectId={projectId} onOpen={(id) => go({ milestone: id })} />
+      )}
+      {openMilestone && (
+        <div className="flex items-start gap-4">
+          <div className="min-w-0 flex-1">
+            <MilestonePage
+              key={openMilestone.id}
+              m={openMilestone}
+              bundle={data.milestones}
+              items={items}
+              features={data.features}
+              onBack={() => go({ milestone: null })}
+              onOpenItem={setOpenId}
+              onOpenModule={(id) => go({ tab: "modules", module: id })}
+              onOpenMilestone={(id) => go({ milestone: id })}
+            />
+          </div>
+          {drawer}
+        </div>
       )}
 
       {tab === "cycles" && !openCycle && (

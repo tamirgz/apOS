@@ -3,6 +3,8 @@ import { db } from "@/core/db/client";
 import { features, projects, type FeatureStatus } from "@/modules/projects/schema";
 import { blockedItemIds, listWorkItems, type WorkItem } from "./core";
 import { listCycles, type CycleSummary } from "./cycles";
+import type { MilestoneBundle } from "./milestone-scope";
+import { loadMilestoneBundle } from "./milestones";
 import { taskLinks, workViews, type WorkView } from "./schema";
 
 export interface WorkProject {
@@ -48,11 +50,13 @@ export interface WorkData {
   commits: Record<string, WorkCommit>;
   /** The newest linked commits, newest first — the "Repo" line of the cycle strip. */
   recentCommits: (WorkCommit & { taskId: string })[];
+  /** Milestones (named product stages) with their capabilities and content rows. */
+  milestones: MilestoneBundle;
 }
 
 /** Everything a Work view needs: items (+identifiers), the project picker, features. */
 export async function loadWorkData(projectId?: string): Promise<WorkData> {
-  const [items, projectRows, featureRows, cycleRows, blocked, wbLinks, views, depRows, commitRows] = await Promise.all([
+  const [items, projectRows, featureRows, cycleRows, blocked, wbLinks, views, depRows, commitRows, milestoneBundle] = await Promise.all([
     // Descriptions are ~60% of the table's bytes and only the drawer shows one
     // (it loads its item fresh), so the list goes without.
     listWorkItems(db, { projectId, notes: false }),
@@ -103,6 +107,7 @@ export async function loadWorkData(projectId?: string): Promise<WorkData> {
       .where(eq(taskLinks.kind, "commit"))
       .orderBy(desc(taskLinks.createdAt))
       .limit(500),
+    loadMilestoneBundle(db, projectId),
   ]);
   const inScope = new Set(items.map((t) => t.id));
   const commits: Record<string, WorkCommit> = {};
@@ -126,5 +131,6 @@ export async function loadWorkData(projectId?: string): Promise<WorkData> {
     deps: [...depRows].map((r) => ({ from: r.from, to: r.to })),
     commits,
     recentCommits,
+    milestones: milestoneBundle,
   };
 }

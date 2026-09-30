@@ -40,8 +40,8 @@ export function CategoryPicker({
           "flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest transition",
           pending && "opacity-50",
           category
-            ? "text-ink-dim hover:bg-white/5"
-            : "border-dashed border-white/15 text-ink-faint hover:text-ink-dim",
+            ? "text-ink-dim hover:bg-ink/5"
+            : "border-dashed border-ion/22 text-ink-faint hover:text-ink-dim",
         )}
         style={category ? { borderColor: `color-mix(in oklab, ${categoryColor(category)} 45%, transparent)` } : undefined}
       >
@@ -67,7 +67,7 @@ export function CategoryPicker({
                   key={c}
                   type="button"
                   onClick={() => set(c)}
-                  className="flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-dim transition hover:bg-white/5"
+                  className="flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-dim transition hover:bg-ink/5"
                   style={{ borderColor: `color-mix(in oklab, ${categoryColor(c)} 40%, transparent)` }}
                 >
                   <span className="size-1.5 rounded-full" style={{ background: categoryColor(c) }} />
@@ -86,14 +86,14 @@ export function CategoryPicker({
                 const v = draft.trim();
                 if (v) set(v);
               }}
-              className="mt-2 flex items-center gap-1 border-t border-white/6 pt-2"
+              className="mt-2 flex items-center gap-1 border-t border-ion/10 pt-2"
             >
               <input
                 autoFocus
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder="New category…"
-                className="h-7 flex-1 rounded-md bg-white/5 px-2 text-xs text-ink outline-none placeholder:text-ink-faint focus:bg-white/8"
+                className="h-7 flex-1 rounded-md bg-ink/5 px-2 text-xs text-ink outline-none placeholder:text-ink-faint focus:bg-ink/8"
               />
               {category && (
                 <button

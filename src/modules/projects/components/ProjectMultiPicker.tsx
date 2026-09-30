@@ -110,12 +110,12 @@ export function ProjectMultiPicker({
             key={o.id}
             type="button"
             onClick={() => toggle(o.id)}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink-dim transition hover:bg-white/6"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink-dim transition hover:bg-ink/6"
           >
             <span
               className={cn(
                 "flex size-4 shrink-0 items-center justify-center rounded border",
-                on ? "border-plasma bg-plasma/25 text-plasma" : "border-white/15",
+                on ? "border-plasma bg-plasma/25 text-plasma" : "border-ion/22",
               )}
             >
               {on && <Check className="size-3" />}
@@ -138,7 +138,7 @@ export function ProjectMultiPicker({
         }}
         title="File this under one or more projects / areas of development"
         className={cn(
-          "flex max-w-[240px] items-center gap-1.5 rounded-lg border border-white/10 bg-abyss/60 px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition hover:border-plasma/40",
+          "flex max-w-[240px] items-center gap-1.5 rounded-lg border border-ion/15 bg-abyss/60 px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition hover:border-plasma/40",
           selectedNames.length ? "text-ink-dim" : "text-ink-faint",
           pending && "opacity-50",
         )}
@@ -155,7 +155,7 @@ export function ProjectMultiPicker({
           <div
             ref={menuRef}
             style={{ position: "fixed", top: coords.top, left: coords.left, width: MENU_W }}
-            className="z-[100] max-h-80 overflow-auto rounded-lg border border-white/10 bg-abyss p-1 shadow-xl shadow-black/40"
+            className="z-[100] max-h-80 overflow-auto rounded-lg border border-ion/15 bg-abyss p-1 shadow-xl shadow-black/40"
           >
             {areas.length > 0 && group("Areas of development", areas)}
             {projects.length > 0 && group("Projects", projects)}

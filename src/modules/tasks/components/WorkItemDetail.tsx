@@ -2,10 +2,35 @@
 
 import { act as runAction, done, errorText, failed, resultError } from "@/core/ui/feedback";
 import Link from "next/link";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
-import { ArrowUpRight, Bot, CornerDownRight, GitCommitHorizontal, Layers, Link2, MessageSquare, Plus, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import {
+  ArrowUpRight,
+  Bot,
+  Box,
+  CalendarClock,
+  CalendarPlus,
+  Check,
+  CircleDot,
+  Copy,
+  CornerDownRight,
+  FolderKanban,
+  GitBranch,
+  GitCommitHorizontal,
+  Hash,
+  Layers,
+  Pencil,
+  Plus,
+  Repeat,
+  Signal,
+  Sparkles,
+  Trash2,
+  User,
+  X,
+} from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { Markdown } from "@/core/ui/Markdown";
 import { timeAgo } from "@/core/ui/time";
+import { useNow } from "@/core/ui/useNow";
 import {
   addTaskComment,
   createTask,
@@ -20,6 +45,7 @@ import type { WorkItemPatch } from "../core";
 import { TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } from "../schema";
 import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, displayTitle, plainTitle, type RelationSide } from "../states";
 import type { WorkProject } from "../queries";
+import { LabelPill, PriorityGlyph, StateGlyph, Who, branchName, dueTone, isClosed, splitTitle } from "./work-ui";
 
 type Loaded = NonNullable<Awaited<ReturnType<typeof loadWorkItem>>>;
 
@@ -33,40 +59,60 @@ const fromDateInput = (v: string) => (v ? new Date(`${v}T18:00:00`) : null);
 
 const actorLabel = (a: string) =>
   a === "user" ? "You" : a.startsWith("agent:") ? a.slice(6) : a.startsWith("system:") ? a.slice(7) : a === "agent" ? "An agent" : a;
+const actorIsBot = (a: string) => a !== "user";
 
 const FIELD_LABEL: Record<string, string> = {
-  title: "title",
-  status: "state",
-  priority: "priority",
-  dueAt: "due date",
-  startAt: "start date",
-  projectRef: "project",
-  featureRef: "feature",
-  parentId: "parent",
-  estimate: "estimate",
-  labels: "labels",
-  notes: "description",
-  cycleId: "cycle",
+  title: "the title",
+  status: "the state",
+  priority: "the priority",
+  dueAt: "the due date",
+  startAt: "the start date",
+  projectRef: "the project",
+  featureRef: "the module",
+  parentId: "the parent",
+  estimate: "the estimate",
+  labels: "the labels",
+  notes: "the description",
+  cycleId: "the cycle",
 };
 
 const RELATION_SIDES = Object.keys(RELATION_SIDE_LABEL) as RelationSide[];
+const RELATION_GLYPH: Record<RelationSide, string> = {
+  blocked_by: "⛓",
+  blocks: "→",
+  relates: "↔",
+  duplicates: "≡",
+  duplicated_by: "≡",
+};
 
-function Prop({ label, children }: { label: string; children: React.ReactNode }) {
+/** Human wording for an activity row's new value (states and priorities by label, dates short). */
+function valueText(field: string | null, v: string | null): string {
+  if (!v) return "";
+  if (field === "status" && v in STATUS_META) return STATUS_META[v as TaskStatus].label;
+  if (field === "priority" && v in PRIORITY_META) return PRIORITY_META[v as TaskPriority].label;
+  if ((field === "dueAt" || field === "startAt") && !Number.isNaN(Date.parse(v)))
+    return new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return v.length > 60 ? `${v.slice(0, 57)}…` : v;
+}
+
+function Sec({ title, count, action, children, className }: { title: string; count?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <label className="flex items-center gap-3">
-      <span className="w-20 shrink-0 font-mono text-[10px] uppercase tracking-widest text-ink-faint">{label}</span>
-      <div className="min-w-0 flex-1">{children}</div>
-    </label>
+    <section className={cn("border-b wk-line px-[18px] py-3.5", className)}>
+      <h6 className="wk-sec-h mb-2">
+        {title}
+        {count != null && <span className="tabular-nums">· {count}</span>}
+        {action && <span className="ml-auto normal-case tracking-normal">{action}</span>}
+      </h6>
+      {children}
+    </section>
   );
 }
 
-const control =
-  "w-full rounded-lg border border-white/8 bg-panel px-2.5 py-1.5 text-xs text-ink-dim outline-none transition hover:border-white/16 focus:border-ion/40";
-
 /**
- * One work item, fully editable: properties, description, sub-items, and the
- * activity + comment stream. Every field saves on change/blur through the
- * core write path, so each edit lands in the history with "You" as the actor.
+ * One work item, fully editable: a docked drawer on the Work views (or a full
+ * page). Properties edit in place, the description renders as markdown, and
+ * sub-items, relations, linked code and the activity stream sit below. Every
+ * write goes through the core write path, so it lands in the history as "You".
  */
 export function WorkItemDetail({
   id,
@@ -74,6 +120,7 @@ export function WorkItemDetail({
   onChanged,
   onOpenItem,
   onDeleted,
+  onClose,
   full = false,
 }: {
   id: string;
@@ -83,20 +130,26 @@ export function WorkItemDetail({
   /** Navigate to another item (sub-item / parent) inside the same host. */
   onOpenItem?: (id: string) => void;
   onDeleted?: () => void;
+  /** Drawer only: close it. */
+  onClose?: () => void;
   full?: boolean;
 }) {
+  const now = useNow();
   const [data, setData] = useState<Loaded | null | undefined>(undefined);
   const [pending, start] = useTransition();
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
-  const [labels, setLabels] = useState("");
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [labelDraft, setLabelDraft] = useState("");
   const [comment, setComment] = useState("");
   const [subTitle, setSubTitle] = useState("");
   const [armedDelete, setArmedDelete] = useState(false);
   const [relSide, setRelSide] = useState<RelationSide>("blocked_by");
   const [relTarget, setRelTarget] = useState("");
+  const [relating, setRelating] = useState(false);
   const [delegating, setDelegating] = useState(false);
   const [delegateNote, setDelegateNote] = useState("");
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
@@ -106,7 +159,6 @@ export function WorkItemDetail({
     if (d) {
       setTitle(d.item.title);
       setNotes(d.item.notes ?? "");
-      setLabels(d.item.labels.join(", "));
     }
   }, []);
   const reload = useCallback(async () => {
@@ -140,8 +192,8 @@ export function WorkItemDetail({
     const el = notesRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.max(el.scrollHeight, 96)}px`;
-  }, [notes, data]);
+    el.style.height = `${Math.max(el.scrollHeight, 120)}px`;
+  }, [notes, data, editingNotes]);
 
   const save = (patch: WorkItemPatch, saved?: string) => act(() => updateTask(id, patch), saved);
   /**
@@ -163,328 +215,408 @@ export function WorkItemDetail({
     });
   }
 
+  const closeBtn = onClose && (
+    <button
+      type="button"
+      onClick={onClose}
+      aria-label="Close"
+      className="grid size-7 shrink-0 place-items-center rounded-lg text-ink-faint transition hover:bg-ink/8 hover:text-ink"
+    >
+      <X className="size-4" />
+    </button>
+  );
+
   if (data === undefined) {
-    return <p className="p-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint">loading…</p>;
+    return (
+      <div className="flex items-center justify-between p-[18px]">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">loading…</p>
+        {closeBtn}
+      </div>
+    );
   }
   if (data === null) {
-    return <p className="p-2 font-mono text-[10px] uppercase tracking-widest text-flare">item not found — it may have been deleted</p>;
+    return (
+      <div className="flex items-center justify-between p-[18px]">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-flare">item not found — it may have been deleted</p>
+        {closeBtn}
+      </div>
+    );
   }
 
   const { item, children, parent, activity, features, relations, links, cycles } = data;
-  const isOpen = item.status !== "done" && item.status !== "cancelled";
+  const isOpen = !isClosed(item.status);
   const commits = links.filter((l) => l.kind === "commit");
   const runs = links.filter((l) => l.kind === "workbench");
+  const liveRun = runs.find((r) => r.state !== "done" && r.state !== "cancelled");
   const projectId = item.projectRef?.startsWith("projects:") ? item.projectRef.slice(9) : "";
+  const project = projects.find((p) => p.id === projectId);
   const featureId = item.featureRef?.startsWith("features:") ? item.featureRef.slice(9) : "";
-  const doneChildren = children.filter((c) => c.status === "done" || c.status === "cancelled").length;
+  const doneChildren = children.filter((c) => isClosed(c.status)).length;
+  const tone = dueTone(item, now);
+  const { tag } = splitTitle(plainTitle(item.title));
+  const branch = branchName(item.identifier, splitTitle(displayTitle(item)).text);
+  const askQuery = `${item.identifier ?? ""} "${plainTitle(item.title).slice(0, 140)}" — what's the context, what's related, and what's the next step?`;
 
-  const identityEl = (
+  const copyBranch = async () => {
+    try {
+      await navigator.clipboard.writeText(branch);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      failed("Couldn't copy the branch name");
+    }
+  };
+
+  const addLabels = () => {
+    const add = labelDraft.split(/[,\s]+/).map((l) => l.replace(/^#/, "").toLowerCase()).filter(Boolean);
+    setLabelDraft("");
+    const next = [...new Set([...item.labels, ...add])];
+    if (next.length !== item.labels.length) save({ labels: next });
+  };
+
+  // ── pieces ──
+
+  const headEl = (
+    <div className={cn("flex items-start gap-2", !full && "border-b wk-line px-[18px] pb-2.5 pt-4")}>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-xs text-ink-faint">
+          <span className="text-ink-dim">{item.identifier ?? "—"}</span>
+          {project && <span>· {project.name}</span>}
+          {tag && <span className="truncate">· {tag}</span>}
+          {!full && (
+            <Link href={`/m/tasks/${item.id}`} className="inline-flex items-center gap-0.5 transition hover:text-ink" title="Open as a page">
+              · page <ArrowUpRight className="size-3" />
+            </Link>
+          )}
+        </div>
+        {parent && (
+          <button
+            type="button"
+            onClick={() => onOpenItem?.(parent.id)}
+            className="mt-1 inline-flex max-w-full items-center gap-1 text-xs text-ink-faint transition hover:text-ion"
+            title="Open parent"
+          >
+            <CornerDownRight className="size-3 shrink-0 rotate-180" />
+            <span className="font-mono">{parent.identifier}</span>
+            <span className="truncate">{displayTitle(parent)}</span>
+          </button>
+        )}
+        <textarea
+          ref={titleRef}
+          dir="auto"
+          rows={1}
+          value={title}
+          onChange={(e) => setTitle(e.target.value.replace(/\n/g, " "))}
+          onBlur={() => title.trim() && title.trim() !== item.title && save({ title }, "Title saved")}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }}
+          aria-label="Title"
+          className={cn(
+            "-mx-1 mt-1 w-[calc(100%+0.5rem)] resize-none overflow-hidden rounded-lg bg-transparent px-1 py-0.5 font-display font-semibold leading-[1.3] text-ink outline-none transition [text-wrap:balance] hover:bg-ink/4 focus:bg-ink/6",
+            full ? "text-2xl" : "text-lg",
+          )}
+        />
+      </div>
+      {closeBtn}
+    </div>
+  );
+
+  const propRow = (icon: ReactNode, label: string, value: ReactNode) => (
     <>
-        {/* identity */}
-        <div className="flex flex-col gap-2">
-          <div className={cn("flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint", !full && "pr-9")}>
-            <span className="text-ink-dim">{item.identifier ?? "—"}</span>
-            {parent && (
+      <dt>
+        {icon}
+        {label}
+      </dt>
+      <dd>{value}</dd>
+    </>
+  );
+  const ic = "size-3.5 shrink-0";
+
+  const propertiesEl = (
+    <dl className={cn("wk-props", !full && "border-b wk-line px-[18px] py-3.5")}>
+      {propRow(
+        <CircleDot className={ic} />,
+        "State",
+        <>
+          <StateGlyph s={item.status} />
+          <select value={item.status} onChange={(e) => save({ status: e.target.value as TaskStatus })} className="wk-inline" aria-label="State">
+            {TASK_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {STATUS_META[s].label}
+              </option>
+            ))}
+          </select>
+        </>,
+      )}
+      {propRow(
+        <Signal className={ic} />,
+        "Priority",
+        <>
+          <PriorityGlyph p={item.priority} />
+          <select value={item.priority} onChange={(e) => save({ priority: e.target.value as TaskPriority })} className="wk-inline" aria-label="Priority">
+            {[...TASK_PRIORITIES].reverse().map((p) => (
+              <option key={p} value={p}>
+                {PRIORITY_META[p].label}
+              </option>
+            ))}
+          </select>
+        </>,
+      )}
+      {propRow(
+        <User className={ic} />,
+        "Owner",
+        liveRun ? (
+          <>
+            <Who bot />
+            <span className="text-ink">Workbench run</span>
+            <span className="font-mono text-[11px] text-ink-faint">{(liveRun.state ?? "queued").replace("_", " ")}</span>
+          </>
+        ) : (
+          <>
+            <Who />
+            <span className="text-ink">You</span>
+          </>
+        ),
+      )}
+      {propRow(
+        <Hash className={ic} />,
+        "Labels",
+        <>
+          {item.labels.map((l) => (
+            <span key={l} className="group/l relative inline-flex">
+              <LabelPill l={l} />
               <button
                 type="button"
-                onClick={() => onOpenItem?.(parent.id)}
-                className="inline-flex items-center gap-1 normal-case tracking-normal transition hover:text-ion"
-                title="Open parent"
+                onClick={() => save({ labels: item.labels.filter((x) => x !== l) })}
+                aria-label={`Remove label ${l}`}
+                className="absolute -right-1.5 -top-1.5 hidden size-3.5 place-items-center rounded-full bg-panel text-ink-faint ring-1 ring-ion/20 hover:text-flare group-hover/l:grid focus-visible:grid"
               >
-                <CornerDownRight className="size-3 rotate-180" />
-                {parent.identifier} {displayTitle(parent)}
+                <X className="size-2.5" />
               </button>
-            )}
-            {!full && (
-              <Link
-                href={`/m/tasks/${item.id}`}
-                className="ml-auto inline-flex items-center gap-1 transition hover:text-ink"
-                title="Open as a page"
-              >
-                page <ArrowUpRight className="size-3" />
-              </Link>
-            )}
-          </div>
-          <textarea
-            ref={titleRef}
-            dir="auto"
-            rows={1}
-            value={title}
-            onChange={(e) => setTitle(e.target.value.replace(/\n/g, " "))}
-            onBlur={() => title.trim() && title.trim() !== item.title && save({ title }, "Title saved")}
+            </span>
+          ))}
+          <input
+            value={labelDraft}
+            onChange={(e) => setLabelDraft(e.target.value)}
+            onBlur={addLabels}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                e.currentTarget.blur();
+                addLabels();
               }
             }}
-            aria-label="Title"
-            className="w-full resize-none overflow-hidden rounded-lg bg-transparent px-1 py-1 font-display text-xl font-semibold leading-snug text-ink outline-none transition hover:bg-white/4 focus:bg-white/6"
+            placeholder={item.labels.length ? "+ label" : "Add labels…"}
+            aria-label="Add labels"
+            className="wk-inline w-20 focus:w-32"
           />
-          {displayTitle(item) !== plainTitle(item.title) && (
-            <p className="px-1 text-xs text-ink-faint" title="A shortened form made by a local model; the title above is unchanged">
-              <span className="font-mono text-[9px] uppercase tracking-widest">in lists</span>{" "}
-              {displayTitle(item)}
-            </p>
-          )}
-        </div>
-    </>
+        </>,
+      )}
+      {(cycles.length > 0 || item.cycleId) &&
+        propRow(
+          <Repeat className={ic} />,
+          "Cycle",
+          <select value={item.cycleId ?? ""} onChange={(e) => save({ cycleId: e.target.value || null })} className="wk-inline" aria-label="Cycle">
+            <option value="">None</option>
+            {cycles.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.status === "current" ? " (current)" : c.status === "completed" ? " (completed)" : ""}
+              </option>
+            ))}
+          </select>,
+        )}
+      {projectId &&
+        propRow(
+          <Layers className={ic} />,
+          "Module",
+          <select value={featureId} onChange={(e) => save({ featureRef: e.target.value ? `features:${e.target.value}` : null })} className="wk-inline" aria-label="Module">
+            <option value="">None</option>
+            {features.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+                {f.status === "shipped" ? " (shipped)" : ""}
+              </option>
+            ))}
+          </select>,
+        )}
+      {propRow(
+        <FolderKanban className={ic} />,
+        "Project",
+        <select value={projectId} onChange={(e) => save({ projectRef: e.target.value ? `projects:${e.target.value}` : null })} className="wk-inline" aria-label="Project">
+          <option value="">No project</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.key && p.key !== p.name ? `${p.key} · ` : ""}
+              {p.name}
+            </option>
+          ))}
+        </select>,
+      )}
+      {propRow(
+        <Box className={ic} />,
+        "Estimate",
+        <>
+          <select
+            value={item.estimate ?? ""}
+            onChange={(e) => save({ estimate: e.target.value ? Number(e.target.value) : null })}
+            className="wk-inline"
+            aria-label="Estimate"
+          >
+            <option value="">None</option>
+            {ESTIMATES.map((n) => (
+              <option key={n} value={n}>
+                {n} pt{n === 1 ? "" : "s"}
+              </option>
+            ))}
+          </select>
+        </>,
+      )}
+      {propRow(
+        <CalendarPlus className={ic} />,
+        "Start",
+        <input type="date" value={toDateInput(item.startAt)} onChange={(e) => save({ startAt: fromDateInput(e.target.value) })} aria-label="Start date" className="wk-inline" />,
+      )}
+      {propRow(
+        <CalendarClock className={ic} />,
+        "Due",
+        <input
+          type="date"
+          value={toDateInput(item.dueAt)}
+          onChange={(e) => save({ dueAt: fromDateInput(e.target.value) })}
+          aria-label="Due date"
+          className={cn("wk-inline", tone === "late" && "!text-flare", tone === "soon" && "!text-solar")}
+        />,
+      )}
+    </dl>
   );
-  const propertiesEl = (
-    <>
-        {/* properties */}
-        <div className="flex flex-col gap-2">
-          <Prop label="State">
-            <select
-              value={item.status}
-              onChange={(e) => save({ status: e.target.value as TaskStatus })}
-              className={control}
-              style={{ color: STATUS_META[item.status].color }}
-            >
-              {TASK_STATUSES.map((s) => (
-                <option key={s} value={s}>{STATUS_META[s].label}</option>
-              ))}
-            </select>
-          </Prop>
-          <Prop label="Priority">
-            <select
-              value={item.priority}
-              onChange={(e) => save({ priority: e.target.value as TaskPriority })}
-              className={cn(control, PRIORITY_META[item.priority].className)}
-            >
-              {[...TASK_PRIORITIES].reverse().map((p) => (
-                <option key={p} value={p}>{PRIORITY_META[p].label}</option>
-              ))}
-            </select>
-          </Prop>
-          <Prop label="Estimate">
-            <select
-              value={item.estimate ?? ""}
-              onChange={(e) => save({ estimate: e.target.value ? Number(e.target.value) : null })}
-              className={control}
-            >
-              <option value="">none</option>
-              {ESTIMATES.map((n) => (
-                <option key={n} value={n}>{n} pt{n === 1 ? "" : "s"}</option>
-              ))}
-            </select>
-          </Prop>
-          <Prop label="Labels">
-            <input
-              value={labels}
-              onChange={(e) => setLabels(e.target.value)}
-              onBlur={() => {
-                const next = labels.split(/[,\s]+/).filter(Boolean);
-                if (next.join(",") !== item.labels.join(",")) save({ labels: next });
-              }}
-              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-              placeholder="comma separated"
-              className={control}
-            />
-          </Prop>
-          <Prop label="Dates">
-            <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 [&>input]:min-w-0 [&>input]:flex-1 [&>input]:basis-32", full && "lg:[&>span]:hidden")}>
-              <input
-                type="date"
-                value={toDateInput(item.startAt)}
-                onChange={(e) => save({ startAt: fromDateInput(e.target.value) })}
-                aria-label="Start date"
-                title="Start"
-                className={control}
-              />
-              <span className="text-ink-faint">→</span>
-              <input
-                type="date"
-                value={toDateInput(item.dueAt)}
-                onChange={(e) => save({ dueAt: fromDateInput(e.target.value) })}
-                aria-label="Due date"
-                title="Due"
-                className={control}
-              />
-            </div>
-          </Prop>
-          <Prop label="Project">
-            <select
-              value={projectId}
-              onChange={(e) => save({ projectRef: e.target.value ? `projects:${e.target.value}` : null })}
-              className={control}
-            >
-              <option value="">no project</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.key ? `${p.key} · ` : ""}{p.name}
-                </option>
-              ))}
-            </select>
-          </Prop>
-          {projectId && (
-            <Prop label="Feature">
-              <select
-                value={featureId}
-                onChange={(e) => save({ featureRef: e.target.value ? `features:${e.target.value}` : null })}
-                className={control}
-              >
-                <option value="">none</option>
-                {features.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}{f.status === "shipped" ? " (shipped)" : ""}
-                  </option>
-                ))}
-              </select>
-            </Prop>
-          )}
-          {(cycles.length > 0 || item.cycleId) && (
-            <Prop label="Cycle">
-              <select value={item.cycleId ?? ""} onChange={(e) => save({ cycleId: e.target.value || null })} className={control}>
-                <option value="">none</option>
-                {cycles.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {c.status === "current" ? " (current)" : c.status === "completed" ? " (completed)" : ""}
-                  </option>
-                ))}
-              </select>
-            </Prop>
-          )}
-        </div>
-    </>
-  );
-  const errorEl = (
-    <>
-        {error && <p className="rounded-lg bg-flare/8 px-3 py-2 text-xs text-flare">{error}</p>}
-    </>
-  );
+
+  const errorEl = error && <p className="mx-[18px] mt-3 rounded-lg bg-flare/8 px-3 py-2 text-xs text-flare">{error}</p>;
+
   const descriptionEl = (
-    <>
-        {/* description */}
+    <Sec
+      title="Description"
+      action={
+        !editingNotes &&
+        item.notes && (
+          <button
+            type="button"
+            onClick={() => setEditingNotes(true)}
+            className="inline-flex items-center gap-1 font-mono text-[10.5px] uppercase tracking-widest text-ink-faint transition hover:text-ink"
+          >
+            <Pencil className="size-3" /> edit
+          </button>
+        )
+      }
+    >
+      {editingNotes ? (
         <textarea
           ref={notesRef}
+          autoFocus
           dir="auto"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          onBlur={() => notes.trim() !== (item.notes ?? "") && save({ notes }, "Notes saved")}
-          placeholder="Add a description…"
-          className="max-h-[50vh] min-h-24 w-full resize-y rounded-lg bg-white/4 px-3 py-2 text-sm leading-relaxed text-ink-dim outline-none placeholder:text-ink-faint focus:bg-white/6"
+          onBlur={() => {
+            setEditingNotes(false);
+            if (notes.trim() !== (item.notes ?? "").trim()) save({ notes }, "Description saved");
+          }}
+          onKeyDown={(e) => e.key === "Escape" && e.currentTarget.blur()}
+          placeholder="Markdown — **bold**, lists, links, `code`…"
+          className="max-h-[60vh] min-h-28 w-full resize-y rounded-lg bg-ink/4 px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink-dim outline-none placeholder:text-ink-faint focus:bg-ink/6"
         />
-    </>
+      ) : item.notes ? (
+        <div
+          className="max-h-[42vh] cursor-text overflow-y-auto [&_p]:!text-[13px]"
+          onDoubleClick={() => setEditingNotes(true)}
+          title="Double-click to edit"
+        >
+          <Markdown>{item.notes}</Markdown>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setEditingNotes(true)} className="text-[13px] text-ink-faint transition hover:text-ink-dim">
+          Add a description…
+        </button>
+      )}
+    </Sec>
   );
-  const handoffEl = (
-    <>
-        {/* Workbench hand-off */}
-        {isOpen && (
-          <section className="flex flex-col gap-2">
-            {!delegating ? (
-              <button
-                type="button"
-                onClick={() => setDelegating(true)}
-                className="flex w-fit items-center gap-1.5 rounded-lg border border-violet/25 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-widest text-violet transition hover:bg-violet/10"
-                title="A background executor works on this item; the result comes back for your review"
-              >
-                <Bot className="size-3.5" /> hand off as a run
-              </button>
-            ) : (
-              <div className="flex flex-col gap-2 rounded-xl border border-violet/25 p-3">
-                <p className="text-xs text-ink-faint">
-                  The run gets the title, description{children.length ? " and open sub-items" : ""}. It runs in an isolated copy of the
-                  project&apos;s repo (if one is attached) and the item moves to In review when it finishes.
-                </p>
-                <textarea
-                  dir="auto"
-                  value={delegateNote}
-                  onChange={(e) => setDelegateNote(e.target.value)}
-                  rows={2}
-                  placeholder="Extra instructions (optional)"
-                  className="w-full resize-y rounded-lg bg-white/4 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint focus:bg-white/6"
-                />
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() =>
-                      act(async () => {
-                        await delegateTask(item.id, delegateNote);
-                        setDelegating(false);
-                        setDelegateNote("");
-                      })
-                    }
-                    className="rounded-lg bg-violet/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-violet transition hover:bg-violet/25 disabled:opacity-40"
-                  >
-                    start run
-                  </button>
-                  <button type="button" onClick={() => setDelegating(false)} className="px-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint hover:text-ink">
-                    cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-    </>
-  );
+
   const subitemsEl = (
-    <>
-        {/* sub-items */}
-        <section className="flex flex-col gap-1.5">
-          <h3 className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
-            <Layers className="size-3" /> sub-items
-            {children.length > 0 && <span className="tabular-nums">{doneChildren}/{children.length}</span>}
-          </h3>
-          {children.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => onOpenItem?.(c.id)}
-              className="flex items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm transition hover:bg-white/4"
-            >
-              <span className="size-2 shrink-0 rounded-full" style={{ background: STATUS_META[c.status].color }} />
-              <span className="font-mono text-[10px] text-ink-faint">{c.identifier}</span>
-              <span className={cn("truncate", c.status === "done" || c.status === "cancelled" ? "text-ink-faint line-through" : "text-ink-dim")}>
-                {displayTitle(c)}
-              </span>
-            </button>
-          ))}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const t = subTitle.trim();
-              if (!t) return;
-              start(async () => {
-                const r = await runAction(() => createTask({ title: t, parentId: item.id }), { failed: "Couldn't add the sub-item" });
-                if (!r.ok) return;
-                setSubTitle("");
-                await reload();
-                onChanged?.();
-              });
-            }}
-            className="flex items-center gap-2 rounded-md px-1.5"
-          >
-            <Plus className="size-3.5 text-ink-faint" />
-            <input
-              value={subTitle}
-              onChange={(e) => setSubTitle(e.target.value)}
-              placeholder="Add sub-item…"
-              className="h-8 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
-            />
-          </form>
-        </section>
-    </>
+    <Sec title="Sub-items" count={children.length ? `${doneChildren}/${children.length}` : undefined}>
+      <div className="flex flex-col">
+        {children.map((c) => {
+          const cDone = isClosed(c.status);
+          return (
+            <div key={c.id} className="group flex items-center gap-2 py-[3px] text-[13px]">
+              <input
+                type="checkbox"
+                checked={cDone}
+                onChange={() => act(() => updateTask(c.id, { status: cDone ? "todo" : "done" }))}
+                aria-label={cDone ? `Reopen ${c.identifier}` : `Complete ${c.identifier}`}
+                className="size-3.5 shrink-0 accent-[var(--color-plasma)]"
+              />
+              <button type="button" onClick={() => onOpenItem?.(c.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                <span className="shrink-0 font-mono text-[11px] text-ink-faint">{c.identifier}</span>
+                <span className={cn("truncate transition group-hover:text-ink", cDone ? "text-ink-faint line-through" : "text-ink-dim")}>{displayTitle(c)}</span>
+              </button>
+            </div>
+          );
+        })}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const t = subTitle.trim();
+            if (!t) return;
+            start(async () => {
+              const r = await runAction(() => createTask({ title: t, parentId: item.id }), { failed: "Couldn't add the sub-item" });
+              if (!r.ok) return;
+              setSubTitle("");
+              await reload();
+              onChanged?.();
+            });
+          }}
+          className="flex items-center gap-2 py-[3px]"
+        >
+          <Plus className="size-3.5 shrink-0 text-ink-faint" />
+          <input
+            value={subTitle}
+            onChange={(e) => setSubTitle(e.target.value)}
+            placeholder="Add sub-item…"
+            aria-label="Add sub-item"
+            className="h-7 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
+          />
+        </form>
+      </div>
+    </Sec>
   );
+
   const relationsEl = (
-    <>
-        {/* relations */}
-        <section className="flex flex-col gap-1.5">
-          <h3 className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
-            <Link2 className="size-3" /> relations
-          </h3>
-          {relations.map((rel) => (
-            <div key={rel.id} className="group flex items-center gap-2 rounded-md px-1.5 py-1 text-sm">
-              <span className={cn("w-24 shrink-0 text-xs", rel.side === "blocked_by" && isOpen && rel.other.status !== "done" && rel.other.status !== "cancelled" ? "text-flare" : "text-ink-faint")}>
-                {RELATION_SIDE_LABEL[rel.side]}
-              </span>
-              <button type="button" onClick={() => onOpenItem?.(rel.other.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left transition hover:text-ion">
-                <span className="size-2 shrink-0 rounded-full" style={{ background: STATUS_META[rel.other.status].color }} />
-                <span className="font-mono text-[10px] text-ink-faint">{rel.other.identifier}</span>
-                <span className="truncate text-ink-dim">{displayTitle(rel.other)}</span>
+    <Sec
+      title="Relations & links"
+      action={
+        !relating && (
+          <button
+            type="button"
+            onClick={() => setRelating(true)}
+            className="inline-flex items-center gap-1 font-mono text-[10.5px] uppercase tracking-widest text-ink-faint transition hover:text-ink"
+          >
+            <Plus className="size-3" /> relate
+          </button>
+        )
+      }
+    >
+      <div className="flex flex-col gap-0.5 text-[12.5px] text-ink-dim">
+        {relations.map((rel) => {
+          const live = rel.side === "blocked_by" && isOpen && !isClosed(rel.other.status);
+          return (
+            <div key={rel.id} className="group flex items-center gap-2 py-[3px]">
+              <span className={cn("w-4 shrink-0 text-center", live ? "text-flare" : "text-ink-faint")}>{RELATION_GLYPH[rel.side]}</span>
+              <span className={cn("shrink-0", live && "text-flare")}>{RELATION_SIDE_LABEL[rel.side]}</span>
+              <button type="button" onClick={() => onOpenItem?.(rel.other.id)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left transition hover:text-ion">
+                <b className="shrink-0 font-mono text-[11.5px] font-medium text-ink">{rel.other.identifier}</b>
+                <span className="truncate">{displayTitle(rel.other)}</span>
               </button>
               <button
                 type="button"
@@ -495,195 +627,268 @@ export function WorkItemDetail({
                 <X className="size-3" />
               </button>
             </div>
-          ))}
+          );
+        })}
+        {commits.map((l) => {
+          const body = (
+            <>
+              <GitCommitHorizontal className="size-3.5 shrink-0 text-violet" />
+              <span className="wk-link shrink-0">{l.ref.slice(0, 7)}</span>
+              <span className="truncate">{l.title}</span>
+              <span className="ml-auto shrink-0 font-mono text-[10.5px] text-ink-faint">{timeAgo(l.createdAt, { compact: true })}</span>
+            </>
+          );
+          return l.url ? (
+            <a key={l.id} href={l.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 py-[3px] transition hover:text-ink">
+              {body}
+            </a>
+          ) : (
+            <div key={l.id} className="flex items-center gap-2 py-[3px]">
+              {body}
+            </div>
+          );
+        })}
+        {runs.map((l) => (
+          <Link key={l.id} href={l.url ?? `/m/workbench/${l.ref}`} className="flex items-center gap-2 py-[3px] transition hover:text-ink">
+            <Bot className="size-3.5 shrink-0 text-violet" />
+            <span className="truncate">{l.title ?? "Workbench run"}</span>
+            <span className="ml-auto shrink-0 font-mono text-[10.5px] text-ink-faint">{(l.state ?? "queued").replace("_", " ")}</span>
+          </Link>
+        ))}
+        {!relations.length && !commits.length && !runs.length && <p className="py-[3px] text-ink-faint">No relations or linked code yet.</p>}
+        {relating && (
           <form
             onSubmit={(e) => {
               e.preventDefault();
               if (!relTarget.trim()) return;
               act(async () => {
                 const r = await relateTask(item.id, relSide, relTarget);
-                if (r.ok) setRelTarget("");
+                if (r.ok) {
+                  setRelTarget("");
+                  setRelating(false);
+                }
                 return r;
               });
             }}
-            className="flex items-center gap-2 px-1.5"
+            className="mt-1 flex items-center gap-1.5"
           >
-            <select value={relSide} onChange={(e) => setRelSide(e.target.value as RelationSide)} aria-label="Relation" className="rounded-md border border-white/8 bg-panel px-1.5 py-1 text-xs text-ink-dim outline-none">
+            <select value={relSide} onChange={(e) => setRelSide(e.target.value as RelationSide)} aria-label="Relation" className="wk-inline !ml-0 border-ion/20">
               {RELATION_SIDES.map((sd) => (
-                <option key={sd} value={sd}>{RELATION_SIDE_LABEL[sd]}</option>
+                <option key={sd} value={sd}>
+                  {RELATION_SIDE_LABEL[sd]}
+                </option>
               ))}
             </select>
             <input
+              autoFocus
               value={relTarget}
               onChange={(e) => setRelTarget(e.target.value)}
-              placeholder="item id, e.g. GL-4"
+              onKeyDown={(e) => e.key === "Escape" && setRelating(false)}
+              placeholder={`item id, e.g. ${item.identifier ?? "KEY-4"}`}
               aria-label="Related item identifier"
-              className="h-7 min-w-0 flex-1 bg-transparent font-mono text-xs text-ink outline-none placeholder:text-ink-faint"
+              className="h-7 min-w-0 flex-1 rounded-md bg-ink/4 px-2 font-mono text-xs text-ink outline-none placeholder:text-ink-faint"
             />
           </form>
-        </section>
-    </>
-  );
-  const evidenceEl = (
-    <>
-        {/* evidence: commits + Workbench runs */}
-        {(commits.length > 0 || runs.length > 0) && (
-          <section className="flex flex-col gap-1">
-            <h3 className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
-              <GitCommitHorizontal className="size-3" /> linked work
-            </h3>
-            {runs.map((l) => (
-              <Link key={l.id} href={l.url ?? `/m/workbench/${l.ref}`} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm transition hover:bg-white/4">
-                <Bot className="size-3.5 shrink-0 text-violet" />
-                <span className="truncate text-ink-dim">{l.title ?? "Run"}</span>
-                <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">{(l.state ?? "queued").replace("_", " ")}</span>
-              </Link>
-            ))}
-            {commits.map((l) => {
-              const body = (
-                <>
-                  <span className="shrink-0 font-mono text-[10px] text-ion">{l.ref.slice(0, 7)}</span>
-                  <span className="truncate text-ink-dim">{l.title}</span>
-                  <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">{timeAgo(l.createdAt)}</span>
-                </>
-              );
-              return l.url ? (
-                <a key={l.id} href={l.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm transition hover:bg-white/4">
-                  {body}
-                </a>
-              ) : (
-                <div key={l.id} className="flex items-center gap-2 px-1.5 py-1 text-sm">{body}</div>
-              );
-            })}
-          </section>
         )}
-    </>
+        <button
+          type="button"
+          onClick={copyBranch}
+          title="Copy the suggested branch name — commits that mention the item id link back here"
+          className="mt-1 flex items-center gap-2 py-[3px] text-left font-mono text-[11.5px] text-ink-faint transition hover:text-ink"
+        >
+          <GitBranch className="size-3.5 shrink-0" />
+          <span className="truncate">branch · {branch}</span>
+          {copied ? <Check className="ml-auto size-3.5 shrink-0 text-plasma" /> : <Copy className="ml-auto size-3 shrink-0" />}
+        </button>
+      </div>
+    </Sec>
   );
+
   const activityEl = (
-    <>
-        {/* activity + comments */}
-        <section className="flex flex-col gap-2">
-          <h3 className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint">
-            <MessageSquare className="size-3" /> activity
-          </h3>
-          <ol className="flex flex-col gap-1.5">
-            {activity.map((a) =>
-              a.kind === "comment" ? (
-                <li key={a.id} className="rounded-lg bg-white/4 px-3 py-2">
-                  <div className="mb-1 flex items-center gap-2 font-mono text-[10px] text-ink-faint">
-                    <span className="text-ink-dim">{actorLabel(a.actor)}</span>
-                    <span>{timeAgo(a.createdAt)}</span>
-                  </div>
-                  <p dir="auto" className="whitespace-pre-wrap text-sm leading-relaxed text-ink-dim">{a.body}</p>
-                </li>
+    <Sec title="Activity">
+      <ol className="flex flex-col gap-2.5">
+        {activity.map((a) => (
+          <li key={a.id} className="wk-ev">
+            <Who bot={actorIsBot(a.actor)} title={actorLabel(a.actor)} />
+            <div className="min-w-0">
+              <time>{timeAgo(a.createdAt)}</time>
+              {a.kind === "comment" ? (
+                <>
+                  <strong className="font-semibold text-ink">{actorLabel(a.actor)}</strong>
+                  <p dir="auto" className="mt-1 whitespace-pre-wrap rounded-lg bg-ink/4 px-2.5 py-1.5 text-[13px] leading-relaxed text-ink-dim">
+                    {a.body}
+                  </p>
+                </>
               ) : (
-                <li key={a.id} className="flex flex-wrap items-baseline gap-x-1.5 px-1 text-xs text-ink-faint">
-                  <span className="text-ink-dim">{actorLabel(a.actor)}</span>
+                <span>
+                  <strong className="font-semibold text-ink">{actorLabel(a.actor)}</strong>{" "}
                   {a.kind === "created" ? (
-                    <span>created this</span>
+                    "created this item"
                   ) : a.field === "notes" ? (
-                    <span>edited the description</span>
+                    "edited the description"
                   ) : a.field === "relation" ? (
-                    <span>
-                      marked this <span className="text-ink-dim">{a.toValue}</span>
-                    </span>
+                    <>
+                      marked this <span className="text-ink">{a.toValue}</span>
+                    </>
+                  ) : a.field === "status" && a.fromValue && a.toValue ? (
+                    <>
+                      moved {valueText("status", a.fromValue)} → <span className="text-ink">{valueText("status", a.toValue)}</span>
+                    </>
                   ) : (
-                    <span>
+                    <>
                       {a.toValue ? "set" : "cleared"} {FIELD_LABEL[a.field ?? ""] ?? a.field}
-                      {a.toValue && <> to <span className="text-ink-dim">{a.toValue}</span></>}
-                    </span>
+                      {a.toValue && (
+                        <>
+                          {" "}
+                          to <span className="text-ink">{valueText(a.field, a.toValue)}</span>
+                        </>
+                      )}
+                    </>
                   )}
-                  <span className="font-mono text-[10px]">· {timeAgo(a.createdAt)}</span>
-                </li>
-              ),
-            )}
-          </ol>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const body = comment.trim();
-              if (!body) return;
-              start(async () => {
-                const r = await runAction(() => addTaskComment(item.id, body), { failed: "Couldn't post the comment" });
-                if (!r.ok) return;
-                setComment("");
-                await reload();
-              });
-            }}
-            className="flex flex-col gap-2"
-          >
-            <textarea
-              dir="auto"
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) e.currentTarget.form?.requestSubmit();
-              }}
-              rows={2}
-              placeholder="Leave a comment… (⌘↵)"
-              className="w-full resize-y rounded-lg bg-white/4 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint focus:bg-white/6"
-            />
-            <button
-              type="submit"
-              disabled={pending || !comment.trim()}
-              className="self-end rounded-lg bg-plasma/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-plasma transition hover:bg-plasma/25 disabled:opacity-40"
-            >
-              comment
-            </button>
-          </form>
-        </section>
-    </>
+                </span>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const body = comment.trim();
+          if (!body) return;
+          start(async () => {
+            const r = await runAction(() => addTaskComment(item.id, body), { failed: "Couldn't post the comment" });
+            if (!r.ok) return;
+            setComment("");
+            await reload();
+          });
+        }}
+        className="mt-3 flex items-end gap-2"
+      >
+        <textarea
+          dir="auto"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) e.currentTarget.form?.requestSubmit();
+          }}
+          rows={1}
+          placeholder="Leave a comment… (⌘↵)"
+          aria-label="Comment"
+          className="min-h-9 w-full resize-y rounded-lg bg-ink/4 px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:bg-ink/6"
+        />
+        {comment.trim() && (
+          <button type="submit" disabled={pending} className="wk-btn primary shrink-0 !px-2.5 !py-1.5 text-xs">
+            Comment
+          </button>
+        )}
+      </form>
+    </Sec>
   );
-  const deleteEl = (
-    <>
-        {/* House rule: two-step armed delete, no browser confirm. */}
+
+  const handoffEl = isOpen && delegating && (
+    <div className="mx-[18px] mt-3.5 flex flex-col gap-2 rounded-xl border border-violet/25 p-3">
+      <p className="text-xs leading-relaxed text-ink-faint">
+        A Workbench run gets the title, description{children.length ? " and open sub-items" : ""}. It works in an isolated copy of the
+        project&apos;s repo (if one is attached), and the item moves to In review with a draft for you when it finishes.
+      </p>
+      <textarea
+        autoFocus
+        dir="auto"
+        value={delegateNote}
+        onChange={(e) => setDelegateNote(e.target.value)}
+        rows={2}
+        placeholder="Extra instructions (optional)"
+        className="w-full resize-y rounded-lg bg-ink/4 px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:bg-ink/6"
+      />
+      <div className="flex items-center gap-2">
         <button
           type="button"
           disabled={pending}
-          onClick={() => {
-            if (!armedDelete) {
-              setArmedDelete(true);
-              setTimeout(() => setArmedDelete(false), 3000);
-              return;
-            }
-            start(async () => {
-              const r = await runAction(() => deleteTask(item.id), { failed: "Couldn't delete the work item" });
-              if (!r.ok) return;
-              onChanged?.();
-              onDeleted?.();
-            });
-          }}
-          className={cn(
-            "flex w-fit items-center gap-1.5 rounded-lg px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-widest transition",
-            armedDelete ? "border border-flare/40 text-flare" : "text-ink-faint hover:text-flare",
-          )}
+          onClick={() =>
+            act(async () => {
+              await delegateTask(item.id, delegateNote);
+              setDelegating(false);
+              setDelegateNote("");
+            })
+          }
+          className="wk-btn violet !py-1.5 text-xs"
         >
-          <Trash2 className="size-3.5" />
-          {armedDelete ? "click again to delete" : "delete"}
+          <Bot className="size-3.5 text-violet" /> Start the run
         </button>
-    </>
+        <button type="button" onClick={() => setDelegating(false)} className="px-2 text-xs text-ink-faint transition hover:text-ink">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+
+  const deleteBtn = (
+    // House rule: two-step armed delete, no browser confirm.
+    <button
+      type="button"
+      disabled={pending}
+      onClick={() => {
+        if (!armedDelete) {
+          setArmedDelete(true);
+          setTimeout(() => setArmedDelete(false), 3000);
+          return;
+        }
+        start(async () => {
+          const r = await runAction(() => deleteTask(item.id), { failed: "Couldn't delete the work item" });
+          if (!r.ok) return;
+          onChanged?.();
+          onDeleted?.();
+        });
+      }}
+      className={cn(
+        "ml-auto inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs transition",
+        armedDelete ? "border border-flare/40 text-flare" : "text-ink-faint hover:text-flare",
+      )}
+      title="Delete this item"
+    >
+      <Trash2 className="size-3.5" />
+      {armedDelete ? "Click again to delete" : "Delete"}
+    </button>
+  );
+
+  const actionsEl = (
+    <div className={cn("flex flex-wrap items-center gap-2", !full && "px-[18px] py-3.5")}>
+      {isOpen && !liveRun && !delegating && (
+        <button
+          type="button"
+          onClick={() => setDelegating(true)}
+          className="wk-btn primary"
+          title="A background executor works on this item; the result comes back for your review"
+        >
+          <Bot className="size-3.5 text-plasma" /> Delegate to Workbench → draft PR
+        </button>
+      )}
+      <Link href={`/m/ask?q=${encodeURIComponent(askQuery)}`} className="wk-btn">
+        <Sparkles className="size-3.5 text-ion" /> Ask about this
+      </Link>
+      {deleteBtn}
+    </div>
   );
 
   // A full page gets two columns — the content on the left, the properties
-  // rail (state, dates, hand-off, linked runs) on the right. The drawer keeps
-  // the single column.
+  // rail on the right. The drawer keeps one column.
   if (full) {
     return (
       <div className={cn("flex flex-col gap-5", pending && "opacity-80")}>
-        {identityEl}
-        <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start lg:gap-8">
-          <aside className="flex flex-col gap-5 lg:sticky lg:top-4 lg:order-2 lg:rounded-xl lg:border lg:border-white/6 lg:p-4">
+        {headEl}
+        <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8">
+          <aside className="wk-drawer flex flex-col gap-4 rounded-2xl p-4 lg:sticky lg:top-4 lg:order-2">
             {propertiesEl}
-            {errorEl}
+            {actionsEl}
             {handoffEl}
-            {evidenceEl}
+            {errorEl}
           </aside>
-          <div className="flex min-w-0 flex-col gap-5 lg:order-1">
+          <div className="glass min-w-0 overflow-hidden rounded-2xl lg:order-1 [&>section:last-child]:border-b-0">
             {descriptionEl}
             {subitemsEl}
             {relationsEl}
             {activityEl}
-            {deleteEl}
           </div>
         </div>
       </div>
@@ -691,17 +896,16 @@ export function WorkItemDetail({
   }
 
   return (
-    <div className={cn("flex flex-col gap-5", pending && "opacity-80")}>
-      {identityEl}
+    <div className={cn("flex flex-col", pending && "opacity-80")}>
+      {headEl}
       {propertiesEl}
       {errorEl}
-      {descriptionEl}
       {handoffEl}
+      {descriptionEl}
       {subitemsEl}
       {relationsEl}
-      {evidenceEl}
       {activityEl}
-      {deleteEl}
+      {actionsEl}
     </div>
   );
 }

@@ -24,7 +24,7 @@ export async function ActiveProjectsWidget() {
           <li key={p.id}>
             <Link
               href={`/m/projects/${p.id}`}
-              className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-white/4"
+              className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-ink/4"
             >
               <span
                 className="size-1.5 shrink-0 rounded-full"
@@ -34,7 +34,7 @@ export async function ActiveProjectsWidget() {
               <span className="flex-1 truncate text-sm text-ink-dim transition group-hover:text-ink">
                 {p.name}
               </span>
-              <span className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-white/6">
+              <span className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-ink/6">
                 <span
                   className="block h-full rounded-full bg-gradient-to-r from-plasma-dim to-plasma"
                   style={{ width: `${pct}%` }}

@@ -83,21 +83,21 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <button type="button" onClick={() => setOffset(offset - 1)} aria-label="Previous month" className="rounded-lg p-1 text-ink-faint hover:bg-white/5 hover:text-ink">
+        <button type="button" onClick={() => setOffset(offset - 1)} aria-label="Previous month" className="rounded-lg p-1 text-ink-faint hover:bg-ink/5 hover:text-ink">
           <ChevronLeft className="size-4" />
         </button>
         <h3 className="min-w-36 text-center font-display text-sm text-ink">
           {month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
         </h3>
-        <button type="button" onClick={() => setOffset(offset + 1)} aria-label="Next month" className="rounded-lg p-1 text-ink-faint hover:bg-white/5 hover:text-ink">
+        <button type="button" onClick={() => setOffset(offset + 1)} aria-label="Next month" className="rounded-lg p-1 text-ink-faint hover:bg-ink/5 hover:text-ink">
           <ChevronRight className="size-4" />
         </button>
         {offset !== 0 && (
-          <button type="button" onClick={() => setOffset(0)} className="rounded-lg px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint hover:bg-white/5 hover:text-ink">
+          <button type="button" onClick={() => setOffset(0)} className="rounded-lg px-2 py-1 font-mono text-[11px] uppercase tracking-widest text-ink-faint hover:bg-ink/5 hover:text-ink">
             today
           </button>
         )}
-        <span className="ml-auto font-mono text-[10px] text-ink-faint">
+        <span className="ml-auto font-mono text-[11px] text-ink-faint">
           {undated > 0 ? `${undated} open without a date · ` : ""}drag an item to another day to reschedule
         </span>
       </div>
@@ -105,7 +105,7 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
       <div className="glass overflow-x-auto rounded-xl">
         <div className="grid min-w-[720px] grid-cols-7">
           {WEEKDAYS.map((d) => (
-            <div key={d} className="border-b border-white/6 px-2 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+            <div key={d} className="border-b border-ion/10 px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest text-ink-faint">
               {d}
             </div>
           ))}
@@ -129,14 +129,14 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
                   if (id) reschedule(id, day);
                 }}
                 className={cn(
-                  "flex min-h-24 flex-col gap-1 border-b border-r border-white/5 p-1.5 transition-colors",
+                  "flex min-h-24 flex-col gap-1 border-b border-r border-ion/8 p-1.5 transition-colors",
                   !inMonth && "bg-void/30",
                   over === day && "bg-ion/10",
                 )}
               >
                 <span
                   className={cn(
-                    "self-end font-mono text-[10px] tabular-nums",
+                    "self-end font-mono text-[11px] tabular-nums",
                     day === today ? "rounded bg-flare/80 px-1 text-void" : inMonth ? "text-ink-dim" : "text-ink-faint/50",
                   )}
                 >
@@ -156,7 +156,7 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
                       onClick={() => onOpen(t.id)}
                       title={`${t.identifier ?? ""} ${plainTitle(t.title)}`}
                       className={cn(
-                        "flex items-center gap-1 truncate rounded-md border-l-2 bg-white/[0.04] px-1.5 py-0.5 text-left text-[11px] text-ink-dim hover:bg-white/[0.08] hover:text-ink",
+                        "flex items-center gap-1 truncate rounded-md border-l-2 bg-ink/[0.04] px-1.5 py-0.5 text-left text-[11px] text-ink-dim hover:bg-ink/[0.08] hover:text-ink",
                         closed(t.status) && "line-through opacity-50",
                         late && "bg-flare/10",
                       )}
@@ -170,7 +170,7 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
                   <button
                     type="button"
                     onClick={() => setExpanded(open ? null : day)}
-                    className="self-start px-1 font-mono text-[10px] text-ink-faint hover:text-ink"
+                    className="self-start px-1 font-mono text-[11px] text-ink-faint hover:text-ink"
                   >
                     {open ? "less" : `+${list.length - CELL_CAP} more`}
                   </button>

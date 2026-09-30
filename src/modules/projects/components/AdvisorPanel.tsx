@@ -115,7 +115,7 @@ export function AdvisorPanel({
             onClick={() => setAngleOpen((o) => !o)}
             disabled={running}
             title="Ask the advisor to reconsider this project from a different angle"
-            className="flex items-center gap-1.5 rounded-lg border border-white/8 px-2.5 py-1 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:text-ink-dim disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-lg border border-ion/12 px-2.5 py-1 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:text-ink-dim disabled:opacity-50"
           >
             <Sparkles className="size-3" /> angle
           </button>
@@ -145,7 +145,7 @@ export function AdvisorPanel({
             value={angle}
             onChange={(e) => setAngle(e.target.value)}
             placeholder="Reconsider from a different angle — e.g. 'focus on go-to-market' · 'be more critical' · 'what's the fastest path to demo?'"
-            className="h-8 flex-1 rounded-lg bg-white/5 px-3 text-sm text-ink outline-none placeholder:text-ink-faint focus:bg-white/8"
+            className="h-8 flex-1 rounded-lg bg-ink/5 px-3 text-sm text-ink outline-none placeholder:text-ink-faint focus:bg-ink/8"
           />
           <button
             type="submit"
@@ -201,7 +201,7 @@ export function AdvisorPanel({
                   disabled={pending}
                   onClick={() => toItem(next, "next")}
                   title="Add this next move to the project's work items"
-                  className="flex items-center gap-1 rounded-md border border-white/8 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:border-plasma/30 hover:text-plasma disabled:opacity-50"
+                  className="flex items-center gap-1 rounded-md border border-ion/12 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:border-plasma/30 hover:text-plasma disabled:opacity-50"
                 >
                   <ListPlus className="size-3" /> item
                 </button>
@@ -209,7 +209,7 @@ export function AdvisorPanel({
                   type="button"
                   disabled={pending}
                   onClick={() => create(() => advisorToFeature(projectId, next), "feature")}
-                  className="flex items-center gap-1 rounded-md border border-white/8 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:border-ion/30 hover:text-ion disabled:opacity-50"
+                  className="flex items-center gap-1 rounded-md border border-ion/12 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:border-ion/30 hover:text-ion disabled:opacity-50"
                 >
                   <Layers className="size-3" /> feature
                 </button>

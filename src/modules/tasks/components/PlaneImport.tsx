@@ -79,7 +79,7 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
         className="glass relative flex w-full max-w-2xl flex-col gap-4 rounded-2xl p-6"
       >
-        <button type="button" onClick={onClose} aria-label="Close" className="absolute right-4 top-4 rounded-lg p-1.5 text-ink-faint hover:bg-white/6 hover:text-ink">
+        <button type="button" onClick={onClose} aria-label="Close" className="absolute right-4 top-4 rounded-lg p-1.5 text-ink-faint hover:bg-ink/6 hover:text-ink">
           <X className="size-4" />
         </button>
         <header className="flex items-center gap-2 pr-8">
@@ -110,10 +110,10 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
             </p>
 
             {plan && (
-              <div className="overflow-x-auto rounded-xl border border-white/6">
+              <div className="overflow-x-auto rounded-xl border border-ion/10">
                 <table className="w-full text-sm">
                   <thead className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
-                    <tr className="border-b border-white/6">
+                    <tr className="border-b border-ion/10">
                       <th className="w-8 p-2" />
                       <th className="p-2 text-left font-normal">Plane project</th>
                       <th className="p-2 text-left font-normal">Into</th>
@@ -125,7 +125,7 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
                   </thead>
                   <tbody className="tabular-nums">
                     {plan.map((p) => (
-                      <tr key={p.planeId} className={cn("border-b border-white/4 last:border-0", p.archived && "opacity-40")}>
+                      <tr key={p.planeId} className={cn("border-b border-ion/6 last:border-0", p.archived && "opacity-40")}>
                         <td className="p-2 text-center">
                           <input
                             type="checkbox"
@@ -177,7 +177,7 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
                 type="button"
                 disabled={pending || running}
                 onClick={() => go("preview")}
-                className="rounded-lg border border-white/10 px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-ink-dim transition hover:bg-white/5 disabled:opacity-40"
+                className="rounded-lg border border-ion/15 px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-ink-dim transition hover:bg-ink/5 disabled:opacity-40"
               >
                 {plan ? "preview again" : "preview"}
               </button>
@@ -207,7 +207,7 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
 
 function ProgressLog({ status }: { status: PlaneImportStatus }) {
   return (
-    <details open={status.state === "running"} className="rounded-xl border border-white/6">
+    <details open={status.state === "running"} className="rounded-xl border border-ion/10">
       <summary className="cursor-pointer px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint">
         {status.mode} log · {status.state}
       </summary>

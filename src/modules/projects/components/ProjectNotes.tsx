@@ -50,7 +50,7 @@ export function ProjectNotes({
       </header>
 
       {notes.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/6 py-8 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+        <div className="rounded-xl border border-dashed border-ion/10 py-8 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
           no notes linked yet
         </div>
       ) : (
@@ -59,7 +59,7 @@ export function ProjectNotes({
             <Link
               key={n.id}
               href={`/m/notes/${n.id}`}
-              className="group glass flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 transition hover:bg-white/4"
+              className="group glass flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 transition hover:bg-ink/4"
             >
               <NotebookPen className="size-3.5 shrink-0 text-violet" />
               <span className="flex-1 truncate text-sm text-ink-dim transition group-hover:text-ink">

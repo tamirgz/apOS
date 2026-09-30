@@ -31,14 +31,12 @@ export function DeleteProjectButton({ id }: { id: string }) {
       disabled={pending}
       title={armed ? "Click again to confirm" : "Delete project"}
       className={cn(
-        "flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest transition disabled:opacity-40",
-        armed
-          ? "border-flare/40 bg-flare/15 text-flare"
-          : "border-white/8 text-ink-faint hover:bg-flare/10 hover:text-flare",
+        "wk-btn disabled:opacity-40",
+        armed ? "!border-flare/40 !bg-flare/15 !text-flare" : "!text-ink-faint hover:!text-flare",
       )}
     >
       <Trash2 className="size-3.5" />
-      {pending ? "…" : armed ? "confirm" : "delete"}
+      {pending ? "…" : armed ? "Click again to delete" : <span className="sr-only">Delete project</span>}
     </button>
   );
 }

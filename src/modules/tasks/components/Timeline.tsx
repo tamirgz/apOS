@@ -13,10 +13,11 @@ import type { WorkFeature, WorkProject } from "../queries";
 import { STATUS_META, displayTitle, plainTitle } from "../states";
 import { FEATURE_META, moduleStats } from "./ModulesView";
 import { readPref, writePref } from "./prefs";
+import { StateGlyph, isClosed } from "./work-ui";
 
 const DAY = 86_400_000;
 const DAY_PX = 22;
-const LABEL_W = 240;
+const LABEL_W = 300;
 const LABEL_MIN = 160;
 const LABEL_MAX = 560;
 /** Pointer travel before a press on a bar counts as a drag, not a click. */
@@ -52,6 +53,10 @@ interface Bar {
   fill?: number;
   late?: boolean;
   module?: boolean;
+  /** A module without its own dates, drawn over its items' span. */
+  derived?: boolean;
+  /** Text inside the bar (item id / "◆ module"). */
+  text?: string;
   title: string;
   save: (s: Span) => Promise<unknown>;
   open: () => void;
@@ -78,6 +83,8 @@ export function Timeline({
   features,
   projects,
   byFeature,
+  deps = [],
+  selectedId = null,
   onOpen,
   onOpenModule,
 }: {
@@ -85,6 +92,9 @@ export function Timeline({
   features: WorkFeature[];
   projects: WorkProject[];
   byFeature: boolean;
+  /** Open "blocks" relations — drawn as arrows from the blocker's end to the blocked item's start. */
+  deps?: { from: string; to: string }[];
+  selectedId?: string | null;
   onOpen: (id: string) => void;
   onOpenModule?: (id: string) => void;
 }) {
@@ -154,6 +164,7 @@ export function Timeline({
       span,
       point,
       color: STATUS_META[t.status].color,
+      text: t.estimate ? `${t.identifier ?? ""} · ${t.estimate}p` : (t.identifier ?? ""),
       late: !closedItem && span.end < today && (d != null || !point),
       title: `${t.identifier ?? ""} ${plainTitle(t.title)}`.trim(),
       save: (n) =>
@@ -162,11 +173,34 @@ export function Timeline({
     };
   };
 
+  // A module's span: its own start → target, or — with neither set — the span of its dated items.
+  const itemSpan = useMemo(() => {
+    const m = new Map<string, Span>();
+    for (const t of items) {
+      if (!t.featureRef?.startsWith("features:")) continue;
+      const ds = [t.startAt, t.dueAt].filter(Boolean).map((x) => dayStart(x!));
+      if (!ds.length) continue;
+      const id = t.featureRef.slice(9);
+      const cur = m.get(id);
+      m.set(id, { start: Math.min(cur?.start ?? Infinity, ...ds), end: Math.max(cur?.end ?? -Infinity, ...ds) });
+    }
+    return m;
+  }, [items]);
+
   const moduleBar = (f: WorkFeature): Bar | null => {
-    const s = f.startAt ? dayStart(f.startAt) : null;
-    const d = f.targetAt ? dayStart(f.targetAt) : null;
+    let s = f.startAt ? dayStart(f.startAt) : null;
+    let d = f.targetAt ? dayStart(f.targetAt) : null;
+    // A missing end comes from the module's items: a target alone starts at its earliest item,
+    // a start alone ends at its latest one — so a milestone reads as a range, not a lone diamond.
+    const span = itemSpan.get(f.id);
+    const own = (s == null ? 0 : 1) + (d == null ? 0 : 1);
+    if (span) {
+      if (s == null && span.start < (d ?? Infinity)) s = span.start;
+      if (d == null && span.end > (s ?? -Infinity)) d = span.end;
+    }
     if (s == null && d == null) return null;
     const point = s == null || d == null;
+    const derived = !point && own < 2;
     const st = stats.get(f.id);
     const live = f.status !== "shipped" && f.status !== "cancelled";
     return {
@@ -174,15 +208,21 @@ export function Timeline({
       span: { start: s ?? d!, end: Math.max(d ?? s!, s ?? d!) },
       point,
       module: true,
+      derived,
+      text: `◆ ${f.name}`,
       color: FEATURE_META[f.status].color,
       fill: st?.total ? st.closed / st.total : 0,
-      late: live && d != null && d < today,
-      title: f.name,
+      late: live && !!f.targetAt && dayStart(f.targetAt) < today,
+      title: derived ? `${f.name} (span of its items — drag to set the module's dates)` : f.name,
       save: (n) =>
         updateFeature(
           f.id,
           f.projectId,
-          point ? (s != null ? { startAt: noon(n.start) } : { targetAt: noon(n.start) }) : { startAt: noon(n.start), targetAt: noon(n.end) },
+          point
+            ? s != null
+              ? { startAt: noon(n.start) }
+              : { targetAt: noon(n.start) }
+            : { startAt: noon(n.start), targetAt: noon(n.end) },
         ),
       open: () => onOpenModule?.(f.id),
     };
@@ -231,7 +271,7 @@ export function Timeline({
       .map((f) => ({ f, bar: moduleBar(f) }))
       .filter((r): r is { f: WorkFeature; bar: Bar } => !!r.bar)
       .sort((a, b) => a.bar.span.start - b.bar.span.start);
-    const name = new Map(projects.map((p) => [`projects:${p.id}`, p.key ? `${p.key} · ${p.name}` : p.name]));
+    const name = new Map(projects.map((p) => [`projects:${p.id}`, p.key && p.key !== p.name ? `${p.key} · ${p.name}` : p.name]));
     const byRef = new Map<string, { item: WorkItem; bar: Bar }[]>();
     for (const r of dated) {
       const ref = r.item.projectRef ?? "";
@@ -320,7 +360,8 @@ export function Timeline({
     );
   }
 
-  const barEl = (bar: Bar) => {
+  const ROW_H = 34;
+  const barEl = (bar: Bar, selected = false) => {
     const s = shown(bar);
     const left = xOf(s.start);
     const w = (Math.round((s.end - s.start) / DAY) + 1) * DAY_PX;
@@ -341,69 +382,121 @@ export function Timeline({
           <span
             className={cn(
               "rotate-45 rounded-[2px]",
-              bar.module ? "size-3 ring-1 ring-white/20" : "size-2.5",
+              bar.module ? "size-3 ring-1 ring-ink/25" : "size-2.5",
               bar.late && "ring-1 ring-flare/70",
-              dragging && "ring-1 ring-ion/70",
+              (dragging || selected) && "ring-2 ring-ion/80",
             )}
             style={{ background: bar.color }}
           />
+          {bar.module && bar.text && !label && (
+            <span className="pointer-events-none absolute left-5 whitespace-nowrap text-[11px] font-medium text-ink-dim">{bar.text.replace(/^◆ /, "")}</span>
+          )}
           {label && <DragLabel text={label} />}
         </span>
       );
     }
+    const width = Math.max(8, w - 4);
+    // The label sits inside when it fits (≈6.5px a character + padding), else just past the bar's end.
+    const inside = !!bar.text && width >= bar.text.length * (bar.module ? 6.6 : 6.4) + 14;
     return (
       <span
         onPointerDown={(e) => begin(e, bar, "move")}
         title={`${plainTitle(bar.title)} — drag to move, drag an end to change that date`}
         className={cn(
-          "group/bar absolute top-1/2 -translate-y-1/2 cursor-grab touch-none overflow-visible rounded-full active:cursor-grabbing",
-          bar.module ? "h-4 border" : "h-3.5",
-          bar.late && "ring-1 ring-flare/60",
-          dragging && "ring-1 ring-ion/70",
+          "group/bar absolute top-1/2 -translate-y-1/2 cursor-grab touch-none overflow-visible rounded-md active:cursor-grabbing",
+          bar.module ? "h-5 border" : "h-4",
+          bar.derived && "border-dashed",
+          bar.late && "ring-1 ring-flare/70",
+          (dragging || selected) && "ring-2 ring-ion/80",
         )}
         style={{
           left: left + 2,
-          width: Math.max(8, w - 4),
+          width,
           ...(bar.module
-            ? { borderColor: `color-mix(in oklab, ${bar.color} 60%, transparent)`, background: `color-mix(in oklab, ${bar.color} 14%, transparent)` }
-            : { background: `color-mix(in oklab, ${bar.color} 55%, transparent)` }),
+            ? { borderColor: bar.color, background: "transparent" }
+            : { background: `color-mix(in oklab, ${bar.color} 88%, transparent)` }),
         }}
       >
         {bar.module && bar.fill != null && (
-          <span className="absolute inset-y-0 left-0 rounded-full bg-plasma/45" style={{ width: `${Math.round(bar.fill * 100)}%` }} />
+          <span className="absolute inset-y-0 left-0 rounded-[5px] opacity-30" style={{ width: `${Math.round(bar.fill * 100)}%`, background: bar.color }} />
         )}
-        <span onPointerDown={(e) => begin(e, bar, "start")} className="absolute inset-y-0 left-0 w-2 cursor-ew-resize rounded-l-full group-hover/bar:bg-white/25" />
-        <span onPointerDown={(e) => begin(e, bar, "end")} className="absolute inset-y-0 right-0 w-2 cursor-ew-resize rounded-r-full group-hover/bar:bg-white/25" />
+        {bar.text && !inside && !label && (
+          <span className={cn("pointer-events-none absolute left-full top-1/2 ml-1.5 -translate-y-1/2 whitespace-nowrap text-ink-dim", bar.module ? "text-[11px] font-medium" : "font-mono text-[10.5px]")}>
+            {bar.text}
+          </span>
+        )}
+        {inside && (
+          <span
+            className={cn(
+              "pointer-events-none absolute inset-0 overflow-hidden whitespace-nowrap px-1.5 leading-[inherit]",
+              bar.module ? "text-[11px] font-medium leading-[18px] text-ink" : "font-mono text-[10.5px] font-semibold leading-4 text-void",
+            )}
+          >
+            {bar.text}
+          </span>
+        )}
+        <span onPointerDown={(e) => begin(e, bar, "start")} className="absolute inset-y-0 left-0 w-2 cursor-ew-resize rounded-l-md group-hover/bar:bg-ink/25" />
+        <span onPointerDown={(e) => begin(e, bar, "end")} className="absolute inset-y-0 right-0 w-2 cursor-ew-resize rounded-r-md group-hover/bar:bg-ink/25" />
         {label && <DragLabel text={label} />}
       </span>
     );
   };
 
-  const row = (key: string, labelEl: ReactNode, bar: Bar | undefined, opts: { head?: boolean; hint?: string } = {}) => (
-    <div key={key} className={cn("group relative flex items-center transition hover:bg-white/[0.03]", opts.head ? "h-9 border-t border-white/5" : "h-8")}>
-      <span className="sticky left-0 z-[1] flex h-full shrink-0 items-center bg-panel/95 px-3" style={{ width: labelW }}>
-        {labelEl}
-      </span>
-      <span className="relative h-full" style={{ width }}>
-        {bar ? barEl(bar) : opts.hint && <span className="absolute left-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-ink-faint/70">{opts.hint}</span>}
-      </span>
-    </div>
-  );
+  // Dependency arrows: blocker's end → blocked item's start, drawn in the blocked row.
+  const barOf = new Map(dated.map((r) => [r.item.id, r.bar]));
+  const incoming = new Map<string, Bar[]>();
+  for (const d of deps) {
+    const from = barOf.get(d.from);
+    if (!from || !barOf.has(d.to)) continue;
+    incoming.set(d.to, [...(incoming.get(d.to) ?? []), from]);
+  }
+  const depEls = (id: string) =>
+    (incoming.get(id) ?? []).map((from) => {
+      const to = barOf.get(id)!;
+      const x1 = xOf(shown(from).end) + DAY_PX - 2;
+      const x2 = xOf(shown(to).start) + 2;
+      // Overlapping spans (the blocked item starts before its blocker ends): a short arrow into the start.
+      const [l, w] = x2 - x1 >= 8 ? [x1, x2 - x1] : [x2 - 14, 12];
+      return <span key={from.key} className="wk-dep" style={{ left: l, width: w }} title="blocked by an open item" aria-hidden />;
+    });
+
+  const row = (key: string, labelEl: ReactNode, bar: Bar | undefined, opts: { head?: boolean; hint?: string; id?: string } = {}) => {
+    const selected = !!opts.id && opts.id === selectedId;
+    return (
+      <div
+        key={key}
+        className={cn("group relative flex items-center border-b wk-line transition hover:bg-ink/[0.03]", selected && "!bg-ion/8")}
+        style={{ height: opts.head ? ROW_H + 2 : ROW_H }}
+      >
+        <span
+          className={cn("sticky left-0 z-[2] flex h-full shrink-0 items-center border-r wk-line bg-panel px-3", selected && "shadow-[inset_2px_0_0_var(--color-ion)]")}
+          style={{ width: labelW }}
+        >
+          {labelEl}
+        </span>
+        <span className="relative h-full" style={{ width }}>
+          {opts.id && depEls(opts.id)}
+          {bar ? barEl(bar, selected) : opts.hint && <span className="absolute left-2 top-1/2 -translate-y-1/2 font-mono text-[10.5px] text-ink-faint">{opts.hint}</span>}
+        </span>
+      </div>
+    );
+  };
 
   const moduleLabel = (name: ReactNode, open?: () => void, pct?: number) => (
     <button type="button" onClick={open} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!open}>
       <Layers className="size-3.5 shrink-0 text-ion" />
-      <span dir="auto" className="truncate text-xs font-medium text-ink-dim hover:text-ink">
+      <span dir="auto" className="truncate font-display text-[13.5px] font-semibold text-ink hover:text-ion">
         {name}
       </span>
-      {pct != null && <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-ink-faint">{pct}%</span>}
+      {pct != null && <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-ink-faint">{pct}%</span>}
     </button>
   );
 
   const itemLabel = (t: WorkItem) => (
     <button type="button" onClick={() => onOpen(t.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-      <span className="w-16 shrink-0 font-mono text-[10px] text-ink-faint">{t.identifier}</span>
-      <span dir="auto" className={cn("truncate text-xs text-ink-dim group-hover:text-ink", (t.status === "done" || t.status === "cancelled") && "line-through opacity-60")}>
+      <StateGlyph s={t.status} />
+      <span className="shrink-0 font-mono text-[11.5px] text-ink-faint">{t.identifier}</span>
+      <span dir="auto" className={cn("truncate text-[12.5px] text-ink-dim group-hover:text-ink", isClosed(t.status) && "line-through opacity-60")}>
         {displayTitle(t)}
       </span>
     </button>
@@ -417,30 +510,37 @@ export function Timeline({
   return (
     <div className="flex flex-col gap-2">
       <Toolbar hideDone={hideDone} onToggle={toggleHideDone} />
-      <div className={cn("glass overflow-hidden rounded-xl", drag && "select-none")}>
+      <div className={cn("glass overflow-hidden rounded-2xl", drag && "select-none")}>
         <div className="overflow-x-auto">
           <div className="relative" style={{ width: labelW + width }}>
             {/* header */}
-            <div className="sticky top-0 z-10 flex h-8 border-b border-white/6 bg-panel/80 backdrop-blur">
-              <div className="sticky left-0 z-10 flex shrink-0 items-center bg-panel/95 px-3 font-mono text-[10px] uppercase tracking-widest text-ink-faint" style={{ width: labelW }}>
-                {byFeature ? "module / item" : "project / item"}
+            <div className="sticky top-0 z-10 flex h-[46px] border-b wk-line-strong bg-panel">
+              <div
+                className="sticky left-0 z-10 flex shrink-0 items-end border-r wk-line bg-panel px-3 pb-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-faint"
+                style={{ width: labelW }}
+              >
+                {byFeature ? "Module / item" : "Project / item"}
                 <span
                   role="separator"
                   aria-orientation="vertical"
                   aria-label="Resize the label column"
                   title="Drag to resize"
                   onPointerDown={resizeLabels}
-                  className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize border-r border-white/8 transition hover:border-ion/60 hover:bg-ion/10"
+                  className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize transition hover:bg-ion/15"
                 />
               </div>
               <div className="relative" style={{ width }}>
-                {months.map((m) => (
-                  <span key={m.x} className="absolute top-1 font-mono text-[10px] text-ink-dim" style={{ left: m.x + 4 }}>
+                {months.map((m, i) => (
+                  <span
+                    key={m.x}
+                    className="absolute top-0 h-[26px] border-l wk-line-strong px-2 pt-1.5 font-mono text-[11.5px] text-ink-dim"
+                    style={{ left: m.x, width: (months[i + 1]?.x ?? width) - m.x }}
+                  >
                     {m.label}
                   </span>
                 ))}
                 {weeks.map((x) => (
-                  <span key={x} className="absolute bottom-0.5 font-mono text-[9px] tabular-nums text-ink-faint" style={{ left: x + 2 }}>
+                  <span key={x} className="absolute bottom-1 font-mono text-[10px] tabular-nums text-ink-faint" style={{ left: x + 3 }}>
                     {new Date(start + (x / DAY_PX) * DAY).getDate()}
                   </span>
                 ))}
@@ -448,18 +548,19 @@ export function Timeline({
             </div>
 
             {/* grid + today line */}
-            <div className="pointer-events-none absolute bottom-0 top-8" style={{ left: labelW, width }} aria-hidden>
+            <div className="pointer-events-none absolute bottom-0 top-[46px] z-[1]" style={{ left: labelW, width }} aria-hidden>
               {weeks.map((x) => (
-                <span key={x} className="absolute inset-y-0 w-px bg-white/[0.04]" style={{ left: x }} />
+                <span key={x} className="absolute inset-y-0 w-px bg-ion/[0.05]" style={{ left: x }} />
               ))}
-              {today >= start && today <= end && (
-                <span className="absolute inset-y-0 w-px bg-flare/60" style={{ left: xOf(today) + DAY_PX / 2 }} title="Today" />
-              )}
+              {months.slice(1).map((m) => (
+                <span key={`m${m.x}`} className="absolute inset-y-0 w-px bg-ion/[0.14]" style={{ left: m.x }} />
+              ))}
+              {today >= start && today <= end && <span className="wk-today" style={{ left: xOf(today) + DAY_PX / 2 - 1 }} title="Today" />}
             </div>
 
             {moduleRows.length > 0 && (
-              <div className="border-b border-white/6 pb-1">
-                <div className="sticky left-0 flex h-7 items-center px-3 font-mono text-[10px] uppercase tracking-[0.2em] text-ink-dim" style={{ width: labelW }}>
+              <div className="border-b wk-line-strong">
+                <div className="sticky left-0 flex h-8 items-center px-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-faint" style={{ width: labelW }}>
                   Modules
                 </div>
                 {moduleRows.map(({ f, bar }) =>
@@ -467,13 +568,14 @@ export function Timeline({
                     `m:${f.id}`,
                     moduleLabel(
                       <>
-                        <span className="text-ink-faint">{projectName.get(f.projectId)} · </span>
+                        <span className="font-mono text-[11px] font-normal text-ink-faint">{projectName.get(f.projectId)} · </span>
                         {f.name}
                       </>,
                       onOpenModule && (() => onOpenModule(f.id)),
                       pctOf(f.id),
                     ),
                     bar,
+                    { head: true },
                   ),
                 )}
               </div>
@@ -484,17 +586,17 @@ export function Timeline({
                 {byFeature ? (
                   row(`g:${g.key}`, moduleLabel(g.head.label, g.head.open, g.key !== "none" ? pctOf(g.key) : undefined), g.head.bar, { head: true, hint: g.head.hint })
                 ) : (
-                  <div className="sticky left-0 flex h-7 items-center px-3 text-xs font-medium text-ink-dim" style={{ width: labelW }}>
+                  <div className="sticky left-0 flex h-8 items-center px-3 font-display text-[13px] font-semibold text-ink" style={{ width: labelW }}>
                     <span className="truncate">{g.head.label}</span>
                   </div>
                 )}
-                {g.rows.map((r) => row(r.bar.key, itemLabel(r.item), r.bar))}
+                {g.rows.map((r) => row(r.bar.key, itemLabel(r.item), r.bar, { id: r.item.id }))}
               </div>
             ))}
           </div>
         </div>
         {undated > 0 && (
-          <p className="border-t border-white/5 px-3 py-2 font-mono text-[10px] text-ink-faint">
+          <p className="border-t wk-line px-3 py-2 font-mono text-[10.5px] text-ink-faint">
             + {undated} open item{undated === 1 ? "" : "s"} without dates (not shown)
           </p>
         )}
@@ -507,7 +609,7 @@ const shortDay = (t: number) => new Date(t).toLocaleDateString(undefined, { mont
 
 function DragLabel({ text }: { text: string }) {
   return (
-    <span className="pointer-events-none absolute -top-5 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded bg-void/90 px-1.5 py-0.5 font-mono text-[10px] text-ion">
+    <span className="pointer-events-none absolute -top-5 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded bg-void/90 px-1.5 py-0.5 font-mono text-[10.5px] text-ion">
       {text}
     </span>
   );
@@ -515,7 +617,7 @@ function DragLabel({ text }: { text: string }) {
 
 function Toolbar({ hideDone, onToggle }: { hideDone: boolean; onToggle: () => void }) {
   return (
-    <div className="flex items-center gap-3 font-mono text-[10px] text-ink-faint">
+    <div className="flex items-center gap-3 font-mono text-[10.5px] text-ink-faint">
       <label className="flex cursor-pointer items-center gap-1.5 uppercase tracking-widest">
         <input type="checkbox" checked={hideDone} onChange={onToggle} className="accent-[var(--color-ion)]" />
         hide done

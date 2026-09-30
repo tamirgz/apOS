@@ -12,7 +12,7 @@ import { updateProject } from "../actions";
  * id (never the name), saving here propagates the new name everywhere it's
  * shown; updateProject also nulls the embedding so the sweep re-ingests it.
  */
-export function ProjectTitle({ id, name }: { id: string; name: string }) {
+export function ProjectTitle({ id, name, size = "hero" }: { id: string; name: string; /** "head": sits inside the Work header's title line. */ size?: "hero" | "head" }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(name);
@@ -49,7 +49,10 @@ export function ProjectTitle({ id, name }: { id: string; name: string }) {
             }
           }}
           onBlur={commit}
-          className="w-full max-w-lg rounded-lg bg-white/5 px-2 py-1 font-display text-3xl font-semibold text-ink outline-none focus:bg-white/8"
+          className={cn(
+            "w-full max-w-lg rounded-lg bg-ink/5 px-2 py-1 font-display font-semibold text-ink outline-none focus:bg-ink/8",
+            size === "head" ? "text-[26px] leading-tight" : "text-3xl",
+          )}
         />
         <button
           type="button"
@@ -68,7 +71,7 @@ export function ProjectTitle({ id, name }: { id: string; name: string }) {
             setEditing(false);
           }}
           title="Cancel"
-          className="rounded-md p-1.5 text-ink-faint transition hover:bg-white/6 hover:text-ink"
+          className="rounded-md p-1.5 text-ink-faint transition hover:bg-ink/6 hover:text-ink"
         >
           <X className="size-4" />
         </button>
@@ -85,11 +88,11 @@ export function ProjectTitle({ id, name }: { id: string; name: string }) {
       }}
       title="Rename project"
       className={cn(
-        "group/title flex items-center gap-2 rounded-lg text-left transition hover:bg-white/4",
+        "group/title flex items-center gap-2 rounded-lg text-left transition hover:bg-ink/4",
         pending && "opacity-50",
       )}
     >
-      <h1 className="font-display text-3xl font-semibold text-ink">{name}</h1>
+      {size === "head" ? <span>{name}</span> : <h1 className="font-display text-3xl font-semibold text-ink">{name}</h1>}
       <Pencil className="size-3.5 shrink-0 text-ink-faint opacity-0 transition group-hover/title:opacity-100" />
     </button>
   );

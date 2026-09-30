@@ -1,6 +1,6 @@
 import { lastActiveLabel } from "@/core/ui/time";
 import Link from "next/link";
-import { ArrowLeft, Sparkles } from "lucide-react";
+import { Download, GitBranch } from "lucide-react";
 import type { ModuleRouteProps } from "@/core/modules/types.server";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import {
@@ -15,7 +15,7 @@ import { usableRepoPath } from "../repo";
 import { AdvisorPanel } from "../components/AdvisorPanel";
 import { getProjectCockpitById } from "../queries";
 import { CockpitHeader } from "../components/CockpitHeader";
-import { HealthChip } from "../components/HealthChip";
+import { HEALTH_META } from "../health";
 import { ProjectAttention } from "../components/ProjectAttention";
 import { DeleteProjectButton } from "../components/DeleteProjectButton";
 import { ProjectNotes } from "../components/ProjectNotes";
@@ -63,55 +63,67 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
   const done = work.items.filter((t) => t.status === "done" || t.status === "cancelled").length;
   const openAttention = attention.filter((a) => a.status === "open");
 
+  const imported = work.items.some((t) => t.externalRef?.startsWith("plane:"));
+  const openCount = work.items.length - done;
+  const chipTone = (c: string) => ({ color: c, borderColor: `color-mix(in oklab, ${c} 35%, transparent)` });
+
   return (
     <div className="flex flex-col gap-6">
-      <header>
-        <Link
-          href="/m/projects"
-          className="mb-3 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:text-ink"
-        >
-          <ArrowLeft className="size-3.5" />
-          projects
-        </Link>
-        <div className="flex flex-wrap items-center gap-3">
-          <ProjectTitle id={project.id} name={project.name} />
-          <StatusCycleButton id={project.id} status={project.status} />
-          {project.key && (
-            <span className="rounded-md border border-white/10 px-1.5 py-0.5 font-mono text-[10px] tracking-widest text-ink-dim" title="Work-item key — items are numbered KEY-N">
-              {project.key}
-            </span>
-          )}
-          <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
-            {done}/{work.items.length} items
-          </span>
-          <Link href="?tab=overview" className="flex items-center gap-2" title={project.resolvedHealth.reason}>
-            <HealthChip health={project.resolvedHealth.health} reason={project.resolvedHealth.reason} />
-            {openAttention.length > 0 && (
-              <span className="font-mono text-[10px] uppercase tracking-widest text-solar">{openAttention.length} needs you</span>
-            )}
-          </Link>
-          <div className="ml-auto flex items-center gap-2">
-            <Link
-              href={`/m/ask?q=${encodeURIComponent(`Everything on ${project.name} — current status, open work, and risks`)}`}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-ion/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/10"
-              title="Cited answer over everything linked to this project"
-            >
-              <Sparkles className="size-3" />
-              ask about this
-            </Link>
-            <DeleteProjectButton id={project.id} />
-          </div>
-        </div>
-        {project.description && (
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink-dim">
-            {project.description}
-          </p>
-        )}
-      </header>
-
       <WorkView
         data={work}
         projectId={project.id}
+        head={{
+          crumb: (
+            <>
+              <Link href="/m/tasks" className="transition hover:text-ink">
+                Work
+              </Link>{" "}
+              /{" "}
+              <Link href="/m/projects" className="transition hover:text-ink">
+                Projects
+              </Link>{" "}
+              / {project.key ?? project.name}
+            </>
+          ),
+          title: <ProjectTitle id={project.id} name={project.name} size="head" />,
+          chips: (
+            <>
+              <Link href="?tab=overview" className="wk-chip transition hover:brightness-125" style={chipTone(HEALTH_META[project.resolvedHealth.health].accent)} title={project.resolvedHealth.reason}>
+                <span className="dot" />
+                {HEALTH_META[project.resolvedHealth.health].label}
+              </Link>
+              <StatusCycleButton id={project.id} status={project.status} />
+              {project.key && project.key !== project.name && (
+                <span className="wk-chip font-mono" title="Work-item key — items are numbered KEY-N">
+                  {project.key}
+                </span>
+              )}
+              <span className="wk-chip">
+                <span className="font-mono tabular-nums text-ink">{openCount}</span> open · {done} done
+              </span>
+              {project.repoUrl && (
+                <span className="wk-chip" title={project.repoUrl}>
+                  <GitBranch className="size-3" /> {project.repoUrl.includes("github.com") ? "github" : "repo"} · linked
+                </span>
+              )}
+              {imported && (
+                <span className="wk-chip" title="Items were imported from a Plane workspace">
+                  <Download className="size-3" /> Plane · imported
+                </span>
+              )}
+              {openAttention.length > 0 && (
+                <Link href="?tab=overview" className="wk-chip" style={chipTone("var(--color-solar)")}>
+                  <span className="dot" />
+                  {openAttention.length} needs you
+                </Link>
+              )}
+            </>
+          ),
+          actions: <DeleteProjectButton id={project.id} />,
+          askLabel: "Ask about this project",
+          askQuery: `Everything on ${project.name} — current status, open work, and risks`,
+          about: project.description ? <p className="max-w-3xl text-sm leading-relaxed text-ink-dim">{project.description}</p> : undefined,
+        }}
         overview={
           <div className="flex flex-col gap-6">
             <CockpitHeader

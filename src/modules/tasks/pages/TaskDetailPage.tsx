@@ -19,17 +19,12 @@ export async function TaskDetailPage({ params }: ModuleRouteProps) {
 
   return (
     <div className="max-w-2xl lg:max-w-6xl">
-      <Link
-        href="/m/tasks"
-        className="mb-3 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:text-ink"
-      >
+      <Link href="/m/tasks" className="mb-2 inline-flex items-center gap-1.5 font-mono text-xs text-ink-faint transition hover:text-ink">
         <ArrowLeft className="size-3.5" />
-        work
+        Work
       </Link>
       {id ? (
-        <div className="glass rounded-2xl p-6">
-          <WorkItemPage id={id} projects={projects} />
-        </div>
+        <WorkItemPage id={id} projects={projects} />
       ) : (
         <p className="glass rounded-2xl px-8 py-16 text-center font-mono text-[11px] uppercase tracking-[0.35em] text-flare">
           no work item {ref}

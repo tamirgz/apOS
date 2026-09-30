@@ -66,6 +66,6 @@ export function displayTitle(t: {
   shortTitle?: string | null;
   shortTitleOf?: string | null;
 }): string {
-  if (t.shortTitle && t.shortTitleOf && t.shortTitleOf === titleHash(t.title)) return t.shortTitle;
+  if (t.shortTitle && t.shortTitleOf && t.shortTitleOf === titleHash(t.title)) return plainTitle(t.shortTitle);
   return plainTitle(t.title);
 }

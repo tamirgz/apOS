@@ -62,7 +62,7 @@ export function moduleStats(items: WorkItem[]): Map<string, ModuleStats> {
 export function StateBar({ s, className }: { s?: ModuleStats; className?: string }) {
   const total = s ? BOARD_STATUSES.reduce((n, st) => n + s.by[st], 0) : 0;
   return (
-    <div className={cn("flex h-1.5 w-full overflow-hidden rounded-full bg-white/6", className)} role="img" aria-label={s ? BOARD_STATUSES.map((st) => `${s.by[st]} ${STATUS_META[st].label}`).join(", ") : "No items"}>
+    <div className={cn("flex h-1.5 w-full overflow-hidden rounded-full bg-ink/6", className)} role="img" aria-label={s ? BOARD_STATUSES.map((st) => `${s.by[st]} ${STATUS_META[st].label}`).join(", ") : "No items"}>
       {total > 0 &&
         BOARD_STATUSES.filter((st) => s!.by[st] > 0).map((st) => (
           <span
@@ -78,10 +78,10 @@ export function StateBar({ s, className }: { s?: ModuleStats; className?: string
 
 function DateSpan({ f }: { f: WorkFeature }) {
   const now = useNow();
-  if (!f.startAt && !f.targetAt) return <span className="font-mono text-[10px] text-ink-faint/60">no dates</span>;
+  if (!f.startAt && !f.targetAt) return <span className="font-mono text-[11px] text-ink-faint/60">no dates</span>;
   const late = f.targetAt && f.status !== "shipped" && f.status !== "cancelled" && +new Date(f.targetAt) + DAY < now;
   return (
-    <span className={cn("inline-flex items-center gap-1 font-mono text-[10px] tabular-nums", late ? "text-flare" : "text-ink-faint")}>
+    <span className={cn("inline-flex items-center gap-1 font-mono text-[11px] tabular-nums", late ? "text-flare" : "text-ink-faint")}>
       {f.startAt ? shortDate(f.startAt) : "—"}
       <ArrowRight className="size-2.5" />
       {f.targetAt ? shortDate(f.targetAt) : "—"}
@@ -93,7 +93,7 @@ function DateSpan({ f }: { f: WorkFeature }) {
 function StatusPill({ status }: { status: FeatureStatus }) {
   return (
     <span
-      className="shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest"
+      className="shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-widest"
       style={{ color: FEATURE_META[status].color, borderColor: "color-mix(in oklab, currentColor 35%, transparent)" }}
     >
       {FEATURE_META[status].label}
@@ -151,7 +151,7 @@ export function ModulesView({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg border border-white/8 p-0.5" role="tablist" aria-label="Which modules">
+        <div className="flex rounded-lg border border-ion/12 p-0.5" role="tablist" aria-label="Which modules">
           {FILTERS.map((x) => (
             <button
               key={x.id}
@@ -160,8 +160,8 @@ export function ModulesView({
               aria-selected={filter === x.id}
               onClick={() => setFilter(x.id)}
               className={cn(
-                "rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest transition",
-                filter === x.id ? "bg-white/8 text-ink" : "text-ink-faint hover:text-ink-dim",
+                "rounded-md px-2.5 py-1 font-mono text-[11px] uppercase tracking-widest transition",
+                filter === x.id ? "bg-ink/8 text-ink" : "text-ink-faint hover:text-ink-dim",
               )}
             >
               {x.label} <span className="tabular-nums opacity-70">{count(x.id)}</span>
@@ -172,7 +172,7 @@ export function ModulesView({
           <button
             type="button"
             onClick={() => setAdding((v) => !v)}
-            className="ml-auto inline-flex items-center gap-1 rounded-lg px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:bg-white/5 hover:text-ink"
+            className="ml-auto inline-flex items-center gap-1 rounded-lg px-2 py-1 font-mono text-[11px] uppercase tracking-widest text-ink-faint transition hover:bg-ink/5 hover:text-ink"
           >
             <Plus className="size-3" /> module
           </button>
@@ -194,7 +194,7 @@ export function ModulesView({
               if (row) onOpen(row.id);
             });
           }}
-          className="glass flex items-center gap-2 rounded-xl p-1.5 pl-3"
+          className="glass flex items-center gap-2 rounded-2xl p-1.5 pl-3"
         >
           <Layers className="size-4 text-solar" />
           <input
@@ -208,7 +208,7 @@ export function ModulesView({
             disabled={pending}
             className="h-8 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
           />
-          <button type="submit" disabled={pending || !name.trim()} className="rounded-lg bg-solar/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-solar hover:bg-solar/25 disabled:opacity-40">
+          <button type="submit" disabled={pending || !name.trim()} className="rounded-lg bg-solar/15 px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-solar hover:bg-solar/25 disabled:opacity-40">
             add
           </button>
         </form>
@@ -227,14 +227,14 @@ export function ModulesView({
           {pid && (
             <Link
               href={`/m/projects/${pid}?tab=modules`}
-              className="flex w-fit items-center gap-2 px-1 pt-2 font-mono text-[10px] uppercase tracking-[0.25em] text-ink-faint transition hover:text-ink"
+              className="flex w-fit items-center gap-2 px-1 pt-2 font-mono text-[11px] uppercase tracking-[0.25em] text-ink-faint transition hover:text-ink"
             >
               <span className="text-ink-dim">{byProject.get(pid)?.key}</span>
               {byProject.get(pid)?.name ?? "Unknown project"}
             </Link>
           )}
           <div className="glass overflow-hidden rounded-xl">
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-ion/8">
               {fs.map((f) => {
                 const s = stats.get(f.id);
                 const pct = s?.total ? Math.round((s.closed / s.total) * 100) : 0;
@@ -243,7 +243,7 @@ export function ModulesView({
                     <button
                       type="button"
                       onClick={() => onOpen(f.id)}
-                      className="group grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1.5 px-3 py-2.5 text-left transition hover:bg-white/3 md:grid-cols-[auto_minmax(0,1fr)_8.5rem_10rem_3rem]"
+                      className="group grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1.5 px-3 py-2.5 text-left transition hover:bg-ink/3 md:grid-cols-[auto_minmax(0,1fr)_8.5rem_10rem_3rem]"
                     >
                       <StatusPill status={f.status} />
                       <span dir="auto" className="min-w-0 truncate text-sm text-ink-dim transition group-hover:text-ink">{f.name}</span>
@@ -253,7 +253,7 @@ export function ModulesView({
                       <span className="col-span-3 flex items-center gap-2 md:col-span-1">
                         <StateBar s={s} />
                       </span>
-                      <span className="hidden text-right font-mono text-[10px] tabular-nums text-ink-faint md:block" title={`${s?.closed ?? 0} of ${s?.total ?? 0} done`}>
+                      <span className="hidden text-right font-mono text-[11px] tabular-nums text-ink-faint md:block" title={`${s?.closed ?? 0} of ${s?.total ?? 0} done`}>
                         {s?.total ? `${pct}%` : "—"}
                       </span>
                     </button>
@@ -266,7 +266,7 @@ export function ModulesView({
       ))}
 
       {shown.length > 0 && (
-        <p className="flex flex-wrap items-center gap-3 px-1 font-mono text-[10px] text-ink-faint">
+        <p className="flex flex-wrap items-center gap-3 px-1 font-mono text-[11px] text-ink-faint">
           {BOARD_STATUSES.map((st) => (
             <span key={st} className="inline-flex items-center gap-1">
               <span className="size-2 rounded-full" style={{ background: STATUS_META[st].color }} />
@@ -368,11 +368,11 @@ export function ModuleHeader({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:bg-white/5 hover:text-ink"
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[11px] uppercase tracking-widest text-ink-faint transition hover:bg-ink/5 hover:text-ink"
         >
           <ArrowLeft className="size-3" /> modules
         </button>
-        {project && <span className="font-mono text-[10px] text-ink-faint">{project.key ?? project.name}</span>}
+        {project && <span className="font-mono text-[11px] text-ink-faint">{project.key ?? project.name}</span>}
         <span className="ml-auto flex items-center gap-1">
           {(s?.open ?? 0) > 0 && (
             <button
@@ -386,7 +386,7 @@ export function ModuleHeader({
                     },
                   ) : arm("run"))}
               className={cn(
-                "flex items-center gap-1 rounded-lg px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition",
+                "flex items-center gap-1 rounded-lg px-2 py-1 font-mono text-[11px] uppercase tracking-widest transition",
                 armed === "run" ? "border border-violet/40 text-violet" : "text-ink-faint hover:text-violet",
               )}
               title="One run takes all the module's open items; they move to In review when it finishes"
@@ -400,7 +400,7 @@ export function ModuleHeader({
             disabled={pending}
             onClick={() => (armed === "delete" ? run(() => deleteFeature(f.id, f.projectId), onDeleted) : arm("delete"))}
             className={cn(
-              "flex items-center gap-1 rounded-lg px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition",
+              "flex items-center gap-1 rounded-lg px-2 py-1 font-mono text-[11px] uppercase tracking-widest transition",
               armed === "delete" ? "border border-flare/40 text-flare" : "text-ink-faint hover:text-flare",
             )}
             title="Delete module (its items stay in the project)"
@@ -420,7 +420,7 @@ export function ModuleHeader({
             onBlur={() => name.trim() && name.trim() !== f.name && save({ name }, "Module renamed")}
             onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
             aria-label="Module name"
-            className="rounded-lg bg-transparent px-1 font-display text-xl text-ink outline-none transition hover:bg-white/4 focus:bg-white/6"
+            className="rounded-lg bg-transparent px-1 font-display text-xl text-ink outline-none transition hover:bg-ink/4 focus:bg-ink/6"
           />
           <textarea
             dir="auto"
@@ -430,14 +430,14 @@ export function ModuleHeader({
             placeholder="What ships in this module, and when it counts as done…"
             aria-label="Description"
             rows={Math.min(6, Math.max(2, desc.split("\n").length))}
-            className="resize-y rounded-lg bg-white/3 px-2 py-1.5 text-sm leading-relaxed text-ink-dim outline-none placeholder:text-ink-faint focus:bg-white/6"
+            className="resize-y rounded-lg bg-ink/3 px-2 py-1.5 text-sm leading-relaxed text-ink-dim outline-none placeholder:text-ink-faint focus:bg-ink/6"
           />
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={f.status}
               onChange={(e) => save({ status: e.target.value as FeatureStatus })}
               aria-label="Module state"
-              className="rounded-lg border border-white/8 bg-panel px-2 py-1 text-xs text-ink-dim outline-none"
+              className="rounded-lg border border-ion/12 bg-panel px-2 py-1 text-xs text-ink-dim outline-none"
             >
               {FEATURE_STATUSES.map((st) => (
                 <option key={st} value={st}>{FEATURE_META[st].label}</option>
@@ -449,7 +449,7 @@ export function ModuleHeader({
                 type="date"
                 value={f.startAt ? dateInput(f.startAt) : ""}
                 onChange={(e) => save({ startAt: day(e.target.value) })}
-                className="rounded-lg border border-white/8 bg-transparent px-2 py-1 text-xs text-ink-dim outline-none"
+                className="rounded-lg border border-ion/12 bg-transparent px-2 py-1 text-xs text-ink-dim outline-none"
               />
             </label>
             <label className="flex items-center gap-1.5 text-xs text-ink-faint">
@@ -458,7 +458,7 @@ export function ModuleHeader({
                 type="date"
                 value={f.targetAt ? dateInput(f.targetAt) : ""}
                 onChange={(e) => save({ targetAt: day(e.target.value) })}
-                className="rounded-lg border border-white/8 bg-transparent px-2 py-1 text-xs text-ink-dim outline-none"
+                className="rounded-lg border border-ion/12 bg-transparent px-2 py-1 text-xs text-ink-dim outline-none"
               />
             </label>
           </div>
@@ -467,12 +467,12 @@ export function ModuleHeader({
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline gap-2">
             <span className="font-display text-3xl tabular-nums text-ink">{pct}%</span>
-            <span className="font-mono text-[10px] tabular-nums text-ink-faint">
+            <span className="font-mono text-[11px] tabular-nums text-ink-faint">
               {s?.closed ?? 0}/{s?.total ?? 0} done
             </span>
           </div>
           <StateBar s={s} className="w-56" />
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] tabular-nums text-ink-faint">
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-ink-faint">
             {BOARD_STATUSES.filter((st) => st !== "done" && (s?.by[st] ?? 0) > 0).map((st) => (
               <span key={st} className="inline-flex items-center gap-1">
                 <span className="size-1.5 rounded-full" style={{ background: STATUS_META[st].color }} />
@@ -483,7 +483,7 @@ export function ModuleHeader({
           <span className="text-ink-faint">
             <BurnUp items={mine} from={from} to={to} />
           </span>
-          <span className="font-mono text-[9px] text-ink-faint">solid = done · dashed = total scope</span>
+          <span className="font-mono text-[10.5px] text-ink-faint">solid = done · dashed = total scope</span>
         </div>
       </div>
       {error && <p className="text-xs text-flare">{error}</p>}

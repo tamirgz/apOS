@@ -47,15 +47,17 @@
 html {
   /* The page must never scroll sideways — wide content uses its own
      overflow-x:auto container. Clipping here (not just on body) stops a fixed
-     decorative layer or a rogue 100vw element from rubber-banding on mobile. */
-  overflow-x: hidden;
+     decorative layer or a rogue 100vw element from rubber-banding on mobile.
+     `clip`, not `hidden`: hidden makes html/body scroll containers, which
+     breaks the sidebar's position:sticky (it scrolled away on long pages). */
+  overflow-x: clip;
 }
 
 body {
   background: var(--color-void);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 ::selection {

@@ -296,7 +296,7 @@ export function Timeline({
       return (
         <span
           onPointerDown={(e) => begin(e, bar, "move")}
-          title={`${bar.title} — drag to move`}
+          title={`${plainTitle(bar.title)} — drag to move`}
           className="absolute top-1/2 flex size-4 -translate-y-1/2 cursor-grab touch-none items-center justify-center active:cursor-grabbing"
           style={{ left: left + DAY_PX / 2 - 8 }}
         >
@@ -316,7 +316,7 @@ export function Timeline({
     return (
       <span
         onPointerDown={(e) => begin(e, bar, "move")}
-        title={`${bar.title} — drag to move, drag an end to change that date`}
+        title={`${plainTitle(bar.title)} — drag to move, drag an end to change that date`}
         className={cn(
           "group/bar absolute top-1/2 -translate-y-1/2 cursor-grab touch-none overflow-visible rounded-full active:cursor-grabbing",
           bar.module ? "h-4 border" : "h-3.5",

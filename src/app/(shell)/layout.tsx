@@ -17,7 +17,7 @@ export default function ShellLayout({
         <Toasts />
         <UsageBeacon />
         <Sidebar />
-        <main className="min-w-0 flex-1 p-3 pl-5 max-md:pl-14">
+        <main className="min-w-0 flex-1 p-3 pl-5 max-md:pl-3">
           <div className="mx-auto max-w-7xl">
             <TopBar />
             {children}

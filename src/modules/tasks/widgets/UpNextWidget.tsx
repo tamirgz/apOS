@@ -3,7 +3,7 @@ import { asc, inArray, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { ACTIVE_STATUSES, priorityRank, tasks } from "../schema";
 import { withIdentifiers } from "../core";
-import { STATUS_META } from "../states";
+import { STATUS_META, plainTitle } from "../states";
 import { cn } from "@/core/ui/cn";
 
 const PRIORITY_COLOR = {
@@ -52,7 +52,7 @@ export async function UpNextWidget() {
             ▲ {t.identifier ? `${t.identifier} · ` : ""}{STATUS_META[t.status].label}
           </span>
           <span className="line-clamp-2 text-[13px] leading-snug text-ink-dim transition group-hover:text-ink">
-            {t.title}
+            {plainTitle(t.title)}
           </span>
         </Link>
       ))}

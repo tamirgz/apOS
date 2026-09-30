@@ -24,11 +24,12 @@ export function ApprovalsPanel({ pending }: { pending: Approval[] }) {
           {pending.map((a) => (
             <motion.div
               key={a.id}
+              id={`approval-${a.id}`}
               layout
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96 }}
-              className="glass glass-edge rounded-xl p-4"
+              className="glass glass-edge scroll-mt-20 rounded-xl p-4 target:ring-1 target:ring-solar/60"
               style={{ borderColor: "color-mix(in oklab, var(--color-solar) 30%, transparent)" }}
             >
               <div className="mb-2 flex items-center gap-2">

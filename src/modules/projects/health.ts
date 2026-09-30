@@ -101,7 +101,15 @@ export function resolveHealth(
     stored &&
     healthUpdatedAt &&
     Date.now() - healthUpdatedAt.getTime() < HEALTH_STALE_DAYS * DAY;
-  if (fresh) {
+  // A judgement written BEFORE the project's latest activity may describe a
+  // project that no longer exists (e.g. "no open tasks" read hours before an
+  // import added 500). Only "blocked" survives — the heuristic can't see it.
+  const overtaken =
+    !!healthUpdatedAt &&
+    !!signals.lastActivityAt &&
+    signals.lastActivityAt.getTime() > healthUpdatedAt.getTime() &&
+    stored !== "blocked";
+  if (fresh && !overtaken) {
     return {
       health: stored!,
       reason: storedReason ?? HEALTH_META[stored!].label,

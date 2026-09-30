@@ -6,6 +6,7 @@ import { db as defaultDb, type Db } from "@/core/db/client";
 import { notes } from "../notes/schema";
 import { attentionItems } from "../today/schema";
 import { priorityRank, tasks } from "../tasks/schema";
+import { plainTitle } from "../tasks/states";
 import { resolveHealth, type HealthSignals } from "./health";
 import {
   projects,
@@ -18,7 +19,7 @@ export interface ProjectWithTaskCounts extends Project {
   taskCounts: { total: number; done: number };
 }
 
-/** First sentence of a longer brief — keeps a derived "[Advise] …" next-action
+/** First sentence of a longer brief — keeps a derived advisor next-action
  *  to one concrete line instead of the advisor's full 2-3 sentence paragraph. */
 function firstSentence(s: string): string {
   const m = s.match(/^.*?[.!?](\s|$)/);
@@ -37,6 +38,9 @@ export interface ProjectCockpit extends Project {
   openAttention: number;
   lastActivityAt: Date | null;
   resolvedHealth: { health: ProjectHealth; reason: string; source: "agent" | "derived" };
+  /** Where `nextAction` came from: typed by you, the top open work item, or the
+   *  advisor's suggestion (shown with a small tag instead of a text prefix). */
+  nextActionSource: "user" | "task" | "advisor" | null;
 }
 
 /**
@@ -82,15 +86,20 @@ export async function getProjectCockpit(
     // next_action, fully derived so it can never be guessed or cross-wired:
     //   1. a stored value (a user override) wins;
     //   2. else the soonest-due / highest-priority OPEN task;
-    //   3. else (no open tasks) the advisor's recommendation, prefixed
-    //      "[Advise] " — a path-forward suggestion grounded in the project's
+    //   3. else (no open tasks) the advisor's recommendation (tagged via
+    //      nextActionSource) — a path-forward suggestion grounded in the project's
     //      state (incl. its completed tasks). Reliable because the advisor
     //      covers every project, unlike a flaky per-run write.
-    const advise = project.advisorNext
-      ? `[Advise] ${firstSentence(project.advisorNext)}`
-      : null;
+    const advise = project.advisorNext ? firstSentence(project.advisorNext) : null;
     const nextAction =
-      project.nextAction ?? (nextTaskTitle ? String(nextTaskTitle) : advise);
+      project.nextAction ?? (nextTaskTitle ? plainTitle(String(nextTaskTitle)) : advise);
+    const nextActionSource = project.nextAction
+      ? ("user" as const)
+      : nextTaskTitle
+        ? ("task" as const)
+        : advise
+          ? ("advisor" as const)
+          : null;
     const signals: HealthSignals = {
       status: project.status,
       goal: project.goal,
@@ -102,6 +111,7 @@ export async function getProjectCockpit(
     return {
       ...project,
       nextAction,
+      nextActionSource,
       taskCounts: {
         total: Number(total),
         done: Number(done),

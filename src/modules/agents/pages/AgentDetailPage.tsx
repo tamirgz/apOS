@@ -1,3 +1,5 @@
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import type { ModuleRouteProps } from "@/core/modules/types.server";
 import { getAllTools } from "@/core/ai/tool-registry";
 import { resolveRoute } from "@/core/ai/routing";
@@ -20,6 +22,13 @@ export async function AgentDetailPage({ params }: ModuleRouteProps) {
         <p className="font-mono text-[11px] uppercase tracking-[0.35em] text-flare">
           agent not found
         </p>
+        <Link
+          href="/m/agents"
+          className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:bg-white/5 hover:text-ink"
+        >
+          <ArrowLeft className="size-3.5" />
+          back to agents
+        </Link>
       </GlassPanel>
     );
   }

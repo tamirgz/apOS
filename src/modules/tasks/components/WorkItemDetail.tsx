@@ -17,7 +17,7 @@ import {
 } from "../actions";
 import type { WorkItemPatch } from "../core";
 import { TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } from "../schema";
-import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, type RelationSide } from "../states";
+import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, plainTitle, type RelationSide } from "../states";
 import type { WorkProject } from "../queries";
 
 type Loaded = NonNullable<Awaited<ReturnType<typeof loadWorkItem>>>;
@@ -168,7 +168,7 @@ export function WorkItemDetail({
               title="Open parent"
             >
               <CornerDownRight className="size-3 rotate-180" />
-              {parent.identifier} {parent.title}
+              {parent.identifier} {plainTitle(parent.title)}
             </button>
           )}
           {!full && (
@@ -386,7 +386,7 @@ export function WorkItemDetail({
             <span className="size-2 shrink-0 rounded-full" style={{ background: STATUS_META[c.status].color }} />
             <span className="font-mono text-[10px] text-ink-faint">{c.identifier}</span>
             <span className={cn("truncate", c.status === "done" || c.status === "cancelled" ? "text-ink-faint line-through" : "text-ink-dim")}>
-              {c.title}
+              {plainTitle(c.title)}
             </span>
           </button>
         ))}
@@ -427,7 +427,7 @@ export function WorkItemDetail({
             <button type="button" onClick={() => onOpenItem?.(rel.other.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left transition hover:text-ion">
               <span className="size-2 shrink-0 rounded-full" style={{ background: STATUS_META[rel.other.status].color }} />
               <span className="font-mono text-[10px] text-ink-faint">{rel.other.identifier}</span>
-              <span className="truncate text-ink-dim">{rel.other.title}</span>
+              <span className="truncate text-ink-dim">{plainTitle(rel.other.title)}</span>
             </button>
             <button
               type="button"

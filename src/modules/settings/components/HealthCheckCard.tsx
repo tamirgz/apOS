@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Activity, RefreshCw } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { checkModelServersNow, saveHealthInterval } from "../actions";
 
 interface ServerStatus {
@@ -35,14 +36,18 @@ export function HealthCheckCard({
   const [checkPending, startCheck] = useTransition();
 
   const pick = (m: number) => {
+    const prev = min;
     setMin(m);
     startSave(async () => {
-      await saveHealthInterval(m);
+      const r = await act(() => saveHealthInterval(m), { failed: "Couldn't save the check interval" });
+      if (!r.ok) setMin(prev);
     });
   };
   const checkNow = () => {
     startCheck(async () => {
-      setStatuses(await checkModelServersNow());
+      const r = await act(() => checkModelServersNow(), { failed: "Couldn't check the model servers" });
+      if (!r.ok) return;
+      setStatuses(r.value);
       setChecked(true);
     });
   };

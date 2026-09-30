@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check, Info } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useProviderModels } from "@/core/ui/useProviderModels";
 import type { AiRoute, AIProviderId } from "@/core/db/schema/ai-routes";
 import { AI_PROVIDERS } from "@/core/db/schema/ai-routes";
@@ -86,7 +87,8 @@ function RouteRow({ route }: { route: AiRoute }) {
         disabled={!dirty || !model || pending}
         onClick={() =>
           startTransition(async () => {
-            await saveRoute(route.taskKey, provider, model);
+            const r = await act(() => saveRoute(route.taskKey, provider, model), { failed: "Couldn't save the route" });
+            if (!r.ok) return;
             setSavedTick(true);
             setTimeout(() => setSavedTick(false), 1600);
           })

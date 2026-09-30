@@ -394,7 +394,8 @@ export function FlowCanvas({
 
   const onRun = async () => {
     setOptimisticRun(true);
-    await runFlowNow(flow.id);
+    const r = await act(() => runFlowNow(flow.id), { failed: "Couldn't start the flow" });
+    if (!r.ok) setOptimisticRun(false);
   };
   const commitName = async () => {
     if (name.trim() && name !== flow.name)

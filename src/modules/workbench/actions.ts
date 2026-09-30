@@ -37,7 +37,7 @@ function titleFrom(prompt: string) {
  */
 export async function updateTaskPrompt(taskId: string, prompt: string) {
   const next = prompt.trim();
-  if (!next) throw new Error("the ask can't be empty");
+  if (!next) return { ok: false as const, error: "the ask can't be empty" };
   await db
     .update(workbenchTasks)
     .set({ prompt: next, title: titleFrom(next), updatedAt: new Date() })
@@ -59,7 +59,7 @@ export async function setTaskProjects(taskId: string, projectRefs: string[]) {
 /** Give a task its own header, independent of the auto-derived first line. */
 export async function updateTaskTitle(taskId: string, title: string) {
   const next = title.trim().slice(0, 140);
-  if (!next) throw new Error("the title can't be empty");
+  if (!next) return { ok: false as const, error: "the title can't be empty" };
   await db
     .update(workbenchTasks)
     .set({ title: next, updatedAt: new Date() })
@@ -322,7 +322,13 @@ export async function updateExecutor(
       .select({ kind: executors.kind })
       .from(executors)
       .where(eq(executors.id, id));
-    if (row?.kind === "cli") assertFreeModel(patch.defaultModel);
+    if (row?.kind === "cli") {
+      try {
+        assertFreeModel(patch.defaultModel);
+      } catch (e) {
+        return { ok: false as const, error: (e as Error).message };
+      }
+    }
   }
 
   await db

@@ -51,7 +51,12 @@ function AddWorkspaceForm({ compact }: { compact?: boolean }) {
         if (!v) return;
         setErr(null);
         start(async () => {
-          const res = await addNotionWorkspace(v);
+          const r = await act(() => addNotionWorkspace(v), {
+            failed: "Couldn't add the workspace",
+            checkResult: false,
+          });
+          if (!r.ok) return;
+          const res = r.value;
           if (res && "badToken" in res) setErr("That token was rejected by Notion.");
           else if (ref.current) ref.current.value = "";
           if (compact && !(res && "badToken" in res)) setOpen(false);
@@ -151,7 +156,11 @@ export function NotionConsole({
             <button
               type="button"
               title={`Disconnect ${w}`}
-              onClick={() => start(async () => void (await removeNotionWorkspace(w)))}
+              onClick={() =>
+                start(async () =>
+                  void (await act(() => removeNotionWorkspace(w), { failed: "Couldn't disconnect the workspace" })),
+                )
+              }
               disabled={pending}
               className="rounded-md p-1 text-ink-faint transition hover:bg-flare/10 hover:text-flare disabled:opacity-40"
             >

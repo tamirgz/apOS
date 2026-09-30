@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { FolderKanban, Plus } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { categoryColor } from "@/modules/projects/components/categoryColor";
 import { createNote } from "../actions";
 import type { Note } from "../schema";
@@ -26,8 +27,9 @@ function NewNoteButton() {
       disabled={pending}
       onClick={() =>
         startTransition(async () => {
-          const row = await createNote();
-          router.push(`/m/notes/${row.id}`);
+          const r = await act(() => createNote(), { failed: "Couldn't create the note" });
+          if (!r.ok) return;
+          router.push(`/m/notes/${r.value.id}`);
         })
       }
       className="flex items-center gap-1.5 rounded-lg bg-violet/15 px-4 py-2 font-mono text-[11px] uppercase tracking-widest text-violet transition hover:bg-violet/25 disabled:opacity-40"

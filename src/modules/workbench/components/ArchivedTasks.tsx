@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronRight, GitBranch, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { deleteTask, unarchiveTask } from "../actions";
 import type { TaskWithAttempt } from "../queries";
 
@@ -72,7 +73,7 @@ export function ArchivedTasks({ tasks }: { tasks: TaskWithAttempt[] }) {
                     title="Put back on the board"
                     onClick={() =>
                       start(async () => {
-                        await unarchiveTask(t.id);
+                        await act(() => unarchiveTask(t.id), { failed: "Couldn't restore the task" });
                       })
                     }
                     className="shrink-0 rounded-md p-1.5 text-ink-faint transition hover:text-ion disabled:opacity-40"
@@ -86,8 +87,10 @@ export function ArchivedTasks({ tasks }: { tasks: TaskWithAttempt[] }) {
                       disabled={pending}
                       onClick={() =>
                         start(async () => {
-                          const r = await deleteTask(t.id);
+                          const res = await act(() => deleteTask(t.id), { failed: "Couldn't delete the task" });
                           setConfirming(null);
+                          if (!res.ok) return;
+                          const r = res.value;
                           setNote(
                             r.keptBranches.length
                               ? `deleted · kept unmerged ${r.keptBranches.join(", ")}`

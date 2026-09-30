@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import {
   createIdea,
@@ -40,7 +41,8 @@ function QuickAdd() {
         const title = inputRef.current?.value.trim();
         if (!title || pending) return;
         startTransition(async () => {
-          await createIdea({ title, category });
+          const r = await act(() => createIdea({ title, category }), { failed: "Couldn't capture the idea" });
+          if (!r.ok) return;
           if (inputRef.current) inputRef.current.value = "";
         });
       }}
@@ -89,7 +91,7 @@ function IdeaCard({ idea }: { idea: Idea }) {
     const next = STAGE_ORDER[idx + dir];
     if (!next) return;
     startTransition(async () => {
-      await setIdeaStage(idea.id, next);
+      await act(() => setIdeaStage(idea.id, next), { failed: "Couldn't move the idea" });
     });
   };
   const analysis = idea.analysis;
@@ -163,7 +165,7 @@ function IdeaCard({ idea }: { idea: Idea }) {
               title="AI reality-check"
               onClick={() =>
                 startTransition(async () => {
-                  await requestAnalysis(idea.id);
+                  await act(() => requestAnalysis(idea.id), { failed: "Couldn't start the reality-check" });
                 })
               }
               className="rounded-md p-1.5 text-ink-faint transition hover:bg-gold/10 hover:text-gold"
@@ -176,7 +178,7 @@ function IdeaCard({ idea }: { idea: Idea }) {
             title="Delete idea"
             onClick={() =>
               startTransition(async () => {
-                await deleteIdea(idea.id);
+                await act(() => deleteIdea(idea.id), { failed: "Couldn't delete the idea" });
               })
             }
             className="rounded-md p-1.5 text-ink-faint transition hover:bg-flare/10 hover:text-flare"

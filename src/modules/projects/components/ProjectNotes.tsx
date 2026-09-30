@@ -4,6 +4,7 @@ import { useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { NotebookPen, Plus } from "lucide-react";
+import { act } from "@/core/ui/feedback";
 import { createNote } from "@/modules/notes/actions";
 import type { Note } from "@/modules/notes/schema";
 
@@ -33,10 +34,12 @@ export function ProjectNotes({
           disabled={pending}
           onClick={() =>
             startTransition(async () => {
-              const row = await createNote({
-                projectRefs: [`projects:${projectId}`],
-              });
-              router.push(`/m/notes/${row.id}`);
+              const r = await act(
+                () => createNote({ projectRefs: [`projects:${projectId}`] }),
+                { failed: "Couldn't create the note" },
+              );
+              if (!r.ok) return;
+              router.push(`/m/notes/${r.value.id}`);
             })
           }
           className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-violet transition hover:bg-violet/25 disabled:opacity-40"

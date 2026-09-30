@@ -6,6 +6,7 @@ import type { FlowNode } from "@/modules/flows/schema";
 import { AI_PROVIDERS, type AIProviderId } from "@/core/db/schema/ai-routes";
 import { useProviderModels } from "@/core/ui/useProviderModels";
 import { metaFor } from "../nodes";
+import { act } from "@/core/ui/feedback";
 import type { NodeTranscript } from "../actions";
 import type { AgentOption, FlowOption, NodeRunView, ToolOption } from "../queries";
 
@@ -654,7 +655,8 @@ function RunDetail({
               disabled={loading}
               onClick={async () => {
                 setLoading(true);
-                setTx(await onLoadTranscript(run.agentRunId!));
+                const r = await act(() => onLoadTranscript(run.agentRunId!), { failed: "Couldn't load the transcript" });
+                if (r.ok) setTx(r.value);
                 setLoading(false);
               }}
               className="flex w-fit items-center gap-1.5 rounded-lg border border-white/8 px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:text-ink"

@@ -177,7 +177,7 @@ export function ProjectFiles({
                     disabled={pending}
                     onClick={() =>
                       startTransition(async () => {
-                        await deleteProjectFile(f.id, projectId);
+                        await act(() => deleteProjectFile(f.id, projectId), { failed: "Couldn't delete the file" });
                         router.refresh();
                       })
                     }

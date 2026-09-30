@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { updateProject } from "../actions";
 import { PROJECT_STATUSES, type ProjectStatus } from "../schema";
 import { STATUS_CHIP } from "./statusStyle";
@@ -19,7 +20,7 @@ export function StatusCycleButton({
     const idx = PROJECT_STATUSES.indexOf(status);
     const next = PROJECT_STATUSES[(idx + 1) % PROJECT_STATUSES.length];
     startTransition(async () => {
-      await updateProject(id, { status: next });
+      await act(() => updateProject(id, { status: next }), { failed: "Couldn't change the project status" });
     });
   };
 

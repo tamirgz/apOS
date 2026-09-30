@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, FolderKanban } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import type { ProjectOption } from "../queries";
 
 /**
@@ -84,7 +85,7 @@ export function ProjectMultiPicker({
     const ref = `projects:${id}`;
     const next = selectedIds.has(id) ? value.filter((v) => v !== ref) : [...value, ref];
     start(async () => {
-      await onChange(next);
+      await act(async () => onChange(next), { failed: "Couldn't update the projects" });
     });
   };
 

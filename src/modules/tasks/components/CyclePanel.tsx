@@ -294,7 +294,7 @@ export function CyclesView({
                 setAdding(false);
                 router.refresh();
               } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
+                setError(errorText(e));
               }
             })
           }

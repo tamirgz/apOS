@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { Check, Plus } from "lucide-react";
 import type { MemoryBlock, MemoryEntry } from "@/core/db/schema/memory";
 import { cn } from "@/core/ui/cn";
+import { act, errorText } from "@/core/ui/feedback";
 import { createMemoryBlock, saveMemoryBlock } from "../actions";
 
 const KIND_COLOR: Record<string, string> = {
@@ -38,7 +39,8 @@ function AddBlock() {
         const label = labelRef.current?.value.trim();
         if (!label || pending) return;
         startTransition(async () => {
-          await createMemoryBlock(label, descRef.current?.value ?? "");
+          const r = await act(() => createMemoryBlock(label, descRef.current?.value ?? ""), { failed: "Couldn't create the memory block" });
+          if (!r.ok) return;
           setOpen(false);
         });
       }}
@@ -107,10 +109,11 @@ function BlockField({ block }: { block: MemoryBlock }) {
         onClick={() =>
           startTransition(async () => {
             try {
-              await saveMemoryBlock(block.label, value);
-              setSaved(true);
+              const r = await saveMemoryBlock(block.label, value);
+              if (r) setError(r.error);
+              else setSaved(true);
             } catch (e) {
-              setError(String(e).replace(/^Error:\s*/, ""));
+              setError(errorText(e));
             }
           })
         }

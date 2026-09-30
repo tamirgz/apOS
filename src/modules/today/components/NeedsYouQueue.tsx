@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { decideApproval } from "@/modules/agents/actions";
 import { doneAttention, dismissAttention, snoozeAttention } from "../actions";
@@ -130,7 +131,7 @@ function Row({ item }: { item: NeedsYouItem }) {
               title="Approve — runs the action"
               disabled={pending}
               onClick={() =>
-                start(async () => void (await decideApproval(item.id, true)))
+                start(async () => void (await act(() => decideApproval(item.id, true), { failed: "Couldn't approve the action" })))
               }
               className="inline-flex items-center gap-1 rounded-md border border-plasma/30 px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-plasma transition hover:bg-plasma/10 disabled:opacity-40"
             >
@@ -142,7 +143,7 @@ function Row({ item }: { item: NeedsYouItem }) {
               title="Reject — drops the action"
               disabled={pending}
               onClick={() =>
-                start(async () => void (await decideApproval(item.id, false)))
+                start(async () => void (await act(() => decideApproval(item.id, false), { failed: "Couldn't reject the action" })))
               }
               className="rounded-md p-1.5 text-ink-faint transition hover:text-flare disabled:opacity-40"
             >
@@ -157,7 +158,7 @@ function Row({ item }: { item: NeedsYouItem }) {
               type="button"
               title="Done"
               disabled={pending}
-              onClick={() => start(async () => void (await doneAttention(item.id)))}
+              onClick={() => start(async () => void (await act(() => doneAttention(item.id), { failed: "Couldn't mark the item done" })))}
               className="rounded-md p-1.5 text-ink-faint transition hover:text-plasma"
             >
               <Check className="size-3.5" />
@@ -168,7 +169,9 @@ function Row({ item }: { item: NeedsYouItem }) {
               disabled={pending}
               onClick={() =>
                 start(async () => {
-                  await snoozeAttention(item.id, new Date(Date.now() + 3 * 3600_000));
+                  await act(() => snoozeAttention(item.id, new Date(Date.now() + 3 * 3600_000)), {
+                    failed: "Couldn't snooze the item",
+                  });
                 })
               }
               className="rounded-md p-1.5 text-ink-faint transition hover:text-ion"
@@ -180,7 +183,7 @@ function Row({ item }: { item: NeedsYouItem }) {
               title="Dismiss"
               disabled={pending}
               onClick={() =>
-                start(async () => void (await dismissAttention(item.id)))
+                start(async () => void (await act(() => dismissAttention(item.id), { failed: "Couldn't dismiss the item" })))
               }
               className="rounded-md p-1.5 text-ink-faint transition hover:text-flare"
             >

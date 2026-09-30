@@ -5,6 +5,7 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { doneAttention, dismissAttention } from "../actions";
 import type { NeedsYouItem } from "../queries";
@@ -43,9 +44,9 @@ export function NeedsYouList({
     );
   }
 
-  const resolve = (fn: (id: string) => Promise<unknown>, id: string) =>
+  const resolve = (fn: (id: string) => Promise<unknown>, id: string, failed: string) =>
     start(async () => {
-      await fn(id);
+      await act(() => fn(id), { failed });
       router.refresh();
     });
 
@@ -88,7 +89,7 @@ export function NeedsYouList({
                   type="button"
                   disabled={pending}
                   title="Mark done"
-                  onClick={() => resolve(doneAttention, it.id)}
+                  onClick={() => resolve(doneAttention, it.id, "Couldn't mark the item done")}
                   className="rounded-md border border-plasma/25 bg-plasma/10 p-1 text-plasma transition hover:bg-plasma/20 disabled:opacity-40"
                 >
                   <Check className="size-3" />
@@ -97,7 +98,7 @@ export function NeedsYouList({
                   type="button"
                   disabled={pending}
                   title="Dismiss"
-                  onClick={() => resolve(dismissAttention, it.id)}
+                  onClick={() => resolve(dismissAttention, it.id, "Couldn't dismiss the item")}
                   className={cn(
                     "rounded-md border border-white/10 p-1 text-ink-faint transition hover:bg-white/5 hover:text-ink-dim disabled:opacity-40",
                   )}

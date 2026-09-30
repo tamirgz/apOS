@@ -8,6 +8,7 @@ import { Bot, CalendarClock, Play, Plus } from "lucide-react";
 import type { Agent, AgentRun } from "@/core/db/schema/agents";
 import type { AgentTemplate } from "@/core/modules/types.server";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { timeAgo } from "@/core/ui/time";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { createAgent, createFromTemplate, updateAgent } from "../actions";
@@ -109,7 +110,9 @@ function EnabledSwitch({ agent }: { agent: Agent }) {
       onClick={(e) => {
         e.preventDefault();
         startTransition(async () => {
-          await updateAgent(agent.id, { enabled: !agent.enabled });
+          await act(() => updateAgent(agent.id, { enabled: !agent.enabled }), {
+            failed: agent.enabled ? "Couldn't disable the agent" : "Couldn't enable the agent",
+          });
         });
       }}
       className={cn(
@@ -297,11 +300,16 @@ export function AgentsList({
             disabled={pending}
             onClick={() =>
               startTransition(async () => {
-                const row = await createAgent({
-                  name: "New agent",
-                  prompt: "Describe this agent's mission here.",
-                });
-                router.push(`/m/agents/${row.id}`);
+                const r = await act(
+                  () =>
+                    createAgent({
+                      name: "New agent",
+                      prompt: "Describe this agent's mission here.",
+                    }),
+                  { failed: "Couldn't create the agent" },
+                );
+                if (!r.ok) return;
+                router.push(`/m/agents/${r.value.id}`);
               })
             }
             className="flex items-center gap-1.5 rounded-lg bg-flare/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-flare transition hover:bg-flare/25 disabled:opacity-40"
@@ -359,8 +367,11 @@ export function AgentsList({
                   disabled={pending || installedNames.has(t.name)}
                   onClick={() =>
                     startTransition(async () => {
-                      const row = await createFromTemplate(t.id);
-                      router.push(`/m/agents/${row.id}`);
+                      const r = await act(() => createFromTemplate(t.id), {
+                        failed: "Couldn't install the template",
+                      });
+                      if (!r.ok) return;
+                      router.push(`/m/agents/${r.value.id}`);
                     })
                   }
                   className="rounded-lg border border-flare/25 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-flare transition hover:bg-flare/10 disabled:opacity-40"

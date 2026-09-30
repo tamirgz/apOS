@@ -73,7 +73,7 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
                 (STAGE_ORDER.indexOf(idea.stage) + 1) % STAGE_ORDER.length
               ];
             startTransition(async () => {
-              await setIdeaStage(idea.id, next);
+              await act(() => setIdeaStage(idea.id, next), { failed: "Couldn't change the stage" });
             });
           }}
           title="Cycle stage"
@@ -91,7 +91,7 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
           disabled={pending || idea.analysisStatus === "analyzing"}
           onClick={() =>
             startTransition(async () => {
-              await requestAnalysis(idea.id);
+              await act(() => requestAnalysis(idea.id), { failed: "Couldn't start the reality-check" });
             })
           }
           className="ml-auto flex items-center gap-1.5 rounded-lg bg-gold/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-gold transition hover:bg-gold/25 disabled:opacity-40"
@@ -116,8 +116,9 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
             disabled={pending}
             onClick={() =>
               startTransition(async () => {
-                const id = await promoteToProject(idea.id);
-                router.push(`/m/projects/${id}`);
+                const r = await act(() => promoteToProject(idea.id), { failed: "Couldn't promote the idea" });
+                if (!r.ok) return;
+                router.push(`/m/projects/${r.value}`);
               })
             }
             className="flex items-center gap-1.5 rounded-lg border border-plasma/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-plasma transition hover:bg-plasma/10 disabled:opacity-40"
@@ -130,7 +131,8 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
           onClick={() => {
             if (!confirmDelete) return setConfirmDelete(true);
             startTransition(async () => {
-              await deleteIdea(idea.id);
+              const r = await act(() => deleteIdea(idea.id), { failed: "Couldn't delete the idea" });
+              if (!r.ok) return;
               router.push("/m/ideas");
             });
           }}

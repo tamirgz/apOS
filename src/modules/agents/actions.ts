@@ -110,7 +110,15 @@ export async function updateAgent(
     turnBudget: number | null;
   }>,
 ) {
-  if ("schedule" in patch) patch.schedule = validateSchedule(patch.schedule);
+  if ("schedule" in patch) {
+    // A bad cron is the user's typo, not a fault — return it so the message
+    // survives production's redaction of thrown errors.
+    try {
+      patch.schedule = validateSchedule(patch.schedule);
+    } catch (e) {
+      return { ok: false as const, error: (e as Error).message };
+    }
+  }
   const [row] = await db
     .update(agents)
     .set({ ...patch, updatedAt: new Date() })

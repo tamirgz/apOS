@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { useDraft } from "@/core/ui/useDraft";
+import { act } from "@/core/ui/feedback";
 import { createTask } from "../actions";
 import type { TaskType } from "../schema";
 
@@ -101,13 +102,15 @@ export function NewTaskBox({
     const prompt = promptRef.current?.value.trim();
     if (!prompt || pending) return;
     start(async () => {
-      const task = await createTask({
+      const r = await act(() => createTask({
         prompt,
         taskType: type,
         repoPath: active.needsRepo ? repo : null,
         executorId: executorId || undefined,
         model: model.trim() || undefined,
-      });
+      }), { failed: "Couldn't create the task" });
+      if (!r.ok) return;
+      const task = r.value;
       if (promptRef.current) promptRef.current.value = "";
       clearDraft();
       router.push(`/m/workbench/${task.id}`);

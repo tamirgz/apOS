@@ -32,15 +32,30 @@ export async function disconnectGoogle() {
   revalidatePath("/m/settings");
 }
 
+// core/memory throws its validation messages ("label required", "would exceed
+// its N-char budget"); production redacts a thrown message, so hand them back.
+const memoryError = (e: unknown) => ({
+  ok: false as const,
+  error: (e instanceof Error ? e.message : String(e)).replace(/^Error:\s*/, ""),
+});
+
 export async function saveMemoryBlock(label: string, value: string) {
   const { updateMemoryBlock } = await import("@/core/memory");
-  await updateMemoryBlock(label, value, "replace");
+  try {
+    await updateMemoryBlock(label, value, "replace");
+  } catch (e) {
+    return memoryError(e);
+  }
   revalidatePath("/m/settings");
 }
 
 export async function createMemoryBlock(label: string, description: string) {
   const { createMemoryBlockDef } = await import("@/core/memory");
-  await createMemoryBlockDef(label, description);
+  try {
+    await createMemoryBlockDef(label, description);
+  } catch (e) {
+    return memoryError(e);
+  }
   revalidatePath("/m/settings");
 }
 
@@ -80,7 +95,7 @@ export async function saveRoute(
   provider: AIProviderId,
   model: string,
 ) {
-  if (!model.trim()) throw new Error("model is required");
+  if (!model.trim()) return { ok: false as const, error: "model is required" };
   await setRoute(taskKey, provider, model);
   revalidatePath("/m/settings");
 }

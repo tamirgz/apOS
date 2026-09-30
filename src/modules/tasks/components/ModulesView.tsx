@@ -5,7 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Bot, Layers, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
-import { done, errorText } from "@/core/ui/feedback";
+import { act, done, errorText } from "@/core/ui/feedback";
 import { shortDate } from "@/core/ui/time";
 import { useNow } from "@/core/ui/useNow";
 import { createFeature, deleteFeature, updateFeature } from "@/modules/projects/features-actions";
@@ -185,7 +185,9 @@ export function ModulesView({
             e.preventDefault();
             if (!name.trim()) return;
             start(async () => {
-              const row = await createFeature(projectId, name);
+              const r = await act(() => createFeature(projectId, name), { failed: "Couldn't create the module" });
+              if (!r.ok) return;
+              const row = r.value;
               setName("");
               setAdding(false);
               router.refresh();

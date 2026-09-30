@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { reflowCollapsedTables } from "@/core/ui/reflowTables";
 import { useDraft } from "@/core/ui/useDraft";
 import {
@@ -230,7 +231,9 @@ export function AskConsole({
     setEntryProjectRefs([]);
     setTitleEditing(false);
     start(async () => {
-      const r = await ask(q);
+      const res = await act(() => ask(q), { failed: "Couldn't answer the question" });
+      if (!res.ok) return;
+      const r = res.value;
       setResult(r);
       if (r.historyId) {
         setActiveId(r.historyId);
@@ -303,7 +306,8 @@ export function AskConsole({
     if (!activeId) return;
     const t = titleDraft.trim();
     startTitle(async () => {
-      await renameAskEntry(activeId, t);
+      const r = await act(() => renameAskEntry(activeId, t), { failed: "Couldn't rename the answer" });
+      if (!r.ok) return;
       setEntryTitle(t || null);
       setHistory((prev) =>
         prev.map((h) => (h.id === activeId ? { ...h, title: t || null } : h)),
@@ -340,6 +344,7 @@ export function AskConsole({
   const deleteEntry = (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    const removed = history.find((h) => h.id === id);
     setHistory((prev) => prev.filter((h) => h.id !== id));
     if (activeId === id) {
       setActiveId(null);
@@ -347,7 +352,12 @@ export function AskConsole({
       setResult(null);
     }
     startDelete(async () => {
-      await deleteAskHistoryEntry(id);
+      const r = await act(() => deleteAskHistoryEntry(id), { failed: "Couldn't delete the answer" });
+      // Put the row back where it was (history is newest first).
+      if (!r.ok && removed)
+        setHistory((prev) =>
+          [...prev, removed].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
+        );
     });
   };
 
@@ -546,8 +556,15 @@ export function AskConsole({
                           options={projectOptions}
                           value={entryProjectRefs}
                           onChange={async (refs) => {
+                            const before = entryProjectRefs;
                             setEntryProjectRefs(refs);
-                            await setAskProjects(activeId, refs);
+                            const r = await act(() => setAskProjects(activeId, refs), {
+                              failed: "Couldn't file the answer under those projects",
+                            });
+                            if (!r.ok) {
+                              setEntryProjectRefs(before);
+                              return;
+                            }
                             setHistory((prev) =>
                               prev.map((h) =>
                                 h.id === activeId ? { ...h, projectRefs: refs } : h,

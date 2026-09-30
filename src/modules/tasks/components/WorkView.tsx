@@ -733,6 +733,7 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
 
   const onMove = (id: string, status: TaskStatus, sortOrder: number) => {
     // Optimistic: the card lands immediately; the server write + refresh reconcile.
+    const was = items.find((t) => t.id === id);
     setItems((prev) =>
       prev.map((t) =>
         t.id === id
@@ -741,7 +742,8 @@ export function WorkView({ data, projectId, overview }: { data: WorkData; projec
       ),
     );
     startMove(async () => {
-      await moveTask(id, status, sortOrder);
+      const r = await act(() => moveTask(id, status, sortOrder), { failed: "Couldn't move the item" });
+      if (!r.ok && was) setItems((prev) => prev.map((t) => (t.id === id ? was : t)));
       refresh();
     });
   };
@@ -1021,7 +1023,8 @@ function SavedViews({
   const save = () =>
     start(async () => {
       if (!name.trim()) return;
-      await saveWorkView(projectId, name, current);
+      const r = await act(() => saveWorkView(projectId, name, current), { failed: "Couldn't save the view" });
+      if (!r.ok) return;
       setName("");
       setNaming(false);
       onChanged();
@@ -1049,7 +1052,8 @@ function SavedViews({
             title="Delete this view"
             onClick={() =>
               start(async () => {
-                await deleteWorkView(v.id);
+                const r = await act(() => deleteWorkView(v.id), { failed: "Couldn't delete the view" });
+                if (!r.ok) return;
                 onChanged();
               })
             }

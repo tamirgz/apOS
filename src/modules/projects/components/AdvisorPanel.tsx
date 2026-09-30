@@ -48,7 +48,8 @@ export function AdvisorPanel({
 
   const reRead = () => {
     setRunning(true);
-    void runProjectAdvisor().finally(() => {
+    void act(runProjectAdvisor, { failed: "Couldn't re-read the projects" }).then((r) => {
+      if (!r.ok) return setRunning(false);
       setTimeout(() => {
         setRunning(false);
         router.refresh();
@@ -67,7 +68,9 @@ export function AdvisorPanel({
   /** Advisor → backlog: a work item, named by its identifier once it exists. */
   const toItem = (text: string, kind: "next" | "blocker") =>
     start(async () => {
-      const r = await advisorToTask(projectId, text, kind);
+      const res = await act(() => advisorToTask(projectId, text, kind), { failed: "Couldn't create the work item" });
+      if (!res.ok) return;
+      const r = res.value;
       setDid(r.existed ? `already ${r.identifier ?? "on the board"}` : `${r.identifier ?? "item"} created`);
       setTimeout(() => setDid(null), 3500);
       router.refresh();

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition, type ReactNode } from "rea
 import { useRouter } from "next/navigation";
 import { Layers } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useNow } from "@/core/ui/useNow";
 import { updateFeature } from "@/modules/projects/features-actions";
 import { updateTask } from "../actions";
@@ -289,7 +290,13 @@ export function Timeline({
       const next = shift(current(bar), mode, delta);
       setDrafts((p) => ({ ...p, [bar.key]: next }));
       startSave(async () => {
-        await bar.save(next);
+        const r = await act(() => bar.save(next), { failed: bar.module ? "Couldn't reschedule the module" : "Couldn't reschedule the item" });
+        if (!r.ok)
+          setDrafts((p) => {
+            const rest = { ...p };
+            delete rest[bar.key];
+            return rest;
+          });
         router.refresh();
       });
     };

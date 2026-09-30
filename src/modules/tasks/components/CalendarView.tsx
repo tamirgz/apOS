@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useNow } from "@/core/ui/useNow";
 import { updateTask } from "../actions";
 import type { WorkItem } from "../core";
@@ -73,7 +74,8 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
     if (t.dueAt) patch.dueAt = noon(to);
     if (t.startAt) patch.startAt = noon(dayStart(t.startAt) + (t.dueAt ? delta : to - dayStart(t.startAt)));
     startSave(async () => {
-      await updateTask(id, patch);
+      const r = await act(() => updateTask(id, patch), { failed: "Couldn't reschedule the item" });
+      if (!r.ok) setMoved((p) => ({ ...p, [id]: from }));
       router.refresh();
     });
   };

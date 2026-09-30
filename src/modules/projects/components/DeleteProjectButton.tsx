@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { deleteProject } from "../actions";
 
 export function DeleteProjectButton({ id }: { id: string }) {
@@ -17,7 +18,7 @@ export function DeleteProjectButton({ id }: { id: string }) {
       return;
     }
     startTransition(async () => {
-      await deleteProject(id);
+      if (!(await act(() => deleteProject(id), { failed: "Couldn't delete the project" })).ok) return;
       router.push("/m/projects");
     });
   };

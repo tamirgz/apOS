@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore, useTransition } from "react";
 import { CalendarCheck2, Check, Copy, ExternalLink, Unplug } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act, errorText, failed } from "@/core/ui/feedback";
 import {
   CATEGORY_LABEL,
   CATEGORY_ORDER,
@@ -39,7 +40,9 @@ function DetectPanel({ kind }: { kind: "obsidian" | "mlx" }) {
           onClick={() =>
             start(async () => {
               setMsg(null);
-              const r = await detectMlx();
+              const res = await act(() => detectMlx(), { failed: "Couldn't detect LM Studio", checkResult: false });
+              if (!res.ok) return;
+              const r = res.value;
               setMsg(
                 r.ok
                   ? `✓ detected — saved ${r.models} model${r.models === 1 ? "" : "s"}`
@@ -65,7 +68,9 @@ function DetectPanel({ kind }: { kind: "obsidian" | "mlx" }) {
           onClick={() =>
             start(async () => {
               setMsg(null);
-              const v = await detectObsidianVaults();
+              const r = await act(() => detectObsidianVaults(), { failed: "Couldn't detect Obsidian vaults" });
+              if (!r.ok) return;
+              const v = r.value;
               setVaults(v);
               if (!v.length) setMsg("no Obsidian vaults found — paste the path below");
             })
@@ -86,7 +91,8 @@ function DetectPanel({ kind }: { kind: "obsidian" | "mlx" }) {
               className="rounded-lg border border-ion/30 bg-ion/8 px-2.5 py-1 font-mono text-[10px] text-ion transition hover:bg-ion/15 disabled:opacity-40"
               onClick={() =>
                 start(async () => {
-                  await selectObsidianVault(v.path);
+                  const r = await act(() => selectObsidianVault(v.path), { failed: "Couldn't select the vault" });
+                  if (!r.ok) return;
                   setVaults(null);
                   setMsg(`✓ using "${v.name}"`);
                 })
@@ -146,7 +152,8 @@ function IntegrationField({
           disabled={pending || !dirty}
           onClick={() =>
             startTransition(async () => {
-              await saveIntegration(settingKey, value);
+              const r = await act(() => saveIntegration(settingKey, value), { failed: "Couldn't save the setting" });
+              if (!r.ok) return;
               setSaved(true);
             })
           }
@@ -200,7 +207,8 @@ function IntegrationToggle({
           const next = !on;
           setOn(next);
           startTransition(async () => {
-            await saveIntegration(settingKey, next ? "on" : "off");
+            const r = await act(() => saveIntegration(settingKey, next ? "on" : "off"), { failed: "Couldn't change the setting" });
+            if (!r.ok) setOn(!next);
           });
         }}
         className={cn(
@@ -352,9 +360,13 @@ function GoogleWizard({
               type="button"
               className={detectBtn}
               onClick={() => {
-                void navigator.clipboard?.writeText(redirect);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
+                navigator.clipboard?.writeText(redirect).then(
+                  () => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  },
+                  (e) => failed("Couldn't copy the redirect URI", errorText(e)),
+                );
               }}
             >
               <Copy className="mr-1 inline size-3 align-[-1px]" />
@@ -393,7 +405,7 @@ function GoogleWizard({
             <button
               type="button"
               disabled={pending}
-              onClick={() => start(async () => void (await disconnectGoogle()))}
+              onClick={() => start(async () => void (await act(() => disconnectGoogle(), { failed: "Couldn't disconnect Google" })))}
               className="flex items-center gap-1.5 rounded-lg border border-flare/25 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-flare transition hover:bg-flare/10"
             >
               <Unplug className="size-3" /> disconnect
@@ -478,7 +490,9 @@ function SlackChannelPicker({
             onClick={() =>
               start(async () => {
                 setErr(null);
-                const r = await listSlackChannels();
+                const res = await act(() => listSlackChannels(), { failed: "Couldn't list the Slack channels", checkResult: false });
+                if (!res.ok) return;
+                const r = res.value;
                 if (!r.ok) setErr(r.error ?? "failed");
                 else setChannels(r.channels ?? []);
               })
@@ -493,7 +507,8 @@ function SlackChannelPicker({
             className={detectBtn}
             onClick={() =>
               start(async () => {
-                await saveIntegration(settingKey, [...selected].join(", "));
+                const r = await act(() => saveIntegration(settingKey, [...selected].join(", ")), { failed: "Couldn't save the channel selection" });
+                if (!r.ok) return;
                 setSaved(true);
                 setTimeout(() => setSaved(false), 1500);
               })
@@ -586,9 +601,13 @@ function SlackWizard({ values }: { values: Record<string, string> }) {
             type="button"
             className={detectBtn}
             onClick={() => {
-              void navigator.clipboard?.writeText(SLACK_MANIFEST);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
+              navigator.clipboard?.writeText(SLACK_MANIFEST).then(
+                () => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                },
+                (e) => failed("Couldn't copy the manifest", errorText(e)),
+              );
             }}
           >
             <Copy className="mr-1 inline size-3 align-[-1px]" />

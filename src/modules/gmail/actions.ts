@@ -15,7 +15,9 @@ export async function resyncGmail() {
  * Idempotent per message via externalRef `gmail:<id>` — a second click returns
  * the existing item instead of a duplicate.
  */
-export async function mailToWorkItem(messageId: string): Promise<{ id: string; created: boolean }> {
+export async function mailToWorkItem(
+  messageId: string,
+): Promise<{ id: string; created: boolean } | { ok: false; error: string }> {
   const [{ db }, { eq }, { gmailMessages }, { tasks }, { createTask }] = await Promise.all([
     import("@/core/db/client"),
     import("drizzle-orm"),
@@ -28,7 +30,8 @@ export async function mailToWorkItem(messageId: string): Promise<{ id: string; c
   if (existing) return { id: existing.id, created: false };
 
   const [m] = await db.select().from(gmailMessages).where(eq(gmailMessages.id, messageId)).limit(1);
-  if (!m) throw new Error("mail not found — resync and try again");
+  // Returned, not thrown: production redacts a thrown message.
+  if (!m) return { ok: false, error: "mail not found — resync and try again" };
   const from = m.fromName ?? m.fromEmail ?? "someone";
   const notes = [
     `From ${from}${m.fromEmail && m.fromName ? ` <${m.fromEmail}>` : ""}`,

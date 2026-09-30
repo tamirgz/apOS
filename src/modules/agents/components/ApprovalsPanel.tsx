@@ -4,6 +4,7 @@ import { useTransition } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, ShieldAlert, X } from "lucide-react";
 import type { Approval } from "@/core/db/schema/approvals";
+import { act } from "@/core/ui/feedback";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { decideApproval } from "../actions";
 
@@ -52,7 +53,7 @@ export function ApprovalsPanel({ pending }: { pending: Approval[] }) {
                   type="button"
                   onClick={() =>
                     startTransition(async () => {
-                      await decideApproval(a.id, false);
+                      await act(() => decideApproval(a.id, false), { failed: "Couldn't reject the action" });
                     })
                   }
                   className="flex items-center gap-1.5 rounded-lg border border-flare/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-flare transition hover:bg-flare/10"
@@ -63,7 +64,7 @@ export function ApprovalsPanel({ pending }: { pending: Approval[] }) {
                   type="button"
                   onClick={() =>
                     startTransition(async () => {
-                      await decideApproval(a.id, true);
+                      await act(() => decideApproval(a.id, true), { failed: "Couldn't approve the action" });
                     })
                   }
                   className="flex items-center gap-1.5 rounded-lg bg-plasma/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-plasma transition hover:bg-plasma/25"

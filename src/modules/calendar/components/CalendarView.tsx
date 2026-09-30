@@ -63,7 +63,10 @@ function QuickAddEvent() {
         const when = whenRef.current?.value;
         if (!title || !when || pending) return;
         startTransition(async () => {
-          await createEvent({ title, startAt: new Date(when) });
+          const r = await act(() => createEvent({ title, startAt: new Date(when) }), {
+            failed: "Couldn't add the event",
+          });
+          if (!r.ok) return;
           if (titleRef.current) titleRef.current.value = "";
         });
       }}
@@ -358,7 +361,7 @@ export function CalendarView({
                       title="Delete event"
                       onClick={() =>
                         startDelete(async () => {
-                          await deleteEvent(it.id);
+                          await act(() => deleteEvent(it.id), { failed: "Couldn't delete the event" });
                         })
                       }
                       className="invisible rounded-md p-1 text-ink-faint transition hover:text-flare group-hover:visible"
@@ -437,7 +440,8 @@ export function CalendarView({
         deletePending={deletePending}
         onDelete={(id) =>
           startDelete(async () => {
-            await deleteEvent(id);
+            const r = await act(() => deleteEvent(id), { failed: "Couldn't delete the event" });
+            if (!r.ok) return;
             setDetail(null);
           })
         }

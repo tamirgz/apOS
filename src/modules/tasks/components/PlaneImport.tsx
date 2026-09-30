@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Download, Loader2, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { errorText, failed } from "@/core/ui/feedback";
 import { planeImportState, startPlaneImport } from "../actions";
 import type { PlaneImportStatus } from "../plane/import";
 
@@ -30,12 +31,15 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = () =>
-      planeImportState().then((s) => {
-        if (!alive) return;
-        setState(s);
-        if (s.status?.state === "running") timer = setTimeout(tick, 2000);
-        else if (s.status?.mode === "import" && s.status.state === "done") router.refresh();
-      });
+      planeImportState().then(
+        (s) => {
+          if (!alive) return;
+          setState(s);
+          if (s.status?.state === "running") timer = setTimeout(tick, 2000);
+          else if (s.status?.mode === "import" && s.status.state === "done") router.refresh();
+        },
+        (e) => alive && failed("Couldn't read the Plane import status", errorText(e)),
+      );
     tick();
     return () => {
       alive = false;
@@ -56,10 +60,11 @@ export function PlaneImport({ onClose }: { onClose: () => void }) {
     start(async () => {
       setError(null);
       try {
-        await startPlaneImport(mode, mode === "import" ? [...(chosen ?? [])] : undefined);
+        const r = await startPlaneImport(mode, mode === "import" ? [...(chosen ?? [])] : undefined);
+        if (!r.ok) setError(r.error);
         setState(await planeImportState());
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       }
     });
 

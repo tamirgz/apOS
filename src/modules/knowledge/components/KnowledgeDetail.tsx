@@ -66,7 +66,7 @@ export function KnowledgeDetail({ item }: { item: KnowledgeItem }) {
         {item.status === "error" && (
           <button
             type="button"
-            onClick={() => startTransition(async () => retryKnowledge(item.id))}
+            onClick={() => startTransition(async () => void (await act(() => retryKnowledge(item.id), { failed: "Couldn't retry the item" })))}
             className="flex items-center gap-1.5 rounded-lg border border-solar/30 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-widest text-solar transition hover:bg-solar/10"
           >
             <RefreshCw className="size-3" /> retry
@@ -77,7 +77,8 @@ export function KnowledgeDetail({ item }: { item: KnowledgeItem }) {
           onClick={() => {
             if (!confirmDelete) return setConfirmDelete(true);
             startTransition(async () => {
-              await deleteKnowledge(item.id);
+              const r = await act(() => deleteKnowledge(item.id), { failed: "Couldn't delete the item" });
+              if (!r.ok) return;
               router.push("/m/knowledge");
             });
           }}

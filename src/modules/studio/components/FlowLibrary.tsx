@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Bot, LayoutTemplate, Plus, Trash2, Upload, Workflow } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import type { AgentOption, FlowCard, FlowStats } from "../queries";
@@ -53,7 +54,10 @@ export function FlowLibrary({
     setImportErr(null);
     try {
       const json = JSON.parse(await file.text());
-      start(async () => router.push(`/m/studio/${await importFlow(json)}`));
+      start(async () => {
+        const r = await act(() => importFlow(json), { failed: "Couldn't import the flow" });
+        if (r.ok && typeof r.value === "string") router.push(`/m/studio/${r.value}`);
+      });
     } catch {
       setImportErr("That file isn't a valid flow export.");
     }
@@ -63,16 +67,25 @@ export function FlowLibrary({
   useEffect(() => {
     if (search.get("new") === "1" && !newGuard.current) {
       newGuard.current = true;
-      start(async () => router.push(`/m/studio/${await createFlow()}`));
+      start(async () => {
+        const r = await act(() => createFlow(), { failed: "Couldn't create the flow" });
+        if (r.ok) router.push(`/m/studio/${r.value}`);
+      });
     }
   }, [search, router]);
 
   const onNew = () =>
-    start(async () => router.push(`/m/studio/${await createFlow()}`));
+    start(async () => {
+      const r = await act(() => createFlow(), { failed: "Couldn't create the flow" });
+      if (r.ok) router.push(`/m/studio/${r.value}`);
+    });
 
   const onImport = (agentId: string) => {
     setImporting(false);
-    start(async () => router.push(`/m/studio/${await importAgentAsFlow(agentId)}`));
+    start(async () => {
+      const r = await act(() => importAgentAsFlow(agentId), { failed: "Couldn't turn the agent into a flow" });
+      if (r.ok) router.push(`/m/studio/${r.value}`);
+    });
   };
 
   return (
@@ -155,7 +168,12 @@ export function FlowLibrary({
               key={t.id}
               type="button"
               disabled={pending}
-              onClick={() => start(async () => router.push(`/m/studio/${await createFlowFromTemplate(t.id)}`))}
+              onClick={() =>
+                start(async () => {
+                  const r = await act(() => createFlowFromTemplate(t.id), { failed: "Couldn't create the flow from the template" });
+                  if (r.ok) router.push(`/m/studio/${r.value}`);
+                })
+              }
               className="group flex flex-col gap-1.5 rounded-xl border border-ink/8 p-3 text-left transition hover:border-plasma/30 hover:bg-plasma/5 disabled:opacity-50"
             >
               <div className="flex items-center gap-2">
@@ -226,7 +244,7 @@ function FlowTile({
           onClick={(e) => {
             e.stopPropagation();
             if (confirm(`Delete "${card.flow.name}"? This removes its run history.`))
-              startDel(async () => deleteFlow(card.flow.id));
+              startDel(async () => void (await act(() => deleteFlow(card.flow.id), { failed: "Couldn't delete the flow" })));
           }}
           className="rounded-md p-1 text-ink-faint opacity-0 transition hover:text-flare group-hover:opacity-100"
         >

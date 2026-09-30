@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { act } from "@/core/ui/feedback";
 import { setPersonNotes } from "../actions";
 
 export function PersonNotes({
@@ -34,7 +35,10 @@ export function PersonNotes({
             disabled={pending}
             onClick={() =>
               start(async () => {
-                await setPersonNotes(personId, value);
+                const r = await act(() => setPersonNotes(personId, value), {
+                  failed: "Couldn't save the notes",
+                });
+                if (!r.ok) return;
                 setSaved(value);
               })
             }

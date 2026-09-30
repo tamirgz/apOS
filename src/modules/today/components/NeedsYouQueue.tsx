@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -197,10 +197,21 @@ function Row({ item }: { item: NeedsYouItem }) {
 /**
  * The "Needs you" queue — the unified attention surface. One list of typed,
  * urgency-sorted cards drawn from attention items + pending approvals +
- * Workbench needs_input. Refreshes live as agents raise or the user resolves.
+ * Workbench needs_input. Project-hygiene nags sit in one folded group at the
+ * end so they don't bury the actionable items. Refreshes live.
  */
-export function NeedsYouQueue({ items }: { items: NeedsYouItem[] }) {
+export function NeedsYouQueue({
+  items,
+  hygiene = [],
+}: {
+  items: NeedsYouItem[];
+  hygiene?: NeedsYouItem[];
+}) {
   useLiveEvents(["attention_changed", "approvals_changed", "workbench_changed"]);
+  // Open when arriving from the home page's digest row (#hygiene).
+  const [hygieneOpen, setHygieneOpen] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- the URL hash is client-only; read it after hydration
+  useEffect(() => setHygieneOpen(window.location.hash === "#hygiene"), []);
 
   return (
     <section>
@@ -228,6 +239,35 @@ export function NeedsYouQueue({ items }: { items: NeedsYouItem[] }) {
               <Row key={`${it.kind}:${it.id}`} item={it} />
             ))}
           </AnimatePresence>
+        </div>
+      )}
+
+      {hygiene.length > 0 && (
+        <div id="hygiene" className="mt-4 scroll-mt-20">
+          <button
+            type="button"
+            onClick={() => setHygieneOpen((o) => !o)}
+            aria-expanded={hygieneOpen}
+            className="flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint transition hover:text-ink"
+          >
+            <ChevronDown
+              className={cn("size-3 transition-transform", !hygieneOpen && "-rotate-90")}
+            />
+            project check-ins
+            <span className="text-gold">{hygiene.length}</span>
+            <span className="normal-case tracking-normal text-ink-faint">
+              — setup, archive &amp; health flags
+            </span>
+          </button>
+          {hygieneOpen && (
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              <AnimatePresence initial={false}>
+                {hygiene.map((it) => (
+                  <Row key={`${it.kind}:${it.id}`} item={it} />
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
         </div>
       )}
     </section>

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
-import { ArrowUpRight, Bell, ChevronRight, LayoutGrid, Menu } from "lucide-react";
+import { ArrowUpRight, Bell, ChevronRight, Menu } from "lucide-react";
 import { navModules } from "@/modules/registry";
 import type { ModuleManifest } from "@/core/modules/types";
 import { getSidebarBadges } from "./sidebar-badges";
@@ -224,13 +224,6 @@ export function Sidebar() {
 
       {/* nav */}
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
-        <NavItem
-          href="/deck"
-          title="Deck"
-          accent="var(--color-plasma)"
-          icon={LayoutGrid}
-          active={pathname === "/deck"}
-        />
         {core.map((m) => (
           <NavItem
             key={m.id}
@@ -245,7 +238,7 @@ export function Sidebar() {
         {[...groups.entries()].map(([label, items]) => (
           <NavGroup key={label} label={label} items={items} pathname={pathname} />
         ))}
-        {/* Notifications — a core page (like Deck), was only reachable via the
+        {/* Notifications — a core page, was only reachable via the
             bell dropdown or an Inbox link; give it a persistent nav entry. */}
         <NavItem
           href="/notifications"

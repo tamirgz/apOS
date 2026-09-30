@@ -3,12 +3,14 @@ import { attentionItems } from "./schema";
 import { todayTools } from "./tools";
 import { todayJobs } from "./jobs";
 import { TodayPage } from "./pages/TodayPage";
+import { QueuePage } from "./pages/QueuePage";
 import { NeedsYouWidget } from "./widgets/NeedsYouWidget";
 
 export const todayServerManifest: ModuleServerManifest = {
   id: "today",
   routes: {
     "": TodayPage,
+    queue: QueuePage,
   },
   widgets: [
     {
@@ -18,6 +20,7 @@ export const todayServerManifest: ModuleServerManifest = {
       component: NeedsYouWidget,
       priority: 1,
       span: 2,
+      href: "/m/today/queue",
     },
   ],
   schema: { attentionItems },

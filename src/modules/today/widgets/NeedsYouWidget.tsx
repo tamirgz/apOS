@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listNeedsYou, todaySummary } from "../queries";
+import { listNeedsYou, splitHygiene, todaySummary } from "../queries";
 import { NeedsYouList } from "./NeedsYouList";
 
 // Tier-1 dashboard hero: not just the count — the actual items that need the
@@ -12,8 +12,10 @@ export async function NeedsYouWidget() {
   // Collapse exact duplicates (same kind+source+title) — agents occasionally
   // raise the same attention card twice without a dedupe key, which the old
   // count-only widget hid. Keep the first (list is pre-sorted by urgency).
+  // Project-hygiene nags fold into one digest row (see splitHygiene).
+  const { focus, hygiene } = splitHygiene(raw);
   const seen = new Set<string>();
-  const items = raw.filter((it) => {
+  const items = focus.filter((it) => {
     const key = `${it.kind}:${it.source}:${it.title}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -22,7 +24,7 @@ export async function NeedsYouWidget() {
 
   return (
     <div className="flex h-full flex-col">
-      <Link href="/m/today" className="mb-2 flex items-baseline gap-2.5">
+      <Link href="/m/today/queue" className="mb-2 flex items-baseline gap-2.5">
         <span className="font-display text-4xl font-semibold leading-none text-solar text-glow">
           {items.length}
         </span>
@@ -36,7 +38,10 @@ export async function NeedsYouWidget() {
         </span>
       </Link>
       <div className="min-h-0 flex-1">
-        <NeedsYouList items={items.slice(0, MAX_ITEMS)} />
+        <NeedsYouList
+          items={items.slice(0, hygiene.length ? MAX_ITEMS - 1 : MAX_ITEMS)}
+          hygieneCount={hygiene.length}
+        />
       </div>
     </div>
   );

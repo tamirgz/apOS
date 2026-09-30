@@ -137,9 +137,31 @@ export async function listNeedsYou(): Promise<NeedsYouItem[]> {
   return sortQueue(rows);
 }
 
+/**
+ * Project-hygiene nags — "Set up or archive X?" and the planner's "X is at
+ * risk" health flags. Each is real, but a stack of them buried the actionable
+ * items, so the home page folds them into ONE digest row.
+ */
+export function isHygiene(it: NeedsYouItem): boolean {
+  if (it.kind !== "attention") return false;
+  if (it.source === "system:project-setup") return true;
+  return it.source === "today-plan" && !!it.href?.startsWith("/m/projects/");
+}
+
+export function splitHygiene(items: NeedsYouItem[]): {
+  focus: NeedsYouItem[];
+  hygiene: NeedsYouItem[];
+} {
+  const focus: NeedsYouItem[] = [];
+  const hygiene: NeedsYouItem[] = [];
+  for (const it of items) (isHygiene(it) ? hygiene : focus).push(it);
+  return { focus, hygiene };
+}
+
+/** Sidebar badge: the actionable items, with the hygiene digest counted once. */
 export async function countNeedsYou(): Promise<number> {
-  const rows = await listNeedsYou();
-  return rows.length;
+  const { focus, hygiene } = splitHygiene(await listNeedsYou());
+  return focus.length + (hygiene.length > 0 ? 1 : 0);
 }
 
 export interface PlanBlock {

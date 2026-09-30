@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { asc, inArray, sql } from "drizzle-orm";
+import { and, asc, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
-import { ACTIVE_STATUSES, priorityRank, tasks } from "../schema";
+import { ACTIVE_STATUSES, cycles, priorityRank, tasks } from "../schema";
 import { withIdentifiers } from "../core";
 import { STATUS_META, plainTitle } from "../states";
 import { cn } from "@/core/ui/cn";
@@ -13,17 +13,49 @@ const PRIORITY_COLOR = {
   low: "text-ink-faint",
 } as const;
 
+const DAY = 86_400_000;
+
+/** "overdue 3d" / "due today" / "due in 2d" — only when it's close. */
+function dueLabel(dueAt: Date | null, now: number): string | null {
+  if (!dueAt) return null;
+  const days = Math.floor((dueAt.getTime() - now) / DAY);
+  if (days < 0) return `overdue ${-days}d`;
+  if (days === 0) return "due today";
+  return days <= 3 ? `due in ${days}d` : null;
+}
+
 export async function UpNextWidget() {
-  // Committed work only (not the backlog): in-progress first, then priority.
+  const now = new Date();
+  // Current cycles (derived from dates) — their items outrank the open pool.
+  const current = await db
+    .select({ id: cycles.id })
+    .from(cycles)
+    .where(and(lte(cycles.startsAt, now), gte(cycles.endsAt, now)));
+  const cycleIds = current.map((c) => c.id);
+  const inCycle = cycleIds.length
+    ? sql`${tasks.cycleId} in (${sql.join(cycleIds.map((id) => sql`${id}`), sql`, `)})`
+    : sql`false`;
+  const soon = new Date(now.getTime() + 3 * DAY);
+
+  // The work in play, committed items only (not the backlog): review, then
+  // in progress, then overdue / due within 3 days, then the current cycle,
+  // then priority.
   const rows = await withIdentifiers(
     db,
     await db
       .select()
       .from(tasks)
       .where(inArray(tasks.status, [...ACTIVE_STATUSES]))
-      .orderBy(asc(sql`case ${tasks.status} when 'review' then 0 when 'doing' then 1 else 2 end`), priorityRank, asc(tasks.sortOrder))
+      .orderBy(
+        asc(sql`case ${tasks.status} when 'review' then 0 when 'doing' then 1 else 2 end`),
+        asc(sql`case when ${tasks.dueAt} is not null and ${tasks.dueAt} <= ${soon.toISOString()}::timestamptz then 0 else 1 end`),
+        asc(sql`case when ${inCycle} then 0 else 1 end`),
+        priorityRank,
+        asc(tasks.sortOrder),
+      )
       .limit(5),
   );
+  const inCycleSet = new Set(cycleIds);
 
   if (rows.length === 0) {
     return (
@@ -45,11 +77,17 @@ export async function UpNextWidget() {
         >
           <span
             className={cn(
-              "font-mono text-[9px] uppercase tracking-widest",
+              "truncate font-mono text-[9px] uppercase tracking-widest",
               PRIORITY_COLOR[t.priority],
             )}
           >
             ▲ {t.identifier ? `${t.identifier} · ` : ""}{STATUS_META[t.status].label}
+            {dueLabel(t.dueAt, now.getTime()) && (
+              <span className="text-flare"> · {dueLabel(t.dueAt, now.getTime())}</span>
+            )}
+            {t.cycleId && inCycleSet.has(t.cycleId) && (
+              <span className="text-ion"> · cycle</span>
+            )}
           </span>
           <span className="line-clamp-2 text-[13px] leading-snug text-ink-dim transition group-hover:text-ink">
             {plainTitle(t.title)}

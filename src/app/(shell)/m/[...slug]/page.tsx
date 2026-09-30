@@ -14,10 +14,10 @@ function NotFound({ path }: { path: string }) {
         No module answers at <code className="text-ion">/{path}</code>
       </h2>
       <Link
-        href="/"
+        href="/m/today"
         className="mt-2 rounded-lg border border-plasma/30 px-4 py-2 font-mono text-xs uppercase tracking-widest text-plasma transition hover:bg-plasma/10"
       >
-        return to deck
+        return to today
       </Link>
     </GlassPanel>
   );

@@ -26,7 +26,7 @@ export const tasksServerManifest: ModuleServerManifest = {
     },
     {
       id: "up-next",
-      title: "Up next",
+      title: "In play",
       size: "md",
       component: UpNextWidget,
       priority: 1,

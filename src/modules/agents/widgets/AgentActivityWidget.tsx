@@ -3,7 +3,11 @@ import { listRecentRunsAcrossAgents } from "../queries";
 import { RUN_STATUS_META } from "../components/runMeta";
 
 export async function AgentActivityWidget() {
-  const rows = await listRecentRunsAcrossAgents(5);
+  // Latest run per agent — a chatty agent listed twice crowded out the rest.
+  const seen = new Set<string>();
+  const rows = (await listRecentRunsAcrossAgents(30))
+    .filter(({ run }) => !seen.has(run.agentId) && !!seen.add(run.agentId))
+    .slice(0, 5);
 
   if (rows.length === 0) {
     return (

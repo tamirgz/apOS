@@ -22,13 +22,20 @@ const KIND_DOT: Record<NeedsYouItem["kind"], string> = {
   workbench: "var(--color-ion)",
 };
 
-export function NeedsYouList({ items }: { items: NeedsYouItem[] }) {
+export function NeedsYouList({
+  items,
+  hygieneCount = 0,
+}: {
+  items: NeedsYouItem[];
+  /** Folded project-hygiene nags, shown as one digest row linking to the queue. */
+  hygieneCount?: number;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   // Live-refresh when attention or approvals state changes elsewhere.
   useLiveEvents(["attention_changed", "approvals_changed"]);
 
-  if (items.length === 0) {
+  if (items.length === 0 && hygieneCount === 0) {
     return (
       <p className="font-mono text-[11px] uppercase tracking-widest text-ink-faint">
         you&apos;re clear — nothing needs you
@@ -102,6 +109,26 @@ export function NeedsYouList({ items }: { items: NeedsYouItem[] }) {
           </li>
         );
       })}
+      {hygieneCount > 0 && (
+        <li className="group flex items-center gap-2.5 border-t border-white/5 py-2 first:border-t-0">
+          <Link
+            href="/m/today/queue#hygiene"
+            className="flex min-w-0 flex-1 items-center gap-2.5"
+          >
+            <span
+              className="mt-1.5 size-1.5 shrink-0 rounded-full"
+              style={{ background: "var(--color-gold)" }}
+            />
+            <span className="min-w-0 flex-1 truncate text-sm text-ink-dim transition group-hover:text-ink">
+              {hygieneCount} project check-in{hygieneCount === 1 ? "" : "s"}
+              <span className="text-ink-faint"> — setup, archive &amp; health</span>
+            </span>
+            <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+              digest
+            </span>
+          </Link>
+        </li>
+      )}
     </ul>
   );
 }

@@ -172,6 +172,8 @@ export interface ModuleWidget {
   priority?: 1 | 2 | 3;
   /** Column span within its tier's grid (tier 1 emphasis). Default 1. */
   span?: number;
+  /** Where the card header links. Default: the module root (/m/<id>). */
+  href?: string;
   /**
    * Compact single-stat form for the tier-3 pulse strip. When a priority-3
    * widget provides this, the dashboard renders it in the strip instead of

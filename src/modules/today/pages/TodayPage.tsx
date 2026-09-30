@@ -1,26 +1,32 @@
-import { getToday, listNeedsYou } from "../queries";
-import { PlanMyDay } from "../components/PlanMyDay";
-import { NeedsYouQueue } from "../components/NeedsYouQueue";
-import { TodayBriefs } from "../components/TodayBriefs";
+import { DeckGrid, type DeckWidget } from "@/core/ui/DeckGrid";
 
 /**
- * The command surface (ONE-STOP §3), and the home page: "what's my day, what
- * needs me, and what did my agents bring in?" — Plan-my-day + today's briefs
- * on the left, the "Needs you" queue on the right.
+ * The home page: the tiered widget deck — Now (needs you, agenda, the work in
+ * play) → In motion → At a glance. Today and the old /deck were two competing
+ * homes; this is the one. The full queue with snooze/approve and the day plan
+ * live one click away at /m/today/queue.
  */
 export async function TodayPage() {
-  const [{ agenda, suggestions }, needs] = await Promise.all([
-    getToday(),
-    listNeedsYou(),
+  // Lazy: the registry imports this module's manifest, which imports this page.
+  const [{ serverModules }, { modules }] = await Promise.all([
+    import("@/modules/registry.server"),
+    import("@/modules/registry"),
   ]);
+  const widgets: DeckWidget[] = serverModules.flatMap((m) => {
+    const accent =
+      modules.find((mod) => mod.id === m.id)?.accent ?? "var(--color-ink-faint)";
+    return m.widgets.map((w) => ({
+      id: w.id,
+      title: w.title,
+      moduleId: m.id,
+      component: w.component,
+      stat: w.stat,
+      priority: w.priority ?? 2,
+      span: w.span ?? 1,
+      accent,
+      href: w.href,
+    }));
+  });
 
-  return (
-    <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
-      <div className="flex flex-col gap-5">
-        <PlanMyDay agenda={agenda} suggestions={suggestions} />
-        <TodayBriefs />
-      </div>
-      <NeedsYouQueue items={needs} />
-    </div>
-  );
+  return <DeckGrid widgets={widgets} />;
 }

@@ -32,42 +32,42 @@ export function ProjectAttention({ items }: { items: Item[] }) {
     });
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="px-1 font-mono text-[10px] uppercase tracking-[0.2em] text-solar">
-        needs you
-      </h2>
+    <section aria-label="Needs you" className="flex flex-col gap-2.5">
+      <h3 className="wk-sec-h !text-solar">
+        Needs you <span className="tabular-nums">{items.length}</span>
+      </h3>
       <AnimatePresence mode="popLayout">
         {items.map((a) => (
           <motion.div
             key={a.id}
             layout
             exit={{ opacity: 0, x: 12 }}
-            className="group glass flex items-start gap-2.5 rounded-xl border-l-2 border-solar/50 p-3"
+            className="wk-card group !flex-row !items-start !gap-3 !p-3.5"
           >
+            <i className="mt-[6px] inline-block size-2 shrink-0 rounded-full bg-solar" aria-hidden />
             <div className="min-w-0 flex-1">
-              <p className="text-sm text-ink">{a.title}</p>
+              <p dir="auto" className="text-[13.5px] leading-snug text-ink">{a.title}</p>
               {a.body && (
-                <p className="mt-0.5 text-xs leading-snug text-ink-dim">{a.body}</p>
+                <p dir="auto" className="mt-1 text-[12.5px] leading-snug text-ink-dim">{a.body}</p>
               )}
+              <span className="mt-1.5 inline-block text-[11px] text-ink-faint">{a.type.replace(/_/g, " ")}</span>
             </div>
-            <span className="mt-0.5 shrink-0 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
-              {a.type}
-            </span>
             <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
                 title="Done — I handled this"
                 disabled={pending}
                 onClick={() => resolve(doneAttention, a.id)}
-                className="rounded-md p-1.5 text-ink-dim transition hover:bg-plasma/15 hover:text-plasma disabled:opacity-40"
+                className="wk-btn primary !gap-1 !px-2 !py-0.5 text-[11.5px]"
               >
-                <Check className="size-3.5" />
+                <Check className="size-3" /> Done
               </button>
               <button
                 type="button"
                 title="Dismiss — not relevant"
                 disabled={pending}
                 onClick={() => resolve(dismissAttention, a.id)}
+                aria-label="Dismiss"
                 className="rounded-md p-1.5 text-ink-faint transition hover:bg-ink/6 hover:text-ink disabled:opacity-40"
               >
                 <X className="size-3.5" />

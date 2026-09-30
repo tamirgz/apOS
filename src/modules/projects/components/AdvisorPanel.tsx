@@ -5,7 +5,6 @@ import { timeAgo } from "@/core/ui/time";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowRight,
   Check,
   Compass,
   Layers,
@@ -77,7 +76,7 @@ export function AdvisorPanel({
     });
 
   const doneChip = did && (
-    <span className="flex items-center gap-1 font-mono text-[9px] uppercase tracking-widest text-plasma">
+    <span className="inline-flex items-center gap-1 text-xs text-plasma">
       <Check className="size-3" /> {did}
     </span>
   );
@@ -98,36 +97,25 @@ export function AdvisorPanel({
   };
 
   return (
-    <section className="glass rounded-2xl p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <Compass className="size-4 text-ion" />
-        <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint">
-          advisor
-        </p>
-        {updatedAt && (
-          <span className="font-mono text-[9px] uppercase tracking-widest text-ink-faint">
-            · read {ago(updatedAt)} · haiku
-          </span>
-        )}
+    <section aria-label="Advisor" className="glass flex flex-col gap-3 rounded-2xl p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="wk-sec-h">
+          <Compass className="size-3.5 text-violet" /> Advisor
+        </h3>
+        {updatedAt && <span className="text-[11px] text-ink-faint">read {ago(updatedAt)}</span>}
         <div className="ml-auto flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => setAngleOpen((o) => !o)}
             disabled={running}
             title="Ask the advisor to reconsider this project from a different angle"
-            className="flex items-center gap-1.5 rounded-lg border border-ion/12 px-2.5 py-1 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:text-ink-dim disabled:opacity-50"
+            className="wk-btn !py-1 text-xs"
           >
-            <Sparkles className="size-3" /> angle
+            <Sparkles className="size-3.5 text-violet" /> Angle
           </button>
-          <button
-            type="button"
-            onClick={reRead}
-            disabled={running}
-            title="Re-read all active projects"
-            className="flex items-center gap-1.5 rounded-lg border border-ion/25 bg-ion/10 px-2.5 py-1 font-mono text-[9px] uppercase tracking-widest text-ion transition hover:bg-ion/20 disabled:opacity-50"
-          >
-            <RefreshCw className={cn("size-3", running && "animate-spin")} />
-            {running ? "reading…" : "re-read"}
+          <button type="button" onClick={reRead} disabled={running} title="Re-read all active projects" className="wk-btn violet !py-1 text-xs">
+            <RefreshCw className={cn("size-3.5", running && "animate-spin")} />
+            {running ? "Reading…" : "Re-read"}
           </button>
         </div>
       </div>
@@ -138,80 +126,69 @@ export function AdvisorPanel({
             e.preventDefault();
             reconsider();
           }}
-          className="mb-3 flex items-center gap-2"
+          className="flex items-center gap-2"
         >
           <input
             autoFocus
             value={angle}
             onChange={(e) => setAngle(e.target.value)}
-            placeholder="Reconsider from a different angle — e.g. 'focus on go-to-market' · 'be more critical' · 'what's the fastest path to demo?'"
-            className="h-8 flex-1 rounded-lg bg-ink/5 px-3 text-sm text-ink outline-none placeholder:text-ink-faint focus:bg-ink/8"
+            onKeyDown={(e) => e.key === "Escape" && setAngleOpen(false)}
+            placeholder="Reconsider from a different angle — e.g. 'be more critical' · 'fastest path to a demo?'"
+            className="h-8 min-w-0 flex-1 rounded-lg bg-ink/5 px-3 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:bg-ink/8"
           />
-          <button
-            type="submit"
-            className="rounded-lg bg-ion/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/25"
-          >
-            reconsider
+          <button type="submit" disabled={!angle.trim()} className="wk-btn violet !py-1 text-xs">
+            Reconsider
           </button>
         </form>
       )}
 
       {state ? (
         <div className="flex flex-col gap-2.5">
-          <p dir="auto" className="text-sm leading-relaxed text-ink-dim">
-            {state}
+          <p dir="auto" className="wk-read !text-[13px]">
+            <b>Read</b> · {state}
           </p>
           {blocker && (
-            <div className="flex items-start gap-2 rounded-lg border border-flare/20 bg-flare/5 px-3 py-2 text-sm text-flare">
-              <OctagonAlert className="mt-0.5 size-3.5 shrink-0" />
-              <span className="flex-1">
-                <span className="font-mono text-[9px] uppercase tracking-widest opacity-70">
-                  blocker
-                </span>
-                <br />
-                {blocker}
-              </span>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => toItem(blocker, "blocker")}
-                title="File this blocker as a high-priority work item"
-                className="flex shrink-0 items-center gap-1 rounded-md border border-flare/25 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-flare/80 transition hover:bg-flare/10 hover:text-flare disabled:opacity-50"
-              >
-                <ListPlus className="size-3" /> item
-              </button>
+            <div className="flex flex-col gap-1.5">
+              <p dir="auto" className="wk-read flare !text-[13px]">
+                <b>Blocker</b> · {blocker}
+              </p>
+              <div className="flex items-center gap-1.5 pl-3">
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => toItem(blocker, "blocker")}
+                  title="File this blocker as a high-priority work item"
+                  className="wk-btn !gap-1 !px-2 !py-0.5 text-[11.5px]"
+                >
+                  <OctagonAlert className="size-3 text-flare" /> File as item
+                </button>
+              </div>
             </div>
           )}
           {next && (
             <div className="flex flex-col gap-1.5">
-              <p className="flex items-start gap-2 text-sm text-ink-dim">
-                <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-plasma" />
-                <span>
-                  <span className="font-mono text-[9px] uppercase tracking-widest text-plasma/70">
-                    next move
-                  </span>
-                  <br />
-                  {next}
-                </span>
+              <p dir="auto" className="wk-read plasma !text-[13px]">
+                <b>Next move</b> · {next}
               </p>
-              {/* Act on the recommendation — turn it into a task or a feature. */}
-              <div className="flex items-center gap-1.5 pl-6">
+              {/* Act on the recommendation — turn it into a work item or a module. */}
+              <div className="flex flex-wrap items-center gap-1.5 pl-3">
                 <button
                   type="button"
                   disabled={pending}
                   onClick={() => toItem(next, "next")}
                   title="Add this next move to the project's work items"
-                  className="flex items-center gap-1 rounded-md border border-ion/12 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:border-plasma/30 hover:text-plasma disabled:opacity-50"
+                  className="wk-btn !gap-1 !px-2 !py-0.5 text-[11.5px]"
                 >
-                  <ListPlus className="size-3" /> item
+                  <ListPlus className="size-3 text-plasma" /> Work item
                 </button>
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => create(() => advisorToFeature(projectId, next), "feature")}
-                  className="flex items-center gap-1 rounded-md border border-ion/12 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:border-ion/30 hover:text-ion disabled:opacity-50"
+                  onClick={() => create(() => advisorToFeature(projectId, next), "module")}
+                  title="Start a module for this next move"
+                  className="wk-btn !gap-1 !px-2 !py-0.5 text-[11.5px]"
                 >
-                  <Layers className="size-3" /> feature
+                  <Layers className="size-3 text-solar" /> Module
                 </button>
                 {doneChip}
               </div>
@@ -220,9 +197,9 @@ export function AdvisorPanel({
           {!next && doneChip}
         </div>
       ) : (
-        <p className="text-xs text-ink-faint">
-          No advisor read yet — hit <span className="text-ion">re-read</span> to have
-          the chief-of-staff assess this project from its tasks, notes and code.
+        <p className="text-[13px] text-ink-faint">
+          No advisor read yet — <span className="text-ink-dim">Re-read</span> has the chief-of-staff assess this project from its items,
+          notes and code.
         </p>
       )}
     </section>

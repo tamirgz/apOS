@@ -14,7 +14,9 @@ import {
 import { usableRepoPath } from "../repo";
 import { AdvisorPanel } from "../components/AdvisorPanel";
 import { getProjectCockpitById } from "../queries";
-import { CockpitHeader } from "../components/CockpitHeader";
+import { ProjectPlan, ProjectVitals } from "../components/CockpitHeader";
+import { ProjectPulse } from "../components/ProjectPulse";
+import { pulseProps } from "../pulse";
 import { HEALTH_META } from "../health";
 import { ProjectAttention } from "../components/ProjectAttention";
 import { DeleteProjectButton } from "../components/DeleteProjectButton";
@@ -125,51 +127,60 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
           about: project.description ? <p className="max-w-3xl text-sm leading-relaxed text-ink-dim">{project.description}</p> : undefined,
         }}
         overview={
-          <div className="flex flex-col gap-6">
-            <CockpitHeader
-              id={project.id}
-              status={project.status}
-              goal={project.goal}
-              category={project.category}
-              categories={categories}
-              nextAction={project.nextAction}
-              repoUrl={project.repoUrl}
-              repoReady={!!usableRepoPath(project.id, project.repoUrl)}
-              repoDigest={project.repoDigest}
-              health={project.resolvedHealth.health}
-              healthReason={project.resolvedHealth.reason}
-              healthSource={project.resolvedHealth.source}
-              stats={{
-                open: project.taskCounts.open,
-                done: project.taskCounts.done,
-                overdue: project.taskCounts.overdue,
-                notes: project.noteCount,
-                attention: openAttention.length,
-              }}
-              lastActive={lastActiveLabel(project.lastActivityAt)}
-              setGoal={setProjectGoal}
-              setCategory={setProjectCategory}
-              setNextAction={setProjectNextAction}
-              setRepo={setProjectRepo}
-              completeNextAction={completeProjectNextAction}
-            />
-            <AdvisorPanel
-              projectId={project.id}
-              state={project.advisorState}
-              blocker={project.advisorBlocker}
-              next={project.advisorNext}
-              updatedAt={project.advisorUpdatedAt}
-            />
-            <ProjectAttention
-              items={openAttention.map((a) => ({
-                id: a.id,
-                type: a.type,
-                title: a.title,
-                body: a.body,
-              }))}
-            />
-            <ProjectNotes projectId={project.id} notes={projectNotes} />
-            <ProjectFiles projectId={project.id} files={projectFiles} />
+          <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,1fr)]">
+            <div className="flex min-w-0 flex-col gap-5">
+              <ProjectPlan
+                id={project.id}
+                goal={project.goal}
+                nextAction={project.nextAction}
+                repoUrl={project.repoUrl}
+                repoReady={!!usableRepoPath(project.id, project.repoUrl)}
+                repoDigest={project.repoDigest}
+                setGoal={setProjectGoal}
+                setNextAction={setProjectNextAction}
+                setRepo={setProjectRepo}
+                completeNextAction={completeProjectNextAction}
+              />
+              <AdvisorPanel
+                projectId={project.id}
+                state={project.advisorState}
+                blocker={project.advisorBlocker}
+                next={project.advisorNext}
+                updatedAt={project.advisorUpdatedAt}
+              />
+              <ProjectAttention
+                items={openAttention.map((a) => ({
+                  id: a.id,
+                  type: a.type,
+                  title: a.title,
+                  body: a.body,
+                }))}
+              />
+            </div>
+            <aside className="flex min-w-0 flex-col gap-5">
+              <ProjectVitals
+                id={project.id}
+                status={project.status}
+                category={project.category}
+                categories={categories}
+                health={project.resolvedHealth.health}
+                healthReason={project.resolvedHealth.reason}
+                healthSource={project.resolvedHealth.source}
+                stats={{
+                  open: project.taskCounts.open,
+                  done: project.taskCounts.done,
+                  overdue: project.taskCounts.overdue,
+                  notes: project.noteCount,
+                }}
+                lastActive={lastActiveLabel(project.lastActivityAt)}
+                setCategory={setProjectCategory}
+              />
+              <ProjectPulse {...pulseProps(work)} />
+            </aside>
+            <div className="grid min-w-0 items-start gap-5 md:grid-cols-2 xl:col-span-2">
+              <ProjectNotes projectId={project.id} notes={projectNotes} />
+              <ProjectFiles projectId={project.id} files={projectFiles} />
+            </div>
           </div>
         }
       />

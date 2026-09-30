@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { approvals } from "@/core/db/schema/approvals";
 import { projects } from "@/modules/projects/schema";
@@ -39,8 +39,16 @@ function sortQueue(items: NeedsYouItem[]): NeedsYouItem[] {
 
 export async function listNeedsYou(): Promise<NeedsYouItem[]> {
   const [items, pendingApprovals, wbTasks] = await Promise.all([
+    // The cards' project/person anchors resolve to names in the same query,
+    // so each card renders clickable chips without a second round trip.
     db
-      .select()
+      .select({
+        item: attentionItems,
+        projectName: sql<string | null>`(select p.name from projects p
+          where p.id::text = split_part(${attentionItems.projectRef}, ':', 2))`,
+        personName: sql<string | null>`(select h.name from people h
+          where h.id::text = split_part(${attentionItems.personRef}, ':', 2))`,
+      })
       .from(attentionItems)
       .where(eq(attentionItems.status, "open"))
       .orderBy(desc(attentionItems.urgency))
@@ -70,27 +78,10 @@ export async function listNeedsYou(): Promise<NeedsYouItem[]> {
     })(),
   ]);
 
-  // Resolve the cards' project/person anchors to names, so each card renders
-  // clickable chips (insertAttentionItem grounds these refs; they were being
-  // dropped on the floor here).
   const refId = (ref: string | null) => ref?.split(":")[1] ?? null;
-  const projectIds = [...new Set(items.map((a) => refId(a.projectRef)).filter((x): x is string => !!x))];
-  const personIds = [...new Set(items.map((a) => refId(a.personRef)).filter((x): x is string => !!x))];
-  const [projectRows, personRows] = await Promise.all([
-    projectIds.length
-      ? db.select({ id: projects.id, name: projects.name }).from(projects).where(inArray(projects.id, projectIds))
-      : Promise.resolve([]),
-    (async () => {
-      if (!personIds.length) return [];
-      const { people } = await import("@/modules/people/schema");
-      return db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, personIds));
-    })(),
-  ]);
-  const projectName = new Map(projectRows.map((p) => [p.id, p.name]));
-  const personName = new Map(personRows.map((p) => [p.id, p.name]));
 
   const rows: NeedsYouItem[] = [
-    ...items.map((a) => {
+    ...items.map(({ item: a, projectName, personName }) => {
       const pid = refId(a.projectRef);
       const hid = refId(a.personRef);
       return {
@@ -106,8 +97,8 @@ export async function listNeedsYou(): Promise<NeedsYouItem[]> {
         createdAt: a.createdAt,
         attentionType: a.type,
         payload: (a.payload ?? {}) as Record<string, unknown>,
-        project: pid && projectName.has(pid) ? { id: pid, name: projectName.get(pid)! } : null,
-        person: hid && personName.has(hid) ? { id: hid, name: personName.get(hid)! } : null,
+        project: pid && projectName ? { id: pid, name: projectName } : null,
+        person: hid && personName ? { id: hid, name: personName } : null,
       };
     }),
     ...pendingApprovals.map((p) => ({

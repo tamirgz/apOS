@@ -55,8 +55,8 @@ export function CycleStrip({
   const unit = usePts ? "pts" : "items";
   const daysLeft = cycle ? Math.max(0, Math.ceil((+new Date(cycle.endsAt) + DAY - now) / DAY)) : 0;
 
-  // ── milestones: live modules, nearest target first ──
-  const milestones = data.features
+  // ── live modules, nearest target first ──
+  const nextModules = data.features
     .filter((f) => f.status === "active" || f.status === "planned" || f.status === "paused")
     .filter((f) => (stats.get(f.id)?.total ?? 0) > 0 || f.targetAt)
     .sort(
@@ -87,7 +87,7 @@ export function CycleStrip({
 
   return (
     <section
-      aria-label="Cycle and milestones"
+      aria-label="Cycle and modules"
       className="glass grid gap-x-6 gap-y-5 rounded-2xl px-5 py-4 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.2fr)_minmax(200px,1fr)_minmax(240px,1.4fr)]"
     >
       {/* cycle */}
@@ -136,14 +136,14 @@ export function CycleStrip({
         )}
       </div>
 
-      {/* milestones */}
+      {/* modules */}
       <div className="min-w-0">
-        <h4 className="mb-1.5 font-display text-sm font-semibold tracking-[0.03em] text-ink">Milestones</h4>
-        {milestones.length === 0 ? (
+        <h4 className="mb-1.5 font-display text-sm font-semibold tracking-[0.03em] text-ink">Modules</h4>
+        {nextModules.length === 0 ? (
           <p className="text-[12.5px] text-ink-faint">No live modules. Group items into a module to track it here.</p>
         ) : (
           <div className="flex flex-col gap-[7px]">
-            {milestones.map((f) => {
+            {nextModules.map((f) => {
               const s = stats.get(f.id);
               const pct = modulePct(s);
               const late = f.targetAt && +new Date(f.targetAt) + DAY < now;

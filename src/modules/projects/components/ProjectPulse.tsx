@@ -21,18 +21,18 @@ export function ProjectPulse({
   cycle,
   cycleItems,
   blocked,
-  milestones,
+  modules,
 }: {
   cycle: CycleSummary | null;
   cycleItems: WorkItem[];
   blocked: string[];
-  milestones: { f: WorkFeature; s?: ModuleStats }[];
+  modules: { f: WorkFeature; s?: ModuleStats }[];
 }) {
   const now = useNow();
   const m = cycle ? cycleMetrics(cycle, cycleItems, blocked, now) : null;
 
   return (
-    <section aria-label="Cycle and milestones" className="glass flex flex-col gap-4 rounded-2xl p-5">
+    <section aria-label="Cycle and modules" className="glass flex flex-col gap-4 rounded-2xl p-5">
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <h3 className="wk-sec-h">Cycle</h3>
@@ -70,16 +70,16 @@ export function ProjectPulse({
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <h3 className="wk-sec-h">Milestones</h3>
+          <h3 className="wk-sec-h">Modules</h3>
           <Link href="?tab=modules" className="ml-auto text-[11.5px] text-ink-faint transition hover:text-ink">
             All modules
           </Link>
         </div>
-        {milestones.length === 0 ? (
+        {modules.length === 0 ? (
           <p className="text-[12.5px] text-ink-faint">No live modules. Group items into a module to track it here.</p>
         ) : (
           <ul className="flex flex-col gap-2.5">
-            {milestones.map(({ f, s }) => {
+            {modules.map(({ f, s }) => {
               const pct = modulePct(s);
               const late = !!f.targetAt && +new Date(f.targetAt) + DAY < now;
               return (

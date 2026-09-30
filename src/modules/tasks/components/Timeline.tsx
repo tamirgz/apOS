@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Crosshair, Diamond } from "lucide-react";
+import { ChevronRight, Crosshair, Diamond, Flag } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { act } from "@/core/ui/feedback";
 import { useNow } from "@/core/ui/useNow";
 import { updateFeature } from "@/modules/projects/features-actions";
 import { updateTask } from "../actions";
 import type { WorkItem } from "../core";
+import { OUTLOOK_META, type Outlook } from "../milestone-scope";
 import type { WorkFeature, WorkProject } from "../queries";
 import { STATUS_META, displayTitle, plainTitle } from "../states";
 import { modulePct } from "../stats";
@@ -97,6 +98,8 @@ export function Timeline({
   selectedId = null,
   onOpen,
   onOpenModule,
+  milestones = [],
+  onOpenMilestone,
 }: {
   items: WorkItem[];
   features: WorkFeature[];
@@ -107,6 +110,9 @@ export function Timeline({
   selectedId?: string | null;
   onOpen: (id: string) => void;
   onOpenModule?: (id: string) => void;
+  /** Milestone targets, drawn as flagged lines across the chart. */
+  milestones?: { id: string; name: string; at: number; outlook: Outlook }[];
+  onOpenMilestone?: (id: string) => void;
 }) {
   const router = useRouter();
   const now = useNow();
@@ -329,7 +335,8 @@ export function Timeline({
 
   // Window: a week back → the latest date shown (at least the zoom's look-ahead, so the grid fills the width), capped per zoom.
   const from = Math.min(today - 7 * DAY, ...allBars.map((b) => b.span.start));
-  const to = Math.max(today + zoomMeta.ahead * DAY, ...allBars.map((b) => b.span.end));
+  const marks = milestones.map((m) => ({ ...m, at: dayStart(m.at) }));
+  const to = Math.max(today + zoomMeta.ahead * DAY, ...allBars.map((b) => b.span.end), ...marks.map((m) => m.at));
   const start = Math.max(from, today - 60 * DAY);
   const end = Math.min(to + 7 * DAY, start + zoomMeta.span * DAY);
   const days = Math.round((end - start) / DAY) + 1;
@@ -395,6 +402,9 @@ export function Timeline({
   };
 
   const todayX = xOf(today);
+  const shownMarks = marks.filter((m) => m.at >= start && m.at <= end);
+  // The header grows a strip for the milestone flags when any are in view.
+  const headH = shownMarks.length ? 66 : 46;
   const scrollToToday = (smooth = true) => {
     const el = scrollRef.current;
     if (!el) return;
@@ -424,7 +434,7 @@ export function Timeline({
     />
   );
   const toolbar = (
-    <Toolbar zoom={zoom} onZoom={pickZoom} hideDone={hideDone} onToggle={toggleHideDone} onToday={allBars.length ? () => scrollToToday() : undefined} />
+    <Toolbar zoom={zoom} onZoom={pickZoom} hideDone={hideDone} onToggle={toggleHideDone} onToday={allBars.length ? () => scrollToToday() : undefined} marks={marks.length > 0} />
   );
 
   if (!allBars.length) {
@@ -622,7 +632,7 @@ export function Timeline({
         <div ref={scrollRef} className="overflow-x-auto">
           <div className="relative" style={{ width: labelW + width }}>
             {/* header */}
-            <div className="sticky top-0 z-10 flex h-[46px] border-b wk-line-strong bg-panel">
+            <div className="sticky top-0 z-10 flex border-b wk-line-strong bg-panel" style={{ height: headH }}>
               <div
                 className="sticky left-0 z-10 flex shrink-0 items-end border-r wk-line bg-panel px-3 pb-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-faint"
                 style={{ width: labelW }}
@@ -652,7 +662,7 @@ export function Timeline({
                       <span
                         key={d.x}
                         className={cn(
-                          "absolute bottom-1 text-center font-mono text-[10px] tabular-nums",
+                          "absolute top-[29px] text-center font-mono text-[10px] tabular-nums",
                           d.x === todayX ? "font-semibold text-solar" : d.weekend ? "text-ink-faint/60" : "text-ink-faint",
                         )}
                         style={{ left: d.x, width: DAY_PX }}
@@ -661,15 +671,28 @@ export function Timeline({
                       </span>
                     ))
                   : weeks.map((x) => (
-                      <span key={x} className="absolute bottom-1 font-mono text-[10px] tabular-nums text-ink-faint" style={{ left: x + 3 }}>
+                      <span key={x} className="absolute top-[29px] font-mono text-[10px] tabular-nums text-ink-faint" style={{ left: x + 3 }}>
                         {new Date(start + (x / DAY_PX) * DAY).getDate()}
                       </span>
                     ))}
+                {shownMarks.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onOpenMilestone?.(m.id)}
+                    title={`${m.name} · target ${shortDay(m.at)} · ${OUTLOOK_META[m.outlook].label}`}
+                    className="absolute top-[46px] flex h-[18px] max-w-[180px] items-center gap-1 rounded-sm bg-panel pr-1.5 text-[10.5px] leading-none text-ink-dim transition hover:text-ink"
+                    style={{ left: xOf(m.at) + DAY_PX / 2 - 5 }}
+                  >
+                    <Flag className="size-2.5 shrink-0" style={{ color: OUTLOOK_META[m.outlook].color }} fill="currentColor" fillOpacity={0.3} aria-hidden />
+                    <span className="truncate">{m.name}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* grid + today line */}
-            <div className="pointer-events-none absolute bottom-0 top-[46px] z-[1]" style={{ left: labelW, width }} aria-hidden>
+            {/* grid + today line + milestone targets */}
+            <div className="pointer-events-none absolute bottom-0 z-[1]" style={{ left: labelW, width, top: headH }} aria-hidden>
               {weekends.map((x) => (
                 <span key={`w${x}`} className="absolute inset-y-0 bg-ink/[0.025]" style={{ left: x, width: DAY_PX }} />
               ))}
@@ -680,6 +703,13 @@ export function Timeline({
                 <span key={`m${m.x}`} className="absolute inset-y-0 w-px bg-ion/[0.14]" style={{ left: m.x }} />
               ))}
               {today >= start && today <= end && <span className="wk-today" style={{ left: todayX + DAY_PX / 2 - 1 }} title="Today" />}
+              {shownMarks.map((m) => (
+                <span
+                  key={m.id}
+                  className="absolute inset-y-0 border-l border-dashed"
+                  style={{ left: xOf(m.at) + DAY_PX / 2, borderColor: `color-mix(in oklab, ${OUTLOOK_META[m.outlook].color} 55%, transparent)` }}
+                />
+              ))}
             </div>
 
             {moduleRows.length > 0 && (
@@ -764,12 +794,14 @@ function Toolbar({
   hideDone,
   onToggle,
   onToday,
+  marks,
 }: {
   zoom: Zoom;
   onZoom: (z: Zoom) => void;
   hideDone: boolean;
   onToggle: () => void;
   onToday?: () => void;
+  marks?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -820,6 +852,11 @@ function Toolbar({
         <span className="inline-flex items-center gap-1.5">
           <i className="inline-block h-3 w-0.5 bg-solar" /> today
         </span>
+        {marks && (
+          <span className="inline-flex items-center gap-1.5">
+            <Flag className="size-3" aria-hidden /> milestone target
+          </span>
+        )}
       </div>
     </div>
   );

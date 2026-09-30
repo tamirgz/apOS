@@ -221,6 +221,7 @@ export interface WorkViewFilters {
   project?: string;
   feature?: string;
   cycle?: string;
+  milestone?: string;
   layout?: "board" | "list" | "calendar";
 }
 

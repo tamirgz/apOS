@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, ChevronRight, Circle, Diamond, Flag, Lock, MinusCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronRight, Circle, Diamond, Flag, Lock, MinusCircle, Pencil, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { Markdown } from "@/core/ui/Markdown";
 import { shortDate } from "@/core/ui/time";
@@ -19,9 +19,19 @@ import {
   type MilestoneStats,
   type Outlook,
 } from "../milestone-scope";
+import {
+  addMilestoneContent,
+  deleteCapability,
+  deleteMilestoneAction,
+  removeMilestoneContent,
+  saveCapability,
+  updateMilestoneAction,
+} from "../milestone-actions";
 import type { WorkFeature, WorkProject } from "../queries";
 import { STATUS_META } from "../states";
-import type { TaskStatus } from "../schema";
+import { MILESTONE_STATUSES, type MilestoneStatus, type TaskStatus } from "../schema";
+import { dateInput } from "./CyclePanel";
+import { ContentPicker, CriteriaEditor, NewMilestone, RequiresEditor, useMilestoneWrite } from "./MilestoneEdit";
 
 const DAY = 86_400_000;
 
@@ -218,6 +228,7 @@ export function MilestonesView({
   onOpen: (id: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("live");
+  const [adding, setAdding] = useState(false);
   const { stats } = useMilestoneStats(bundle, items);
   const names = useMemo(() => new Map(bundle.milestones.map((m) => [m.id, m.name])), [bundle.milestones]);
   const byProject = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
@@ -243,9 +254,25 @@ export function MilestonesView({
             {late} past target
           </span>
         )}
+        {projectId && (
+          <button type="button" onClick={() => setAdding((v) => !v)} className="wk-btn primary ml-auto !py-1.5 text-xs">
+            <Plus className="size-3.5" /> New milestone
+          </button>
+        )}
       </div>
 
-      {shown.length === 0 && (
+      {adding && projectId && (
+        <NewMilestone
+          projectId={projectId}
+          onCancel={() => setAdding(false)}
+          onCreated={(id) => {
+            setAdding(false);
+            onOpen(id);
+          }}
+        />
+      )}
+
+      {shown.length === 0 && !adding && (
         <div className="glass flex flex-col items-center gap-2 rounded-2xl px-5 py-10 text-center">
           <Flag className="size-5 text-ink-faint" aria-hidden />
           <p className="max-w-md text-sm text-ink-dim">
@@ -255,8 +282,8 @@ export function MilestonesView({
           </p>
           {bundle.milestones.length === 0 && (
             <p className="max-w-md text-xs text-ink-faint">
-              Agents create and fill milestones through the apOS MCP tools: <code className="font-mono">milestones.create</code>, then{" "}
-              <code className="font-mono">milestones.addContent</code>.
+              {projectId ? "Create one with New milestone. " : "Create one on a project's Milestones tab. "}Agents can also create and fill milestones
+              through the apOS MCP tools <code className="font-mono">milestones.create</code> and <code className="font-mono">milestones.addContent</code>.
             </p>
           )}
         </div>
@@ -381,6 +408,22 @@ function Tile({ label, value, sub, tone }: { label: string; value: React.ReactNo
 
 const LEFT_ORDER: TaskStatus[] = ["review", "doing", "todo", "backlog"];
 
+/** A capability's name, edited in place (saved on blur / Enter). */
+function CapabilityName({ name, onSave }: { name: string; onSave: (name: string) => void }) {
+  const [v, setV] = useState(name);
+  return (
+    <input
+      dir="auto"
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={() => (v.trim() && v.trim() !== name ? onSave(v) : setV(name))}
+      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      aria-label="Capability name"
+      className="-ml-1 min-w-0 flex-1 rounded-md bg-transparent px-1 font-display text-[15px] text-ink outline-none transition hover:bg-ink/4 focus:bg-ink/6"
+    />
+  );
+}
+
 /**
  * A milestone's page: goal, the numbers that say whether it lands (progress,
  * target, forecast, pace), the readiness gate, each capability with its
@@ -410,6 +453,29 @@ export function MilestonePage({
   const s = stats.get(m.id)!;
   const scope = useMemo(() => resolve(m.id), [resolve, m.id]);
   const [showAllLeft, setShowAllLeft] = useState(false);
+  const { pending, write } = useMilestoneWrite();
+  const [name, setName] = useState(m.name);
+  const [desc, setDesc] = useState(m.description ?? "");
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [capDraft, setCapDraft] = useState<string | null>(null);
+  // Which capability's content picker is open ("loose" = ungrouped content).
+  const [picker, setPicker] = useState<string | null>(null);
+  const [armed, setArmed] = useState<string | null>(null);
+  const [seed, setSeed] = useState(m);
+  if (seed !== m) {
+    setSeed(m);
+    setName(m.name);
+    setDesc(m.description ?? "");
+  }
+  const arm = (k: string) => {
+    setArmed(k);
+    setTimeout(() => setArmed((a) => (a === k ? null : a)), 4000);
+  };
+  const save = (patch: Parameters<typeof updateMilestoneAction>[1], failed = "Couldn't save the milestone") =>
+    write(() => updateMilestoneAction(m.id, patch), failed);
+  const remove = (r: Pick<ContentInfo, "kind" | "targetId">, failed = "Couldn't remove it") =>
+    write(() => removeMilestoneContent(m.id, [{ kind: r.kind, targetId: r.targetId }]), failed);
+  const day = (v: string) => (v ? new Date(`${v}T12:00:00`) : null);
   const itemById = useMemo(() => new Map(items.map((t) => [t.id, t])), [items]);
   const featureById = useMemo(() => new Map(features.map((f) => [f.id, f])), [features]);
   const msById = useMemo(() => new Map(bundle.milestones.map((x) => [x.id, x])), [bundle.milestones]);
@@ -483,44 +549,157 @@ export function MilestonePage({
         </button>
       );
     }
-    const body = (
+    const label = (
       <>
-        {r.done ? <Check className="size-3.5 shrink-0 text-plasma" aria-label="Done" /> : <Circle className="size-3.5 shrink-0 text-ink-faint" aria-label="Not done" />}
         <span className="w-[74px] shrink-0 truncate font-mono text-[10.5px] uppercase tracking-wider text-ink-faint">{r.entityKind}</span>
         <span dir="auto" className={cn("min-w-0 flex-1 truncate text-[13px]", r.done ? "text-ink-dim" : "text-ink")}>
           {r.label ?? r.targetId}
         </span>
       </>
     );
-    return r.href ? (
-      <Link href={r.href} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-ink/[0.04]">
-        {body}
-      </Link>
-    ) : (
-      <span className="flex w-full items-center gap-2.5 px-2 py-1.5">{body}</span>
+    return (
+      <span className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-ink/[0.04]">
+        {/* An entity has no state of its own: its done mark lives on the content row. */}
+        <button
+          type="button"
+          onClick={() =>
+            write(
+              () => addMilestoneContent(m.id, [{ kind: "entity", targetId: r.targetId, entityKind: r.entityKind, label: r.label }], { done: !r.done }),
+              "Couldn't mark it",
+            )
+          }
+          aria-label={r.done ? `Mark "${r.label ?? r.targetId}" as not done` : `Mark "${r.label ?? r.targetId}" as done`}
+          className="shrink-0 rounded transition hover:scale-110"
+        >
+          {r.done ? <Check className="size-3.5 text-plasma" /> : <Circle className="size-3.5 text-ink-faint" />}
+        </button>
+        {r.href ? (
+          <Link href={r.href} className="group flex min-w-0 flex-1 items-center gap-2.5 hover:[&>span:last-child]:text-plasma">
+            {label}
+          </Link>
+        ) : (
+          label
+        )}
+      </span>
     );
   };
 
+  /** A content row with its hover action: remove it, or bring an exclusion back into scope. */
+  const withRemove = (r: ContentInfo) => (
+    <li key={r.id} className="group/row flex items-center gap-1">
+      <div className="min-w-0 flex-1">{contentRow(r)}</div>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => remove(r, r.exclude ? "Couldn't bring it back" : "Couldn't remove it")}
+        aria-label={r.exclude ? "Bring back into scope" : "Remove from this milestone"}
+        title={r.exclude ? "Bring back into scope" : "Remove from this milestone (the work itself stays)"}
+        className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition group-hover/row:opacity-100 hover:text-flare focus-visible:opacity-100"
+      >
+        {r.exclude ? <Plus className="size-3.5" /> : <X className="size-3.5" />}
+      </button>
+    </li>
+  );
+  const pickerFor = (key: string, capabilityId: string | null) =>
+    picker === key && (
+      <ContentPicker m={m} capabilityId={capabilityId} bundle={bundle} items={items} features={features} onClose={() => setPicker(null)} />
+    );
+
   return (
     <div className="flex flex-col gap-4">
-      <section aria-label={m.name} className="glass flex flex-col gap-4 rounded-2xl p-5">
+      <section aria-label={m.name} className={cn("glass flex flex-col gap-4 rounded-2xl p-5", pending && "opacity-80")}>
         <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button type="button" onClick={onBack} className="wk-btn !px-2 !py-1 text-xs" aria-label="Back to milestones">
             <ArrowLeft className="size-3.5" /> Milestones
           </button>
           <MilestoneGlyph outlook={s.outlook} size={17} />
-          <h2 dir="auto" className="font-display text-[22px] leading-tight text-ink">
-            {m.name}
-          </h2>
+          <input
+            dir="auto"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => (name.trim() && name.trim() !== m.name ? save({ name }, "Couldn't rename the milestone") : setName(m.name))}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            aria-label="Milestone name"
+            size={Math.max(6, Math.min(48, name.length + 1))}
+            className="min-w-0 max-w-full rounded-lg bg-transparent px-1 font-display text-[22px] leading-tight text-ink outline-none transition hover:bg-ink/4 focus:bg-ink/6"
+          />
           <OutlookChip outlook={s.outlook} />
-          <span className="wk-chip !px-2 !py-px !text-[11px] capitalize">{m.status}</span>
+          <select
+            value={m.status}
+            onChange={(e) => save({ status: e.target.value as MilestoneStatus })}
+            aria-label="Milestone state"
+            className="wk-chip !px-2 !py-px !text-[11px] capitalize transition hover:text-ink"
+          >
+            {MILESTONE_STATUSES.map((st) => (
+              <option key={st} value={st}>
+                {st === "done" ? "reached" : st}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => (armed === "delete" ? write(() => deleteMilestoneAction(m.id), "Couldn't delete the milestone", onBack) : arm("delete"))}
+            className={cn("wk-btn ml-auto !py-1 text-xs", armed === "delete" ? "!border-flare/50 text-flare" : "!px-2 text-ink-faint hover:text-flare")}
+            title="Delete the milestone (the work in it stays)"
+            aria-label={`Delete ${m.name}`}
+          >
+            <Trash2 className="size-3.5" />
+            {armed === "delete" && "Click again to delete"}
+          </button>
         </header>
 
-        {m.description && (
-          <div className="max-w-3xl text-sm leading-relaxed text-ink-dim">
-            <Markdown size="note">{m.description}</Markdown>
+        <div className="grid gap-x-8 gap-y-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(260px,1fr)]">
+          <div className="min-w-0">
+            {editingDesc ? (
+              <textarea
+                autoFocus
+                dir="auto"
+                value={desc}
+                onChange={(e) => setDesc(e.target.value)}
+                onBlur={() => {
+                  setEditingDesc(false);
+                  if (desc.trim() !== (m.description ?? "").trim()) save({ description: desc }, "Couldn't save the goal");
+                }}
+                onKeyDown={(e) => e.key === "Escape" && e.currentTarget.blur()}
+                placeholder="The goal: what reaching this stage means (markdown)"
+                aria-label="Goal"
+                className="max-h-[50vh] min-h-24 w-full resize-y rounded-lg bg-ink/4 px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink-dim outline-none placeholder:text-ink-faint focus:bg-ink/6"
+              />
+            ) : desc ? (
+              <div className="group relative max-w-3xl text-sm leading-relaxed text-ink-dim" onDoubleClick={() => setEditingDesc(true)} title="Double-click to edit">
+                <Markdown size="note">{desc}</Markdown>
+                <button
+                  type="button"
+                  onClick={() => setEditingDesc(true)}
+                  className="absolute -top-1 right-0 inline-flex items-center gap-1 text-xs text-ink-faint opacity-0 transition group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
+                >
+                  <Pencil className="size-3" /> Edit
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setEditingDesc(true)} className="text-[13px] text-ink-faint transition hover:text-ink-dim">
+                Add a goal: what reaching this stage means…
+              </button>
+            )}
           </div>
-        )}
+          <dl className="wk-props">
+            <dt>Target</dt>
+            <dd>
+              <input
+                type="date"
+                value={m.targetAt ? dateInput(m.targetAt) : ""}
+                onChange={(e) => save({ targetAt: day(e.target.value) }, "Couldn't set the target")}
+                aria-label="Target date"
+                className={cn("wk-inline", s.outlook === "late" && "!text-flare")}
+              />
+            </dd>
+            <dt>Waits on</dt>
+            <dd>
+              <RequiresEditor m={m} bundle={bundle} />
+            </dd>
+          </dl>
+        </div>
 
         {s.waitingOn.length > 0 && (
           <div className="wk-read flare">
@@ -564,22 +743,90 @@ export function MilestonePage({
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
         <div className="flex min-w-0 flex-col gap-3">
-          <h3 className="wk-sec-h px-1">
-            Capabilities <span className="tabular-nums">{s.capabilities.length}</span>
-          </h3>
+          <div className="flex items-center gap-2 px-1">
+            <h3 className="wk-sec-h">
+              Capabilities <span className="tabular-nums">{s.capabilities.filter((c) => c.id).length}</span>
+            </h3>
+            <button type="button" onClick={() => setCapDraft(capDraft == null ? "" : null)} className="wk-btn ml-auto !py-1 text-xs">
+              <Plus className="size-3.5" /> Capability
+            </button>
+          </div>
+          {capDraft != null && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!capDraft.trim()) return;
+                write(
+                  () => saveCapability(m.id, null, { name: capDraft }),
+                  "Couldn't add the capability",
+                  (r) => {
+                    setCapDraft(null);
+                    if (r.ok) setPicker(r.id);
+                  },
+                );
+              }}
+              className="glass flex items-center gap-2 rounded-2xl p-2.5 pl-4"
+            >
+              <input
+                autoFocus
+                dir="auto"
+                value={capDraft}
+                onChange={(e) => setCapDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && setCapDraft(null)}
+                placeholder="Capability name, such as AI visibility"
+                aria-label="Capability name"
+                className="h-8 flex-1 bg-transparent font-display text-[15px] text-ink outline-none placeholder:font-sans placeholder:text-sm placeholder:text-ink-faint"
+              />
+              <button type="submit" disabled={pending || !capDraft.trim()} className="wk-btn primary !py-1.5 text-xs">
+                Add
+              </button>
+              <button type="button" onClick={() => setCapDraft(null)} className="wk-btn !py-1.5 text-xs">
+                Cancel
+              </button>
+            </form>
+          )}
           {s.capabilities.length === 0 && (
-            <p className="glass rounded-2xl px-5 py-6 text-sm text-ink-faint">
-              No content yet. Agents add modules, items, other milestones and entities with <code className="font-mono">milestones.addContent</code>.
-            </p>
+            <div className="glass flex flex-col gap-3 rounded-2xl px-5 py-5">
+              <p className="text-sm text-ink-faint">
+                No content yet. Group it into capabilities, or add modules, items, other milestones and anything else in apOS directly.
+              </p>
+              {picker === "loose" ? (
+                pickerFor("loose", null)
+              ) : (
+                <button type="button" onClick={() => setPicker("loose")} className="wk-btn primary self-start !py-1 text-xs">
+                  <Plus className="size-3.5" /> Add content
+                </button>
+              )}
+            </div>
           )}
           {s.capabilities.map((c) => {
             const list = rowsOfCap(c.id);
+            const key = c.id ?? "loose";
             return (
-              <section key={c.id ?? "loose"} className="glass flex flex-col gap-2.5 rounded-2xl p-4">
-                <header className="flex items-center gap-3">
-                  <span dir="auto" className="min-w-0 flex-1 font-display text-[15px] text-ink">
-                    {c.name}
-                  </span>
+              <section key={key} className="glass flex flex-col gap-2.5 rounded-2xl p-4">
+                <header className="group flex items-center gap-3">
+                  {c.id ? (
+                    <CapabilityName key={c.name} name={c.name} onSave={(n) => write(() => saveCapability(m.id, c.id, { name: n }), "Couldn't rename the capability")} />
+                  ) : (
+                    <span dir="auto" className="min-w-0 flex-1 font-display text-[15px] text-ink">
+                      {c.name}
+                    </span>
+                  )}
+                  {c.id && (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => (armed === `cap:${c.id}` ? write(() => deleteCapability(m.id, c.id!), "Couldn't delete the capability") : arm(`cap:${c.id}`))}
+                      className={cn(
+                        "shrink-0 rounded-md p-1 text-xs transition",
+                        armed === `cap:${c.id}` ? "text-flare" : "text-ink-faint opacity-0 hover:text-flare group-hover:opacity-100 focus-visible:opacity-100",
+                      )}
+                      title="Delete the capability (its content stays in the milestone, ungrouped)"
+                      aria-label={`Delete capability ${c.name}`}
+                    >
+                      {armed === `cap:${c.id}` ? "Click again to delete" : <Trash2 className="size-3.5" />}
+                    </button>
+                  )}
                   <span className="font-mono text-[11.5px] tabular-nums text-ink-dim">
                     {c.done}/{c.total}
                   </span>
@@ -589,12 +836,17 @@ export function MilestonePage({
                   <span className="block h-full rounded-full" style={{ width: `${c.pct}%`, background: STATUS_META.done.color }} />
                 </div>
                 {c.description && <p className="text-[12.5px] leading-relaxed text-ink-dim">{c.description}</p>}
-                {list.length > 0 && (
-                  <ul className="-mx-2 flex flex-col">
-                    {list.map((r) => (
-                      <li key={r.id}>{contentRow(r)}</li>
-                    ))}
-                  </ul>
+                {list.length > 0 && <ul className="-mx-2 flex flex-col">{list.map(withRemove)}</ul>}
+                {picker === key ? (
+                  pickerFor(key, c.id)
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setPicker(key)}
+                    className="inline-flex items-center gap-1.5 self-start rounded-md px-1 text-[12px] text-ink-faint transition hover:text-ink"
+                  >
+                    <Plus className="size-3.5" /> Add content
+                  </button>
                 )}
               </section>
             );
@@ -604,11 +856,7 @@ export function MilestonePage({
               <h4 className="wk-sec-h">
                 <MinusCircle className="size-3" /> Left out of scope <span className="tabular-nums">{excluded.length}</span>
               </h4>
-              <ul className="-mx-2 flex flex-col opacity-70 [&_span.flex-1]:line-through">
-                {excluded.map((r) => (
-                  <li key={r.id}>{contentRow(r)}</li>
-                ))}
-              </ul>
+              <ul className="-mx-2 flex flex-col [&_span.flex-1]:line-through [&_span.flex-1]:opacity-70">{excluded.map(withRemove)}</ul>
             </section>
           )}
         </div>
@@ -619,23 +867,12 @@ export function MilestonePage({
             <ScopeChart m={m} s={s} now={now} />
           </section>
 
-          {m.criteria.length > 0 && (
-            <section className="glass flex flex-col gap-2 rounded-2xl p-4">
-              <h3 className="wk-sec-h">
-                Exit criteria <span className="tabular-nums">{s.criteria.done}/{s.criteria.total}</span>
-              </h3>
-              <ul className="flex flex-col gap-1.5">
-                {m.criteria.map((c) => (
-                  <li key={c.id} className="flex items-start gap-2 text-[13px]">
-                    {c.done ? <Check className="mt-0.5 size-3.5 shrink-0 text-plasma" aria-label="Met" /> : <Circle className="mt-0.5 size-3.5 shrink-0 text-ink-faint" aria-label="Not met" />}
-                    <span dir="auto" className={c.done ? "text-ink-dim" : "text-ink"}>
-                      {c.text}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <section className="glass flex flex-col gap-2 rounded-2xl p-4">
+            <h3 className="wk-sec-h">
+              Exit criteria {s.criteria.total > 0 && <span className="tabular-nums">{s.criteria.done}/{s.criteria.total}</span>}
+            </h3>
+            <CriteriaEditor m={m} />
+          </section>
 
           {s.modules.length > 0 && (
             <section className="glass flex flex-col gap-2 rounded-2xl p-4">
@@ -674,14 +911,24 @@ export function MilestonePage({
             ) : (
               <ul className="-mx-2 flex flex-col">
                 {leftShown.map((t) => (
-                  <li key={t.id}>
-                    <button type="button" onClick={() => onOpenItem(t.id)} className="group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-ink/[0.04]">
+                  <li key={t.id} className="group/row flex items-center gap-1">
+                    <button type="button" onClick={() => onOpenItem(t.id)} className="group flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-ink/[0.04]">
                       <span className="size-2 shrink-0 rounded-full" style={{ background: STATUS_META[t.status].color }} title={STATUS_META[t.status].label} />
                       <span className="w-[74px] shrink-0 truncate font-mono text-[11px] text-ink-faint">{t.identifier ?? "—"}</span>
                       <span dir="auto" className="min-w-0 flex-1 truncate text-[13px] text-ink group-hover:text-plasma">
                         {t.shortTitle ?? t.title}
                       </span>
                       <ChevronRight className="size-3.5 shrink-0 text-ink-faint opacity-0 transition group-hover:opacity-100" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => write(() => addMilestoneContent(m.id, [{ kind: "item", targetId: t.id }], { exclude: true }), "Couldn't leave it out")}
+                      aria-label={`Leave ${t.identifier ?? "this item"} out of scope`}
+                      title="Leave out of this milestone's scope"
+                      className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition group-hover/row:opacity-100 hover:text-flare focus-visible:opacity-100"
+                    >
+                      <MinusCircle className="size-3.5" />
                     </button>
                   </li>
                 ))}

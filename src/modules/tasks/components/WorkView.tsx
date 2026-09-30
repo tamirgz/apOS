@@ -33,7 +33,8 @@ import { CalendarView } from "./CalendarView";
 import { CycleHeader, CyclesView, nextCycleFor } from "./CyclePanel";
 import { CycleStrip } from "./CycleStrip";
 import { ListView } from "./ListView";
-import { MilestonePage, MilestonesView } from "./MilestonesView";
+import { ItemMilestones } from "./MilestoneEdit";
+import { MilestonePage, MilestonesView, useMilestoneStats } from "./MilestonesView";
 import { ModuleHeader, ModulesView } from "./ModulesView";
 import { MyWork } from "./MyWork";
 import { PlaneImport } from "./PlaneImport";
@@ -154,7 +155,7 @@ const HINT: Record<ViewId, string> = {
 /**
  * The Work surface — one component for /m/tasks (all work) and a project page
  * (scoped, with an Overview tab for the cockpit). A header with the project's
- * status and actions, the cycle strip (progress, burndown, milestones, a read
+ * status and actions, the cycle strip (progress, burndown, modules, a read
  * of pace and risk), a view bar (Board · List · Calendar · Timeline · My work
  * with filter chips), and the item drawer docked on the right.
  */
@@ -204,6 +205,7 @@ export function WorkView({
   const [project, setProject] = useState("");
   const [feature, setFeature] = useState("");
   const [cycle, setCycle] = useState("");
+  const [milestone, setMilestone] = useState("");
   const [planeOpen, setPlaneOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -215,6 +217,15 @@ export function WorkView({
     return { blocked: new Set(data.blocked), blockerOf, delegated: data.delegated, commits: data.commits };
   }, [data.blocked, data.deps, data.delegated, data.commits, identifierOf]);
   const currentCycles = useMemo(() => new Set(data.cycles.filter((c) => c.status === "current").map((c) => c.id)), [data.cycles]);
+  const { resolve: resolveMilestone, stats: milestoneStats } = useMilestoneStats(data.milestones, items);
+  const inMilestone = useMemo(
+    () => (milestone ? new Set(resolveMilestone(milestone).items.map((x) => x.item.id)) : null),
+    [milestone, resolveMilestone],
+  );
+  // Timeline markers: the dated, unfinished milestones on this surface.
+  const milestoneMarks = data.milestones.milestones
+    .filter((m) => m.targetAt && m.status !== "cancelled")
+    .map((m) => ({ id: m.id, name: m.name, at: +m.targetAt!, outlook: milestoneStats.get(m.id)?.outlook ?? "unscheduled" }));
 
   const openModule = moduleId ? data.features.find((f) => f.id === moduleId) : undefined;
   const openCycle = cycleId ? data.cycles.find((c) => c.id === cycleId) : undefined;
@@ -256,19 +267,21 @@ export function WorkView({
           ? !!t.cycleId && currentCycles.has(t.cycleId)
           : scopeCycle === "none"
             ? !t.cycleId
-            : t.cycleId === scopeCycle)),
+            : t.cycleId === scopeCycle)) &&
+      (!inMilestone || inMilestone.has(t.id)),
   );
 
   const refresh = useCallback(() => router.refresh(), [router]);
 
   // Saved views capture the Work-items filters + layout (not a module / cycle page's scope).
-  const currentFilters: WorkViewFilters = { q, label, project, feature, cycle, layout };
+  const currentFilters: WorkViewFilters = { q, label, project, feature, cycle, milestone, layout };
   const applyView = (f: WorkViewFilters) => {
     setQ(f.q ?? "");
     setLabel(f.label ?? "");
     setProject(f.project ?? "");
     setFeature(f.feature ?? "");
     setCycle(f.cycle ?? "");
+    setMilestone(f.milestone && data.milestones.milestones.some((m) => m.id === f.milestone) ? f.milestone : "");
     if (f.layout && LAYOUTS.includes(f.layout)) pickLayout(f.layout);
   };
 
@@ -367,6 +380,16 @@ export function WorkView({
           onOpenItem={setOpenId}
           onDeleted={() => setOpenId(null)}
           onClose={() => setOpenId(null)}
+          milestones={
+            <ItemMilestones
+              itemId={openId}
+              bundle={data.milestones}
+              items={items}
+              onOpen={(id) => {
+                go({ tab: "milestones", milestone: id });
+              }}
+            />
+          }
         />
       </aside>
     </>
@@ -536,6 +559,24 @@ export function WorkView({
                     ))}
                   </select>
                 )}
+                {data.milestones.milestones.length > 0 && (
+                  <select
+                    value={milestone}
+                    onChange={(e) => setMilestone(e.target.value)}
+                    aria-label="Milestone"
+                    className={cn("wk-filter", milestone && "set")}
+                    title="Items in a milestone's scope: its modules, single items and nested milestones"
+                  >
+                    <option value="">Milestone: any</option>
+                    {data.milestones.milestones
+                      .filter((m) => m.status !== "cancelled" && (m.status !== "done" || m.id === milestone))
+                      .map((m) => (
+                        <option key={m.id} value={m.id}>
+                          Milestone: {m.name}
+                        </option>
+                      ))}
+                  </select>
+                )}
                 {!openModule && data.features.length > 0 && (
                   <select value={feature} onChange={(e) => setFeature(e.target.value)} aria-label="Module" className={cn("wk-filter", feature && "set")}>
                     <option value="">Module: any</option>
@@ -591,6 +632,8 @@ export function WorkView({
                   selectedId={openId}
                   onOpen={setOpenId}
                   onOpenModule={(id) => go({ tab: "modules", module: id })}
+                  milestones={milestoneMarks}
+                  onOpenMilestone={(id) => go({ tab: "milestones", milestone: id })}
                 />
               )}
               {view === "mywork" && <MyWork data={data} flags={flags} selectedId={openId} onOpen={setOpenId} />}
@@ -617,7 +660,7 @@ export function WorkView({
 
 // ── saved views ────────────────────────────────────────────────────────────
 
-const FILTER_KEYS = ["q", "label", "project", "feature", "cycle"] as const;
+const FILTER_KEYS = ["q", "label", "project", "feature", "cycle", "milestone"] as const;
 const sameFilters = (a: WorkViewFilters, b: WorkViewFilters) =>
   FILTER_KEYS.every((k) => (a[k] ?? "") === (b[k] ?? "")) && (!b.layout || a.layout === b.layout);
 

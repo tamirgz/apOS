@@ -108,6 +108,11 @@ export interface ActOptions<T> {
   href?: string | ((result: T) => string | undefined);
   /** Failure title, e.g. "Couldn't save the routine". Defaults to "Action failed". */
   failed?: string;
+  /**
+   * false: the caller shows the returned result itself (an inline "✗ Not
+   * working"), so only a throw is reported and every result counts as ok.
+   */
+  checkResult?: boolean;
 }
 
 export type ActResult<T> = { ok: true; value: T } | { ok: false };
@@ -125,7 +130,7 @@ export async function act<T>(fn: () => Promise<T>, opts: ActOptions<T> = {}): Pr
     if (!(e instanceof Error && e.name === "AbortError")) failed(opts.failed ?? "Action failed", errorText(e));
     return { ok: false };
   }
-  const err = resultError(result);
+  const err = opts.checkResult === false ? null : resultError(result);
   if (err) {
     failed(opts.failed ?? "Action failed", err);
     return { ok: false };

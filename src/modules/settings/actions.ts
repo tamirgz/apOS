@@ -280,6 +280,10 @@ export async function reconnectClaude(
   } catch (e) {
     return { ok: false, message: `Could not write .env.local: ${String(e).slice(0, 120)}` };
   }
+  // This web process read .env.local when it started, and chat and the Verify
+  // button run in it — so without this they keep the old (expired) token until
+  // the next restart. The Agent SDK inherits process.env on every call.
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = t;
   let restarted = false;
   try {
     const uid = process.getuid?.() ?? 0;
@@ -296,7 +300,7 @@ export async function reconnectClaude(
   return {
     ok: true,
     message: restarted
-      ? "Token saved and the agent worker was restarted. Restart the web app too so chat uses it."
-      : "Token saved to .env.local — restart the worker and web app for it to take effect.",
+      ? "Token saved and in use. The agent worker was restarted to pick it up — Verify connection to confirm."
+      : "Token saved and in use here. Restart the agent worker (launchctl kickstart -k gui/$UID/com.aios.worker) for agents to pick it up.",
   };
 }

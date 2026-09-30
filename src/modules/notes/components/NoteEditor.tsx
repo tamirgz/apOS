@@ -7,18 +7,20 @@ import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { Markdown } from "@/core/ui/Markdown";
 import { deleteNote, setNoteProjects, updateNote } from "../actions";
 import type { Note } from "../schema";
 import { ProjectMultiPicker } from "@/modules/projects/components/ProjectMultiPicker";
 import type { ProjectOption } from "@/modules/projects/queries";
 
-type SaveStatus = "saved" | "saving" | "unsaved";
+type SaveStatus = "saved" | "saving" | "unsaved" | "failed";
 
 const STATUS_STYLE: Record<SaveStatus, string> = {
   saved: "text-plasma",
   saving: "text-solar",
   unsaved: "text-ink-faint",
+  failed: "text-flare",
 };
 
 export function NoteEditor({
@@ -52,10 +54,12 @@ export function NoteEditor({
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       setStatus("saving");
-      await updateNote(note.id, {
-        title: nextTitle.trim() || "Untitled note",
-        body: nextBody,
-      });
+      const r = await act(
+        () => updateNote(note.id, { title: nextTitle.trim() || "Untitled note", body: nextBody }),
+        { failed: "Couldn't save the note" },
+      );
+      // A failed save keeps the edit on screen; the next keystroke retries.
+      if (!r.ok) return setStatus("failed");
       setStatus("saved");
       setSavedAt(
         new Date().toLocaleTimeString(undefined, { hour12: false }),
@@ -71,7 +75,8 @@ export function NoteEditor({
       return;
     }
     setDeleting(true);
-    await deleteNote(note.id);
+    const r = await act(() => deleteNote(note.id), { failed: "Couldn't delete the note" });
+    if (!r.ok) return setDeleting(false);
     router.push("/m/notes");
   };
 
@@ -97,7 +102,8 @@ export function NoteEditor({
           value={projectRefs}
           onChange={async (next) => {
             setProjectRefs(next);
-            await setNoteProjects(note.id, next);
+            const r = await act(() => setNoteProjects(note.id, next), { failed: "Couldn't file the note" });
+            if (!r.ok) setProjectRefs(projectRefs);
           }}
         />
         <span
@@ -108,6 +114,8 @@ export function NoteEditor({
         >
           {status === "saving"
             ? "saving…"
+            : status === "failed"
+              ? "not saved"
             : status === "unsaved"
               ? "unsaved"
               : savedAt

@@ -191,18 +191,20 @@ async function syncOne(token: string, workspace: string): Promise<number> {
 /** Sync every connected workspace. Returns totals; never throws for "not set up". */
 export async function syncNotion(
   log: (m: string) => void = () => {},
-): Promise<{ synced: number; workspaces: number } | { needsToken: true }> {
+): Promise<{ synced: number; workspaces: number; failedWorkspaces: string[] } | { needsToken: true }> {
   const conns = await getConnections();
   if (conns.length === 0) return { needsToken: true };
   let synced = 0;
+  const failedWorkspaces: string[] = [];
   for (const c of conns) {
     try {
       synced += await syncOne(c.token, c.workspace);
     } catch (e) {
+      failedWorkspaces.push(c.workspace);
       log(`notion "${c.workspace}" failed: ${String(e).slice(0, 140)}`);
     }
   }
   await sql.notify("notion_changed", "");
   log(`notion: synced ${synced} pages across ${conns.length} workspace(s)`);
-  return { synced, workspaces: conns.length };
+  return { synced, workspaces: conns.length, failedWorkspaces };
 }

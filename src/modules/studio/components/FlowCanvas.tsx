@@ -23,6 +23,7 @@ import {
 } from "react";
 import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
+import { act } from "@/core/ui/feedback";
 import type {
   FlowEdge,
   FlowGraph,
@@ -125,7 +126,7 @@ export function FlowCanvas({
     [agents, extraAgents],
   );
   const [name, setName] = useState(flow.name);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [saveState, setSaveState] = useState<SaveState>("idle");
   const [wire, setWire] = useState<{ from: string; fromPort: string; x: number; y: number } | null>(null);
   const [optimisticRun, setOptimisticRun] = useState(false);
   // Run picker: null = follow the live/latest run (prop); else a fetched past run.
@@ -199,7 +200,11 @@ export function FlowCanvas({
     if (serialized === lastSaved.current) return;
     setSaveState("saving");
     const t = setTimeout(async () => {
-      await saveFlowGraph(flow.id, { nodes, edges } as FlowGraph);
+      const r = await act(() => saveFlowGraph(flow.id, { nodes, edges } as FlowGraph), {
+        failed: "Couldn't save the flow",
+      });
+      // lastSaved stays behind on a failure, so the next edit retries.
+      if (!r.ok) return setSaveState("failed");
       lastSaved.current = serialized;
       setSaveState("saved");
     }, 700);
@@ -499,9 +504,10 @@ export function FlowCanvas({
               }}
               onLoadTranscript={loadNodeTranscript}
               onCreateAgent={async (name) => {
-                const opt = await quickCreateAgent(name);
-                setExtraAgents((p) => [...p, opt]);
-                return opt;
+                const r = await act(() => quickCreateAgent(name), { failed: "Couldn't create the agent" });
+                if (!r.ok) return null;
+                setExtraAgents((p) => [...p, r.value]);
+                return r.value;
               }}
             />
           </div>
@@ -707,7 +713,11 @@ function HumanGate({
   const [pending, setPending] = useState(false);
   const decide = (approved: boolean) => {
     setPending(true);
-    void decideFlowStep(flowId, runId, nodeId, approved);
+    // On success the run moves on and this card unmounts; on a failure it
+    // stays, so the buttons must come back.
+    void act(() => decideFlowStep(flowId, runId, nodeId, approved), {
+      failed: approved ? "Couldn't approve the step" : "Couldn't reject the step",
+    }).then((r) => !r.ok && setPending(false));
   };
   return (
     <div className="glass-edge glass pointer-events-auto w-80 rounded-xl p-3" style={{ boxShadow: "0 0 0 1px #e0a94a55, 0 0 26px -6px #e0a94a66" }}>
@@ -783,11 +793,20 @@ function NodeRunDetail({ node, run }: { node: FlowNode; run: NodeRunView }) {
   );
 }
 
-function SaveBadge({ state }: { state: "idle" | "saving" | "saved" }) {
+type SaveState = "idle" | "saving" | "saved" | "failed";
+
+function SaveBadge({ state }: { state: SaveState }) {
   if (state === "idle") return null;
   return (
-    <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint">
-      {state === "saving" ? (
+    <span
+      className={cn(
+        "flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest",
+        state === "failed" ? "text-flare" : "text-ink-faint",
+      )}
+    >
+      {state === "failed" ? (
+        "not saved"
+      ) : state === "saving" ? (
         <>
           <Loader2 className="h-3 w-3 animate-spin" /> saving
         </>

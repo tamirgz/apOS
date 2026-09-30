@@ -9,7 +9,8 @@ import { AI_PROVIDERS, isCloudProvider, type AIProviderId } from "@/core/db/sche
 import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { useProviderModels } from "@/core/ui/useProviderModels";
-import { deleteAgent, requestRun, updateAgent } from "../actions";
+import { deleteAgent, updateAgent } from "../actions";
+import { runNow } from "./run-now";
 import type { AgentDocView } from "../agent-doc";
 import { RUN_STATUS_META, runDuration } from "./runMeta";
 
@@ -201,9 +202,7 @@ export function AgentDetail({
           type="button"
           disabled={pending}
           onClick={() =>
-            startTransition(async () => {
-              await requestRun(agent.id);
-            })
+            startTransition(() => runNow(agent.id))
           }
           className="ml-auto flex items-center gap-1.5 rounded-lg bg-flare/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-flare transition hover:bg-flare/25 disabled:opacity-40"
         >

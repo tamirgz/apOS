@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import {
   advisorToFeature,
   advisorToTask,
@@ -55,9 +56,9 @@ export function AdvisorPanel({
     });
   };
 
-  const act = (fn: () => Promise<unknown>, label: string) =>
+  const create = (fn: () => Promise<unknown>, label: string) =>
     start(async () => {
-      await fn();
+      if (!(await act(fn, { failed: `Couldn't create the ${label}` })).ok) return;
       setDid(`${label} created`);
       setTimeout(() => setDid(null), 2000);
       router.refresh();
@@ -83,8 +84,9 @@ export function AdvisorPanel({
     if (!a) return;
     setRunning(true);
     setAngleOpen(false);
-    void reconsiderProject(projectId, a).finally(() => {
+    void act(() => reconsiderProject(projectId, a), { failed: "Couldn't reconsider the project" }).then((r) => {
       setAngle("");
+      if (!r.ok) return setRunning(false);
       setTimeout(() => {
         setRunning(false);
         router.refresh();
@@ -203,7 +205,7 @@ export function AdvisorPanel({
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => act(() => advisorToFeature(projectId, next), "feature")}
+                  onClick={() => create(() => advisorToFeature(projectId, next), "feature")}
                   className="flex items-center gap-1 rounded-md border border-white/8 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:border-ion/30 hover:text-ion disabled:opacity-50"
                 >
                   <Layers className="size-3" /> feature

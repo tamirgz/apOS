@@ -125,7 +125,7 @@ export function StatusSlot() {
           )}
         </AnimatePresence>
         {unseen > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-flare" aria-label={`${unseen} unseen errors`} />
+          <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-flare" aria-label={`${unseen} unseen error${unseen === 1 ? "" : "s"}`} />
         )}
       </button>
       {flash?.href && (

@@ -187,7 +187,8 @@ export async function reconsiderProject(projectId: string, angle: string) {
     maxTurns: 6,
     track: { source: "action", label: "advisor refresh" },
   })) {
-    if (ev.type === "error") throw new Error(ev.message);
+    // Returned, not thrown: production redacts a thrown message.
+    if (ev.type === "error") return { error: ev.message };
   }
   revalidateProjects(projectId);
   return { ok: true as const };

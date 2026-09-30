@@ -18,7 +18,7 @@ export async function addChannel(input: {
 }) {
   const { DEFAULT_EXCLUDE } = await import("./relevance");
   const username = input.username.trim().replace(/^@/, "").replace(/^https?:\/\/t\.me\/(s\/)?/, "");
-  if (!username) throw new Error("a channel username is required");
+  if (!username) return { ok: false as const, error: "Enter a channel username." };
   const [row] = await db
     .insert(telegramChannels)
     .values({
@@ -30,10 +30,11 @@ export async function addChannel(input: {
     })
     .onConflictDoNothing()
     .returning();
+  if (!row) return { ok: false as const, error: `@${username} is already followed.` };
   // Kick a first ingest (backfill) in the worker.
-  if (row) await sql.notify("telegram_ingest", row.id);
+  await sql.notify("telegram_ingest", row.id);
   revalidate();
-  return row;
+  return { ok: true as const, channel: row };
 }
 
 export async function ingestNow(channelId: string) {

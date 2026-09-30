@@ -5,9 +5,13 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { FileText, Paperclip, Trash2, UploadCloud } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act, failed } from "@/core/ui/feedback";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { deleteProjectFile, uploadProjectFiles } from "../files-actions";
 import type { ProjectFileStatus } from "../schema";
+
+/** Mirrors the server's per-file limit (files-actions.ts). */
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 export interface ProjectFileRow {
   id: string;
@@ -59,10 +63,20 @@ export function ProjectFiles({
 
   const upload = (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
+    // Oversized files are refused here: sent along, they'd exceed the server
+    // action's body limit and fail the whole batch with a redacted error.
     const fd = new FormData();
-    for (const f of fileList) fd.append("files", f);
+    const tooBig: string[] = [];
+    for (const f of fileList) {
+      if (f.size > MAX_UPLOAD_BYTES) tooBig.push(f.name);
+      else fd.append("files", f);
+    }
+    if (tooBig.length) failed(`Too large to upload (20 MB max)`, tooBig.join(", "));
+    if (!fd.has("files")) return;
     startTransition(async () => {
-      await uploadProjectFiles(projectId, fd);
+      const r = await act(() => uploadProjectFiles(projectId, fd), { failed: "Couldn't upload" });
+      const refused = r.ok ? r.value.filter((f) => !f.ok) : [];
+      if (refused.length) failed("Couldn't upload", refused.map((f) => `${f.filename}: ${f.error}`).join("; "));
       router.refresh();
     });
   };

@@ -225,8 +225,10 @@ try {
     const client = new Client({ name: "zz-test", version: "0" });
     await client.connect(new StdioClientTransport({ command: "scripts/apos-mcp.sh", env: { ...process.env, APOS_ACTOR: "zz-test" } as Record<string, string>, stderr: "ignore" }));
     try {
-      const names = (await client.listTools()).tools.map((t) => t.name);
-      for (const n of ["tasks__create", "tasks__relate", "cycles__create", "modules__update", "projects__list"]) assert.ok(names.includes(n), `exposes ${n}`);
+      const listed = (await client.listTools()).tools;
+      const names = listed.map((t) => t.name);
+      assert.equal(listed.find((t) => t.name === "cycles__delete")?.annotations?.destructiveHint, true, "cycles.delete is marked destructive");
+      for (const n of ["tasks__create", "tasks__relate", "cycles__create", "cycles__delete", "modules__update", "projects__list"]) assert.ok(names.includes(n), `exposes ${n}`);
       assert.ok(!names.includes("memory__update"), "only the work-tracker surface");
       const call = async (name: string, args: Record<string, unknown>) => {
         const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
@@ -258,6 +260,11 @@ try {
       assert.equal(m.status, "paused");
       assert.equal(m.items, 2);
       assert.equal((await call("cycles__rollOver", { from: "c1" })).moved, 2);
+      await call("tasks__update", { ref: a.identifier, cycle: "ZZ sprint" });
+      assert.deepEqual(await call("cycles__delete", { cycle: "ZZ sprint" }), { deleted: true, unplanned: 1 });
+      assert.equal((await call("tasks__get", { ref: a.identifier })).cycle ?? null, null, "deleting a cycle un-plans its items, never deletes them");
+      assert.ok(!(await call("cycles__list", { project: proj.key, include: "all" })).some((c: { name: string }) => c.name === "ZZ sprint"), "the cycle is gone");
+      assert.ok((await client.callTool({ name: "cycles__delete", arguments: { cycle: "ZZ sprint" } }) as { content: { text: string }[] }).content[0].text.includes("No cycle"), "deleting it twice reports it missing");
       assert.equal((await call("tasks__unrelate", { ref: a.identifier, other: b.identifier })).removed, 1);
       const bad = (await client.callTool({ name: "tasks__update", arguments: { ref: "ZZMCP-9999", title: "x" } })) as { isError?: boolean };
       assert.ok(bad.isError, "unknown identifier is an error, not a silent no-op");

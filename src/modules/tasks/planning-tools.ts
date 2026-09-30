@@ -9,7 +9,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { AiToolDef } from "@/core/modules/types.server";
 import { registerRefs } from "@/core/ai/refs";
 import { FEATURE_STATUSES, features, projects } from "@/modules/projects/schema";
-import { createCycle, cycleStatus, listCycles, rollOverCycle, updateCycle } from "./cycles";
+import { createCycle, cycleStatus, deleteCycle, listCycles, rollOverCycle, updateCycle } from "./cycles";
 import { resolveCycle, resolveFeature, resolveProject } from "./tools";
 import { isClosed, tasks } from "./schema";
 
@@ -129,6 +129,25 @@ export const planningTools: AiToolDef[] = [
         to = t.id;
       }
       return { moved: await rollOverCycle(ctx.db, from.id, to) };
+    },
+  },
+  {
+    name: "cycles.delete",
+    description:
+      "Delete a cycle. Its work items are never deleted — they are un-planned (left without a cycle); use cycles.rollOver first to move them into another cycle instead. Returns how many items were un-planned.",
+    risk: "approval",
+    input: z.object({
+      cycle: z.string().describe("Cycle ref ('c1') or NAME"),
+    }),
+    async execute(input, ctx) {
+      const c = await resolveCycle(ctx, null, input.cycle);
+      if ("error" in c) return c;
+      const [{ n }] = await ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(tasks)
+        .where(eq(tasks.cycleId, c.id));
+      await deleteCycle(ctx.db, c.id);
+      return { deleted: true, unplanned: n };
     },
   },
 

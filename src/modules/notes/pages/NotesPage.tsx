@@ -1,5 +1,6 @@
 import { listNotes } from "../actions";
 import { NotesGrid } from "../components/NotesGrid";
+import { SectionTabs } from "@/core/ui/SectionTabs";
 
 export async function NotesPage() {
   const { listProjects } = await import("@/modules/projects/actions");
@@ -13,5 +14,10 @@ export async function NotesPage() {
       { name: p.name, category: p.category ?? null, kind: p.kind },
     ]),
   );
-  return <NotesGrid notes={notes} projectInfo={projectInfo} />;
+  return (
+    <>
+      <SectionTabs section="library" />
+      <NotesGrid notes={notes} projectInfo={projectInfo} />
+    </>
+  );
 }

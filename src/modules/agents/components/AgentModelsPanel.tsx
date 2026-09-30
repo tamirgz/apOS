@@ -135,7 +135,7 @@ export function AgentModelsPanel({ agents }: { agents: AgentModelRow[] }) {
       </p>
       <p className="mb-4 text-xs text-ink-faint">
         Per-agent override; beats the <code className="text-ion">agent.default</code>{" "}
-        route above. Periodic agents should stay on a free local model — {" "}
+        route (Settings → Models &amp; Routing). Periodic agents should stay on a free local model — {" "}
         <span className={cloud > 0 ? "text-solar" : "text-plasma"}>
           {cloud} of {agents.length}
         </span>{" "}

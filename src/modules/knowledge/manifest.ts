@@ -6,7 +6,7 @@ export const knowledgeManifest: ModuleManifest = {
   title: "Knowledge",
   icon: BrainCircuit,
   accent: "var(--color-orchid)",
-  nav: { order: 45 },
+  nav: { order: 45, group: "Library" },
   searchable: true,
   commands: [
     {

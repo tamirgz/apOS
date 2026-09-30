@@ -9,6 +9,7 @@ import { RunQueuePanel } from "../components/RunQueuePanel";
 import { externalReports } from "../schema";
 import { getReportsDir } from "../external";
 import { getRunQueue, listAgentsWithLatestRun } from "../queries";
+import { SectionTabs } from "@/core/ui/SectionTabs";
 
 export async function AgentsPage() {
   const [items, queue, pending, reports, dropboxDir] = await Promise.all([
@@ -31,6 +32,7 @@ export async function AgentsPage() {
   );
   return (
     <>
+      <SectionTabs section="automation" />
       <ApprovalsPanel pending={pending} />
       <RunQueuePanel state={queue} />
       <AgentsList items={items} templates={templates} />

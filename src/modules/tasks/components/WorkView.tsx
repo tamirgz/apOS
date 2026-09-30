@@ -98,7 +98,7 @@ function Flags({ blocked, delegated }: { blocked?: boolean; delegated?: string }
         </span>
       )}
       {live && (
-        <span className="inline-flex items-center gap-1 font-mono text-[10px] text-violet" title={`Workbench: ${delegated}`}>
+        <span className="inline-flex items-center gap-1 font-mono text-[10px] text-violet" title={`Run: ${delegated}`}>
           <Bot className="size-3" /> {delegated === "needs_input" ? "needs input" : delegated}
         </span>
       )}

@@ -28,6 +28,7 @@ async function notifyChanged(id: string) {
   await sql.notify("agents_changed", id);
   revalidatePath("/m/agents");
   revalidatePath(`/m/agents/${id}`);
+  revalidatePath("/m/agents/models");
   revalidatePath("/");
 }
 

@@ -11,18 +11,20 @@ import {
 import { workbenchTools } from "./tools";
 import { WorkbenchPage } from "./pages/WorkbenchPage";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
+import { ExecutorsPage } from "./pages/ExecutorsPage";
 import { WorkbenchWidget } from "./widgets/WorkbenchWidget";
 
 export const workbenchServerManifest: ModuleServerManifest = {
   id: "workbench",
   routes: {
     "": WorkbenchPage,
+    executors: ExecutorsPage,
     "[id]": TaskDetailPage,
   },
   widgets: [
     {
       id: "workbench-active",
-      title: "Workbench",
+      title: "Runs",
       size: "sm",
       component: WorkbenchWidget,
     },

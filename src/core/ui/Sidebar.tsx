@@ -66,6 +66,9 @@ function NavItem({
   );
 }
 
+/** Sidebar sections, top to bottom. A group not listed here is appended. */
+const GROUP_ORDER = ["Library", "Automation", "Sources"];
+
 /** True when the current route lives inside one of `items`. */
 function isActiveModule(pathname: string, id: string): boolean {
   return pathname === `/m/${id}` || pathname.startsWith(`/m/${id}/`);
@@ -82,28 +85,44 @@ function NavGroup({
   label,
   items,
   pathname,
+  defaultOpen,
 }: {
   label: string;
   items: ModuleManifest[];
   pathname: string;
+  /** Open unless the user folded it (remembered per group in this browser). */
+  defaultOpen: boolean;
 }) {
   const activeInside = items.some((m) => isActiveModule(pathname, m.id));
-  // Collapsed by default — but when the current route already lives inside the
-  // group, start open so the sidebar shows where you are. The header toggle
-  // still rules after that.
-  const [open, setOpen] = useState(activeInside);
+  const storeKey = `nav.group.${label}`;
+  const [open, setOpenState] = useState(defaultOpen || activeInside);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    try {
+      localStorage.setItem(storeKey, next ? "open" : "closed");
+    } catch {}
+  };
+  // Restore the remembered fold after hydration (server renders the default).
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storeKey);
+      if (saved) setOpenState(saved === "open" || activeInside);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount
+  }, []);
   // Navigating INTO the group (sidebar persists across routes) opens it once;
   // collapsing it again while inside is respected — this only fires on the
   // outside→inside transition.
   useEffect(() => {
-    if (activeInside) setOpen(true);
+    if (activeInside) setOpenState(true);
   }, [activeInside]);
 
   return (
     <div className="mt-2">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
         className="flex w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-ink-faint transition hover:text-ink-dim"
       >
         <ChevronRight
@@ -177,7 +196,10 @@ export function Sidebar() {
   // Settings is pinned LAST (below the group sections), as convention expects.
   const core = navModules.filter((m) => !m.nav.group && m.id !== "settings");
   const settings = navModules.find((m) => !m.nav.group && m.id === "settings");
-  const groups = new Map<string, ModuleManifest[]>();
+  // Section order is fixed (not by module order); Sources stays folded by default.
+  const groups = new Map<string, ModuleManifest[]>(
+    GROUP_ORDER.map((g) => [g, [] as ModuleManifest[]]),
+  );
   for (const m of navModules) {
     if (!m.nav.group) continue;
     (groups.get(m.nav.group) ?? groups.set(m.nav.group, []).get(m.nav.group)!).push(m);
@@ -235,9 +257,17 @@ export function Sidebar() {
             badge={badgeFor(m.id)}
           />
         ))}
-        {[...groups.entries()].map(([label, items]) => (
-          <NavGroup key={label} label={label} items={items} pathname={pathname} />
-        ))}
+        {[...groups.entries()]
+          .filter(([, items]) => items.length > 0)
+          .map(([label, items]) => (
+            <NavGroup
+              key={label}
+              label={label}
+              items={items}
+              pathname={pathname}
+              defaultOpen={label !== "Sources"}
+            />
+          ))}
         {/* Notifications — a core page, was only reachable via the
             bell dropdown or an Inbox link; give it a persistent nav entry. */}
         <NavItem

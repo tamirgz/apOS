@@ -6,7 +6,7 @@ export const agentsManifest: ModuleManifest = {
   title: "Agents",
   icon: Bot,
   accent: "var(--color-flare)",
-  nav: { order: 50 },
+  nav: { order: 71, group: "Automation" },
   searchable: true,
   commands: [
     {

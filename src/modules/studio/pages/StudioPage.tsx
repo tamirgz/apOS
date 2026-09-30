@@ -1,6 +1,7 @@
 import { listAgentOptions, listFlows, listFlowStats } from "../queries";
 import { templateCards } from "../templates";
 import { FlowLibrary } from "../components/FlowLibrary";
+import { SectionTabs } from "@/core/ui/SectionTabs";
 
 /** Studio root — the flow library. */
 export async function StudioPage() {
@@ -12,6 +13,9 @@ export async function StudioPage() {
   // Plain object so it serializes to the client component.
   const stats = Object.fromEntries(statsMap);
   return (
-    <FlowLibrary flows={flows} agents={agents} stats={stats} templates={templateCards()} />
+    <>
+      <SectionTabs section="automation" />
+      <FlowLibrary flows={flows} agents={agents} stats={stats} templates={templateCards()} />
+    </>
   );
 }

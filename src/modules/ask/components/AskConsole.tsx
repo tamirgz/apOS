@@ -22,6 +22,7 @@ import {
   Globe,
   History,
   Lightbulb,
+  MessageSquare,
   Paperclip,
   Pencil,
   Sparkles,
@@ -171,6 +172,15 @@ function CitedAnswer({ text, sources }: { text: string; sources: AskSource[] }) 
   );
 }
 
+/** A finished ⌘K chat, shown read-only beside the Ask history. */
+export type PastChat = {
+  id: string;
+  title: string;
+  answer: string;
+  model: string | null;
+  createdAt: Date;
+};
+
 function formatWhen(d: Date | string): string {
   return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -178,9 +188,12 @@ function formatWhen(d: Date | string): string {
 export function AskConsole({
   initialHistory,
   projectOptions = [],
+  pastChats = [],
 }: {
   initialHistory: AskHistoryEntry[];
   projectOptions?: ProjectOption[];
+  /** ⌘K chat answers — listed here so past AI answers live in one place. */
+  pastChats?: PastChat[];
 }) {
   const [pending, start] = useTransition();
   const [, startDelete] = useTransition();
@@ -189,6 +202,7 @@ export function AskConsole({
   const [history, setHistory] = useState<AskHistoryEntry[]>(initialHistory);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   // Save-to-Obsidian (same raw/ destination + format as Workbench outcomes).
   const [clipPending, startClip] = useTransition();
   const [clipOpen, setClipOpen] = useState(false);
@@ -211,6 +225,7 @@ export function AskConsole({
     setAsked(q);
     setResult(null);
     setActiveId(null);
+    setActiveChatId(null);
     setEntryTitle(null);
     setEntryProjectRefs([]);
     setTitleEditing(false);
@@ -258,8 +273,22 @@ export function AskConsole({
     setAsked(entry.query);
     setResult({ answer: entry.answer, sources: entry.sources, model: entry.model ?? "" });
     setActiveId(entry.id);
+    setActiveChatId(null);
     setEntryTitle(entry.title ?? null);
     setEntryProjectRefs(entry.projectRefs ?? []);
+    setTitleEditing(false);
+    setClipOpen(false);
+    setClip({});
+  };
+
+  // A ⌘K chat answer: read-only (no rename/filing/PDF — those are Ask rows).
+  const loadChat = (c: PastChat) => {
+    setAsked(c.title);
+    setResult({ answer: c.answer, sources: [], model: c.model ?? "" });
+    setActiveId(null);
+    setActiveChatId(c.id);
+    setEntryTitle(null);
+    setEntryProjectRefs([]);
     setTitleEditing(false);
     setClipOpen(false);
     setClip({});
@@ -368,13 +397,13 @@ export function AskConsole({
           className="flex items-center gap-2 rounded-lg px-1 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:text-ink-dim"
         >
           <History className="size-3.5" />
-          recent questions
-          <span className="tabular-nums text-ink-faint">{history.length}</span>
+          history
+          <span className="tabular-nums text-ink-faint">{history.length + pastChats.length}</span>
           <ChevronDown className={cn("size-3 transition-transform", historyOpen && "rotate-180")} />
         </button>
         {historyOpen && (
           <div className="mt-2 flex flex-col gap-1.5">
-            {history.length === 0 && (
+            {history.length === 0 && pastChats.length === 0 && (
               <p className="py-3 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
                 no questions yet
               </p>
@@ -408,6 +437,30 @@ export function AskConsole({
                 </button>
               </div>
             ))}
+            {pastChats.length > 0 && (
+              <>
+                <p className="mt-2 flex items-center gap-2 px-1 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+                  <MessageSquare className="size-3" /> from ⌘K chat
+                </p>
+                {pastChats.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => loadChat(c)}
+                    title="Show this chat answer (read-only)"
+                    className={cn(
+                      "glass flex items-center gap-2 rounded-xl px-3 py-2 text-left transition",
+                      activeChatId === c.id ? "bg-plasma/8" : "hover:bg-white/4",
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-sm text-ink-dim">{c.title}</span>
+                    <span className="shrink-0 font-mono text-[9px] text-ink-faint">
+                      {formatWhen(c.createdAt)}
+                    </span>
+                  </button>
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>

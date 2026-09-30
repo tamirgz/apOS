@@ -101,7 +101,7 @@ export function ExecutorsPanel({
   return (
     <section className="glass rounded-2xl p-5">
       <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint">
-        workbench executors
+        run executors
       </p>
       <p className="mb-4 text-xs text-ink-faint">
         Who does the work when you delegate. Local executors (opencode, pi)

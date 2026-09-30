@@ -80,6 +80,60 @@ async function modelShorten(plain: string, budget: number): Promise<string | nul
   return out && out.length >= 8 ? out : null;
 }
 
+/** Words the source itself capitalizes in running text (not after a sentence
+ *  break) — proper nouns and product names that must stay capitalized. */
+function properNouns(source: string): Set<string> {
+  const out = new Set<string>();
+  const re = /[\p{L}][\p{L}'’]*/gu;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source))) {
+    const w = m[0];
+    if (!/^\p{Lu}/u.test(w)) continue;
+    const before = source.slice(0, m.index).trimEnd();
+    if (before === "" || /[.!?:—–(\[-]$/.test(before)) continue;
+    out.add(w);
+    out.add(w.replace(/['’]s$/u, "")); // "LM Studio's" → Studio
+  }
+  return out;
+}
+
+/** Words Title Case styles leave lowercase — they don't count either way. */
+const MINOR = new Set(["with", "from", "into", "onto", "over", "than", "that", "upon", "when", "then", "until"]);
+
+/**
+ * Title Case → sentence case, keeping what must stay capitalized: the first
+ * word, acronyms (FDR, S2), words with digits or inner capitals (iSentry), and
+ * anything the source title capitalizes mid-sentence. Text that isn't Title
+ * Cased (most words lower) is returned untouched.
+ */
+export function sentenceCase(text: string, source: string): string {
+  const prefix = text.match(PREFIX)?.[1] ?? "";
+  const body = text.slice(prefix.length);
+  // Title Case capitalizes nearly every content word; judge by the 4+ letter
+  // words after the first, acronyms aside ("Backup DB to Google Drive folder"
+  // is sentence case with a proper noun, not Title Case).
+  const words = (body.match(/[\p{L}][\p{L}'’]{3,}/gu) ?? [])
+    .slice(1)
+    .filter((w) => w !== w.toUpperCase() && !MINOR.has(w));
+  const upper = words.filter((w) => /^\p{Lu}/u.test(w)).length;
+  if (words.length < 2 || upper / words.length < 0.85) return text;
+
+  const keep = properNouns(plainTitle(source));
+  let first = true;
+  const cased = body.replace(/[\p{L}][\p{L}'’]*/gu, (w, offset: number) => {
+    const before = body.slice(0, offset).trimEnd();
+    const sentenceStart = first || /[.!?]$/.test(before);
+    first = false;
+    if (sentenceStart) return w;
+    if (w.length > 1 && w === w.toUpperCase()) return w; // acronym
+    if (/\p{Lu}/u.test(w.slice(1))) return w; // iSentry, OpenAI
+    if (/\d/.test(body.slice(Math.max(0, offset - 1), offset + w.length + 1))) return w; // S2, 8CPU
+    if (keep.has(w)) return w; // a proper noun in the source
+    return w.charAt(0).toLowerCase() + w.slice(1);
+  });
+  return prefix + cased;
+}
+
 /** One title → its short form (prefix kept). Throws only when the model is unreachable. */
 export async function shortenTitle(title: string): Promise<string> {
   const plain = plainTitle(title).replace(/\s+/g, " ");
@@ -93,7 +147,7 @@ export async function shortenTitle(title: string): Promise<string> {
   const short = await modelShorten(body, budget);
   // A model reply that's too long or empty falls back to a clean word cut.
   const core = short && prefix.length + short.length <= MAX ? short : wordCut(body);
-  return wordCut(prefix + core.replace(PREFIX, ""));
+  return sentenceCase(wordCut(prefix + core.replace(PREFIX, "")), title);
 }
 
 /** Fill up to `batch` missing/stale short titles. Returns how many were written. */
@@ -103,7 +157,13 @@ export async function fillShortTitles(
   log: (m: string) => void = () => {},
 ): Promise<{ written: number; pending: number }> {
   const rows = await db
-    .select({ id: tasks.id, title: tasks.title, status: tasks.status, of: tasks.shortTitleOf })
+    .select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      of: tasks.shortTitleOf,
+      short: tasks.shortTitle,
+    })
     .from(tasks)
     .where(gt(dsql`length(${tasks.title})`, LONG));
   const todo = rows
@@ -111,7 +171,20 @@ export async function fillShortTitles(
     // Open work first — that's what the board and lists show.
     .sort((a, b) => Number(a.status === "done" || a.status === "cancelled") - Number(b.status === "done" || b.status === "cancelled"));
 
+  // Current short titles that are still Title Cased: re-case in place (no
+  // model call). Idempotent — sentence-cased text comes back unchanged.
   let written = 0;
+  for (const r of rows) {
+    if (!r.short || r.of !== titleHash(r.title)) continue;
+    const cased = sentenceCase(r.short, r.title);
+    if (cased === r.short) continue;
+    await db
+      .update(tasks)
+      .set({ shortTitle: cased })
+      .where(dsql`${tasks.id} = ${r.id} and ${tasks.shortTitleOf} = ${r.of}`);
+    written++;
+  }
+
   for (const r of todo.slice(0, batch)) {
     let short: string;
     try {

@@ -1,5 +1,6 @@
 "use client";
 
+import { done, errorText } from "@/core/ui/feedback";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
 import { ArrowUpRight, Bot, CornerDownRight, GitCommitHorizontal, Layers, Link2, MessageSquare, Plus, Trash2, X } from "lucide-react";
@@ -133,15 +134,19 @@ export function WorkItemDetail({
     el.style.height = `${Math.max(el.scrollHeight, 96)}px`;
   }, [notes, data]);
 
-  const save = (patch: WorkItemPatch) => act(() => updateTask(id, patch));
-  /** Any write: run it, surface a readable error, reload the item, tell the host. */
-  function act(fn: () => Promise<unknown>) {
+  const save = (patch: WorkItemPatch, saved?: string) => act(() => updateTask(id, patch), saved);
+  /**
+   * Any write: run it, surface a readable error, reload the item, tell the host.
+   * `saved` confirms a write the page doesn't visibly reflect (a blur-save).
+   */
+  function act(fn: () => Promise<unknown>, saved?: string) {
     start(async () => {
       setError(null);
       try {
         await fn();
+        if (saved) done(saved);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       }
       await reload();
       onChanged?.();
@@ -196,7 +201,7 @@ export function WorkItemDetail({
             rows={1}
             value={title}
             onChange={(e) => setTitle(e.target.value.replace(/\n/g, " "))}
-            onBlur={() => title.trim() && title.trim() !== item.title && save({ title })}
+            onBlur={() => title.trim() && title.trim() !== item.title && save({ title }, "Title saved")}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -347,7 +352,7 @@ export function WorkItemDetail({
           dir="auto"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          onBlur={() => notes.trim() !== (item.notes ?? "") && save({ notes })}
+          onBlur={() => notes.trim() !== (item.notes ?? "") && save({ notes }, "Notes saved")}
           placeholder="Add a description…"
           className="max-h-[50vh] min-h-24 w-full resize-y rounded-lg bg-white/4 px-3 py-2 text-sm leading-relaxed text-ink-dim outline-none placeholder:text-ink-faint focus:bg-white/6"
         />

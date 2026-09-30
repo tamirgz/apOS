@@ -1,5 +1,6 @@
 "use client";
 
+import { done, errorText } from "@/core/ui/feedback";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -458,8 +459,9 @@ export function AgentDetail({
                   turnBudget: turnBudget.trim() ? Number(turnBudget) : null,
                 });
                 setScheduleError(null);
+                done("Agent saved");
               } catch (e) {
-                setScheduleError(String(e).replace(/^Error:\s*/, ""));
+                setScheduleError(errorText(e));
               }
             })
           }

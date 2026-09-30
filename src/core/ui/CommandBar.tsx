@@ -21,6 +21,7 @@ import { searchEverywhere, searchModule } from "@/core/search/commandSearch";
 import type { CommandSearchHit } from "@/core/search/types";
 import { ChatMessages, useChat } from "./chat";
 import { cn } from "./cn";
+import { act } from "./feedback";
 
 /** Deterministic fast path: recognized prefixes skip the LLM and hit CRUD
  *  server actions directly — sub-second, zero tokens. */
@@ -235,14 +236,30 @@ export function CommandBar() {
   const fast = parseFastPath(search);
   const runFast = async () => {
     if (!fast) return;
-    if (fast.kind === "task") await createTask({ title: fast.text });
-    else await createNote({ title: fast.text });
+    const r =
+      fast.kind === "task"
+        ? await act(() => createTask({ title: fast.text }), {
+            failed: "Couldn't create the item",
+            done: (t) => `${t.identifier ?? "Item"} created`,
+            href: (t) => `/m/tasks/${t.id}`,
+          })
+        : await act(() => createNote({ title: fast.text }), {
+            failed: "Couldn't create the note",
+            done: "Note created",
+            href: (n) => `/m/notes/${n.id}`,
+          });
+    if (!r.ok) return;
     setOpen(false);
     router.refresh();
   };
   const runCapture = async () => {
     if (!search.trim()) return;
-    await captureToInbox(search.trim());
+    const r = await act(() => captureToInbox(search.trim()), {
+      failed: "Couldn't capture",
+      done: "Captured to Inbox",
+      href: "/m/inbox",
+    });
+    if (!r.ok) return;
     setOpen(false);
     router.refresh();
   };

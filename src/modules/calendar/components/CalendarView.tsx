@@ -1,5 +1,6 @@
 "use client";
 
+import { act } from "@/core/ui/feedback";
 import { useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
@@ -273,7 +274,7 @@ export function CalendarView({
               disabled={syncPending || !hasIcs}
               onClick={() =>
                 startSync(async () => {
-                  await requestIcsSync();
+                  await act(requestIcsSync, { failed: "Couldn't start the calendar sync", done: "Calendar sync started" });
                 })
               }
               className="flex items-center gap-1.5 rounded-lg border border-white/8 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:border-ion/30 hover:text-ion disabled:opacity-40"

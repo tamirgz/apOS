@@ -1,5 +1,6 @@
 "use client";
 
+import { act } from "@/core/ui/feedback";
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -195,7 +196,9 @@ export function KnowledgeDetail({ item }: { item: KnowledgeItem }) {
             onSubmit={(e) => {
               e.preventDefault();
               const v = noteRef.current?.value ?? "";
-              startTransition(async () => updateKnowledgeNote(item.id, v));
+              startTransition(async () =>
+                void (await act(() => updateKnowledgeNote(item.id, v), { failed: "Couldn't save the note", done: "Note saved" })),
+              );
             }}
             className="flex flex-col gap-2"
           >

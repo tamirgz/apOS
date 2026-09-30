@@ -1,5 +1,6 @@
 "use client";
 
+import { act } from "@/core/ui/feedback";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
@@ -130,18 +131,25 @@ function QuickCreate({
   const submit = () => {
     if (!parsed.title) return;
     const projectRef = keyed ? `projects:${keyed.id}` : projectId ? `projects:${projectId}` : null;
+    const input = {
+      title: parsed.title,
+      priority: parsed.priority,
+      labels: parsed.labels,
+      dueAt: parsed.dueAt ?? null,
+      estimate: parsed.estimate ?? null,
+      status: parsed.status,
+      projectRef,
+      featureRef: featureId && (!keyed || keyed.id === projectId) ? `features:${featureId}` : null,
+      cycleId: cycleId ?? null,
+    };
     start(async () => {
-      await createTask({
-        title: parsed.title,
-        priority: parsed.priority,
-        labels: parsed.labels,
-        dueAt: parsed.dueAt ?? null,
-        estimate: parsed.estimate ?? null,
-        status: parsed.status,
-        projectRef,
-        featureRef: featureId && (!keyed || keyed.id === projectId) ? `features:${featureId}` : null,
-        cycleId: cycleId ?? null,
+      // Confirmed with a link: the new item may be hidden by the active filter.
+      const r = await act(() => createTask(input), {
+        failed: "Couldn't create the item",
+        done: (t) => `${t.identifier ?? "Item"} created`,
+        href: (t) => `/m/tasks/${t.id}`,
       });
+      if (!r.ok) return;
       setText("");
       router.refresh();
     });

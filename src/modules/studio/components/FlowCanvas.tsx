@@ -397,7 +397,8 @@ export function FlowCanvas({
     await runFlowNow(flow.id);
   };
   const commitName = async () => {
-    if (name.trim() && name !== flow.name) await renameFlow(flow.id, name.trim());
+    if (name.trim() && name !== flow.name)
+      await act(() => renameFlow(flow.id, name.trim()), { failed: "Couldn't rename the flow", done: "Flow renamed" });
   };
   const onExport = () => {
     const data = JSON.stringify({ name, graph: { nodes, edges } }, null, 2);

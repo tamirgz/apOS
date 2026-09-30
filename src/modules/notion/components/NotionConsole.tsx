@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { ExternalLink, FileText, Plus, Plug, RefreshCw, Search, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act, done, failed } from "@/core/ui/feedback";
 import { addNotionWorkspace, removeNotionWorkspace, resyncNotion } from "../actions";
 
 interface PageRow {
@@ -10,6 +11,17 @@ interface PageRow {
   title: string;
   url: string | null;
   workspace: string | null;
+}
+
+/** Resync, reporting "no token" and any workspace that failed to sync. */
+async function resync() {
+  const r = await act(resyncNotion, { failed: "Couldn't sync Notion" });
+  if (!r.ok) return;
+  if ("needsToken" in r.value) return void failed("Couldn't sync Notion", "No workspace is connected. Add one with its integration token.");
+  const { synced, failedWorkspaces } = r.value;
+  if (failedWorkspaces.length)
+    failed("Some Notion workspaces didn't sync", `${failedWorkspaces.join(", ")}. Check each token; the apOS log has the details.`);
+  else done(`Notion synced · ${synced} pages`);
 }
 
 function AddWorkspaceForm({ compact }: { compact?: boolean }) {
@@ -150,7 +162,7 @@ export function NotionConsole({
         <AddWorkspaceForm compact />
         <button
           type="button"
-          onClick={() => start(async () => void (await resyncNotion()))}
+          onClick={() => start(resync)}
           disabled={pending}
           className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:bg-white/5 disabled:opacity-40"
         >

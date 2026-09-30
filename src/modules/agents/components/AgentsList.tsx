@@ -10,7 +10,8 @@ import type { AgentTemplate } from "@/core/modules/types.server";
 import { cn } from "@/core/ui/cn";
 import { timeAgo } from "@/core/ui/time";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
-import { createAgent, createFromTemplate, requestRun, updateAgent } from "../actions";
+import { createAgent, createFromTemplate, updateAgent } from "../actions";
+import { runNow } from "./run-now";
 import { RUN_STATUS_META, runDuration } from "./runMeta";
 
 type AgentItem = {
@@ -136,9 +137,7 @@ function RunNowButton({ agentId }: { agentId: string }) {
       disabled={pending}
       onClick={(e) => {
         e.preventDefault();
-        startTransition(async () => {
-          await requestRun(agentId);
-        });
+        startTransition(() => runNow(agentId));
       }}
       className="flex items-center gap-1.5 rounded-lg border border-flare/25 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-widest text-flare transition hover:bg-flare/10 disabled:opacity-40"
     >

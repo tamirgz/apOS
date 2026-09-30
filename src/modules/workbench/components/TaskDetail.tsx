@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
+import { act, info } from "@/core/ui/feedback";
 import {
   acceptTask,
   archiveTask,
@@ -240,6 +241,7 @@ export function TaskDetailView({
   const { task, attempts, events, diff } = detail;
   const [pending, start] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [prRequested, setPrRequested] = useState(false);
   const [editingAsk, setEditingAsk] = useState(false);
   const [askDraft, setAskDraft] = useState(task.prompt);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -435,13 +437,23 @@ export function TaskDetailView({
             diff.files.length > 0 && (
               <button
                 type="button"
-                disabled={pending}
-                onClick={() => start(async () => void (await requestPR(task.id)))}
+                disabled={pending || prRequested}
+                onClick={() =>
+                  start(async () => {
+                    const r = await act(() => requestPR(task.id), {
+                      failed: "Couldn't request the PR",
+                      done: (r) =>
+                        r.existing ? "PR already requested — waiting for your approval" : "PR requested — approve it on Today",
+                      href: "/m/today",
+                    });
+                    if (r.ok) setPrRequested(true);
+                  })
+                }
                 title="Queue a PR for approval — pushes only after you approve"
                 className="flex items-center gap-1.5 rounded-lg border border-ion/30 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/10 disabled:opacity-40"
               >
                 <GitPullRequest className="size-3" />
-                request PR
+                {prRequested ? "PR requested" : "request PR"}
               </button>
             )
           )}
@@ -466,7 +478,10 @@ export function TaskDetailView({
                 onClick={() =>
                   confirmDelete
                     ? start(async () => {
-                        await deleteTask(task.id);
+                        const r = await act(() => deleteTask(task.id), { failed: "Couldn't delete the task" });
+                        if (!r.ok) return;
+                        const kept = r.value.keptBranches;
+                        if (kept.length) info("Task deleted · unmerged branches kept", { body: kept.join(", ") });
                         router.push("/m/workbench");
                       })
                     : setConfirmDelete(true)

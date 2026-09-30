@@ -13,9 +13,11 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
+import { act } from "@/core/ui/feedback";
+import { cn } from "@/core/ui/cn";
 import {
   composeRoutine,
-  createRoutine,
+  createRoutineFromUI,
   deleteRoutine,
   runRoutineNow,
   setRoutineEnabled,
@@ -87,7 +89,7 @@ function RoutineRow({
           type="button"
           title={on ? "Enabled — click to pause" : "Paused — click to enable"}
           disabled={pending}
-          onClick={() => start(async () => void (await setRoutineEnabled(r.id, !on)))}
+          onClick={() => start(async () => void (await act(() => setRoutineEnabled(r.id, !on), { failed: "Couldn't change the routine" })))}
           className={`size-2.5 shrink-0 rounded-full transition ${on ? "bg-plasma shadow-[0_0_8px_var(--color-plasma)]" : "bg-ink-faint/40"}`}
         />
         <button
@@ -124,7 +126,15 @@ function RoutineRow({
           type="button"
           title="Run now"
           disabled={pending}
-          onClick={() => start(async () => void (await runRoutineNow(r.id)))}
+          onClick={() =>
+            start(async () =>
+              void (await act(() => runRoutineNow(r.id), {
+                failed: "Couldn't start the routine",
+                done: `${r.name} queued`,
+                href: "/m/workbench",
+              })),
+            )
+          }
           className="rounded-md p-1.5 text-ink-faint transition hover:text-ion"
         >
           <Play className="size-3.5" />
@@ -133,7 +143,7 @@ function RoutineRow({
           type="button"
           title="Delete routine"
           disabled={pending}
-          onClick={() => start(async () => void (await deleteRoutine(r.id)))}
+          onClick={() => start(async () => void (await act(() => deleteRoutine(r.id), { failed: "Couldn't delete the routine" })))}
           className="rounded-md p-1.5 text-ink-faint transition hover:text-flare"
         >
           <Trash2 className="size-3.5" />
@@ -273,7 +283,7 @@ function RoutineRow({
               disabled={!dirty || pending}
               onClick={() =>
                 start(async () => {
-                  await updateRoutine(r.id, {
+                  await act(() => updateRoutine(r.id, {
                     name,
                     prompt,
                     executorId,
@@ -283,7 +293,7 @@ function RoutineRow({
                     deliverPr,
                     gateEnabled,
                     gateModel: gateModel.trim() || null,
-                  });
+                  }), { failed: "Couldn't save the routine", done: "Routine saved" });
                 })
               }
               className="flex items-center gap-1.5 rounded-lg bg-ion/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/25 disabled:opacity-40"
@@ -341,7 +351,7 @@ export function RoutinesPanel({
   // builder: describe → cheap model composes the config (keeps your ask)
   const [describe, setDescribe] = useState("");
   const [composing, setComposing] = useState(false);
-  const [builderNote, setBuilderNote] = useState<string | null>(null);
+  const [builderNote, setBuilderNote] = useState<null | { ok: boolean; text: string }>(null);
 
   const canSave = name.trim() && projectId && prompt.trim().length > 10;
 
@@ -386,16 +396,21 @@ export function RoutinesPanel({
                   start(async () => {
                     setComposing(true);
                     setBuilderNote(null);
-                    const res = await composeRoutine(describe);
+                    const r = await act(() => composeRoutine(describe), {
+                      failed: "Couldn't compose the routine",
+                      checkResult: false,
+                    });
                     setComposing(false);
+                    if (!r.ok) return;
+                    const res = r.value;
                     if (res.ok) {
                       setName(res.draft.name);
                       setPrompt(res.draft.ask);
                       setTrigger(res.draft.triggerKind);
                       if (res.draft.schedule) setSchedule(res.draft.schedule);
-                      setBuilderNote(res.draft.note ?? "Filled in below — review and save.");
+                      setBuilderNote({ ok: true, text: res.draft.note ?? "Filled in below — review and save." });
                     } else {
-                      setBuilderNote(res.error);
+                      setBuilderNote({ ok: false, text: res.error });
                     }
                   })
                 }
@@ -405,7 +420,9 @@ export function RoutinesPanel({
                 {composing ? "composing…" : "compose with AI"}
               </button>
               {builderNote && (
-                <span className="font-mono text-[9px] text-ink-faint">{builderNote}</span>
+                <span className={cn("font-mono text-[9px]", builderNote.ok ? "text-ink-faint" : "text-flare")}>
+                  {builderNote.text}
+                </span>
               )}
             </div>
           </div>
@@ -496,7 +513,7 @@ export function RoutinesPanel({
               disabled={!canSave || pending}
               onClick={() =>
                 start(async () => {
-                  await createRoutine({
+                  const r = await act(() => createRoutineFromUI({
                     name,
                     projectId,
                     prompt,
@@ -505,7 +522,8 @@ export function RoutinesPanel({
                     triggerKind: trigger,
                     schedule: trigger === "schedule" || trigger === "both" ? schedule : null,
                     sourceRef: trigger === "source" ? sourceRef : null,
-                  });
+                  }), { failed: "Couldn't create the routine", done: "Routine created" });
+                  if (!r.ok) return;
                   setName("");
                   setPrompt("");
                   setOpen(false);

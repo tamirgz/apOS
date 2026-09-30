@@ -20,6 +20,7 @@ import { createNote } from "@/modules/notes/actions";
 import { saveMarkdownToVault } from "@/modules/obsidian/actions";
 import { Markdown } from "./Markdown";
 import { cn } from "./cn";
+import { act, errorText, failed } from "./feedback";
 
 export type ChatEvent =
   | { type: "meta"; provider: string; model: string; chatRunId?: string }
@@ -264,21 +265,15 @@ function MessageActions({ content }: { content: string }) {
 
   const doNote = async () => {
     setNote("busy");
-    try {
-      await createNote({ title, body: content });
-      flash(setNote, true);
-    } catch {
-      flash(setNote, false);
-    }
+    const r = await act(() => createNote({ title, body: content }), { failed: "Couldn't save the note" });
+    flash(setNote, r.ok);
   };
   const doObsidian = async () => {
     setObs("busy");
-    try {
-      const r = await saveMarkdownToVault({ title, body: content });
-      flash(setObs, !!r.ok);
-    } catch {
-      flash(setObs, false);
-    }
+    const r = await act(() => saveMarkdownToVault({ title, body: content }), {
+      failed: "Couldn't save to Obsidian",
+    });
+    flash(setObs, r.ok);
   };
   const doPdf = async () => {
     setPdf("busy");
@@ -288,7 +283,7 @@ function MessageActions({ content }: { content: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, content }),
       });
-      if (!res.ok) throw new Error("pdf failed");
+      if (!res.ok) throw new Error(`the PDF service answered ${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -305,7 +300,8 @@ function MessageActions({ content }: { content: string }) {
       a.remove();
       URL.revokeObjectURL(url);
       flash(setPdf, true);
-    } catch {
+    } catch (e) {
+      failed("Couldn't make the PDF", errorText(e));
       flash(setPdf, false);
     }
   };

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { act } from "@/core/ui/feedback";
+import { cn } from "@/core/ui/cn";
 import { reconnectClaude, verifyClaudeAuth } from "../actions";
 
 /**
@@ -12,7 +14,7 @@ export function ClaudeReconnect() {
   const [verify, setVerify] = useState<null | { valid: boolean; error?: string }>(null);
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
-  const [msg, setMsg] = useState("");
+  const [msg, setMsg] = useState<null | { ok: boolean; text: string }>(null);
   const [pending, start] = useTransition();
 
   const expired =
@@ -24,7 +26,16 @@ export function ClaudeReconnect() {
         <button
           type="button"
           disabled={pending}
-          onClick={() => start(async () => { setMsg(""); setVerify(await verifyClaudeAuth()); })}
+          onClick={() =>
+            start(async () => {
+              setMsg(null);
+              const r = await act(verifyClaudeAuth, {
+                failed: "Couldn't check the Claude connection",
+                checkResult: false,
+              });
+              if (r.ok) setVerify(r.value);
+            })
+          }
           className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-ink-dim transition hover:border-plasma/40 hover:text-plasma disabled:opacity-50"
         >
           {pending ? "Checking…" : "Verify connection"}
@@ -45,6 +56,9 @@ export function ClaudeReconnect() {
             </span>
           ))}
       </div>
+      {verify && !verify.valid && verify.error && !expired && (
+        <p className="mt-1.5 break-words text-xs text-flare/80">{verify.error}</p>
+      )}
 
       {open && (
         <div className="mt-3 space-y-2">
@@ -65,8 +79,13 @@ export function ClaudeReconnect() {
             disabled={pending || token.trim().length < 20}
             onClick={() =>
               start(async () => {
-                const r = await reconnectClaude(token);
-                setMsg(r.message);
+                const res = await act(() => reconnectClaude(token), {
+                  failed: "Couldn't save the token",
+                  checkResult: false,
+                });
+                if (!res.ok) return;
+                const r = res.value;
+                setMsg({ ok: r.ok, text: r.message });
                 if (r.ok) {
                   setToken("");
                   setOpen(false);
@@ -80,7 +99,7 @@ export function ClaudeReconnect() {
           </button>
         </div>
       )}
-      {msg && <p className="mt-2 text-xs text-ink-dim">{msg}</p>}
+      {msg && <p className={cn("mt-2 text-xs", msg.ok ? "text-ink-dim" : "text-flare")}>{msg.text}</p>}
     </div>
   );
 }

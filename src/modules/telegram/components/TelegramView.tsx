@@ -5,6 +5,7 @@ import { useEffect, useState, useTransition } from "react";
 import { Send, Plus, RefreshCw, Trash2, Check, X, SlidersHorizontal, Search, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { readPref, writePref } from "@/modules/tasks/components/prefs";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
+import { act } from "@/core/ui/feedback";
 import {
   addChannel,
   deleteChannel,
@@ -108,7 +109,11 @@ export function TelegramView({
               disabled={pending || !username.trim() || criteria.trim().length < 10}
               onClick={() =>
                 start(async () => {
-                  await addChannel({ username, criteria, backfillDays: Number(days) || 14 });
+                  const r = await act(() => addChannel({ username, criteria, backfillDays: Number(days) || 14 }), {
+                    failed: "Couldn't add the channel",
+                    done: (r) => (r.ok ? `Following @${r.channel.username} · backfilling` : null),
+                  });
+                  if (!r.ok) return;
                   setUsername("");
                   setOpen(false);
                 })

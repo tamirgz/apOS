@@ -1,7 +1,7 @@
 "use server";
 
 import { join } from "node:path";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
 import { recordUsage } from "@/core/usage";
@@ -464,6 +464,18 @@ export async function createRoutine(input: {
   return row;
 }
 
+/**
+ * createRoutine for the UI: its "no project" / "no repo" refusals come back as
+ * { ok: false, error } — a thrown message is redacted in production builds.
+ */
+export async function createRoutineFromUI(input: Parameters<typeof createRoutine>[0]) {
+  try {
+    return { ok: true as const, routine: await createRoutine(input) };
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** Edit a routine's fields in place (the ask, brain, trigger, schedule, PR). */
 export async function updateRoutine(
   id: string,
@@ -534,10 +546,25 @@ export async function requestPR(taskId: string) {
     .select()
     .from(workbenchTasks)
     .where(eq(workbenchTasks.id, taskId));
-  if (!task) throw new Error("task not found");
-  if (!task.repoPath) throw new Error("task has no repo");
+  if (!task) return { ok: false as const, error: "This task no longer exists." };
+  if (!task.repoPath) return { ok: false as const, error: "This task has no repo to open a PR against." };
 
   const { approvals } = await import("@/core/db/schema/approvals");
+  // One open request per task — a second click (or a reload and click) must
+  // not queue a duplicate approval that would push the branch twice.
+  const [open] = await db
+    .select({ id: approvals.id })
+    .from(approvals)
+    .where(
+      and(
+        eq(approvals.toolName, "workbench.openPR"),
+        inArray(approvals.status, ["pending", "approved"]),
+        dsql`${approvals.input}->>'taskId' = ${taskId}`,
+      ),
+    )
+    .limit(1);
+  if (open) return { ok: true as const, approvalId: open.id, existing: true };
+
   const title = `apOS: ${task.title}`.slice(0, 120);
   const body = [
     `Proposed by apOS from the Workbench task "${task.title}".`,
@@ -556,7 +583,7 @@ export async function requestPR(taskId: string) {
     .returning();
   await sql.notify("approvals_changed", row.id);
   revalidate(taskId);
-  return row;
+  return { ok: true as const, approvalId: row.id, existing: false };
 }
 
 /** "I've looked at the diff" — closes the card without touching the branch. */

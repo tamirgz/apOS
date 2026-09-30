@@ -5,6 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Bot, Layers, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { done, errorText } from "@/core/ui/feedback";
 import { shortDate } from "@/core/ui/time";
 import { useNow } from "@/core/ui/useNow";
 import { createFeature, deleteFeature, updateFeature } from "@/modules/projects/features-actions";
@@ -341,15 +342,14 @@ export function ModuleHeader({
   const from = f.startAt ? +new Date(f.startAt) : Math.min(now, ...mine.map((t) => +new Date(t.createdAt)));
   const to = Math.min(now, f.targetAt ? Math.max(+new Date(f.targetAt), from + DAY) : now);
 
-  const run = (fn: () => Promise<unknown>, after?: () => void) =>
+  const run = <T,>(fn: () => Promise<T>, after?: (r: T) => void) =>
     start(async () => {
       setError(null);
       try {
-        await fn();
-        after?.();
+        after?.(await fn());
         router.refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       }
     });
   const arm = (k: "delete" | "run") => {
@@ -375,7 +375,13 @@ export function ModuleHeader({
             <button
               type="button"
               disabled={pending}
-              onClick={() => (armed === "run" ? run(() => delegateFeatureAction(f.id), () => setArmed(null)) : arm("run"))}
+              onClick={() => (armed === "run" ? run(
+                    () => delegateFeatureAction(f.id),
+                    (wb) => {
+                      setArmed(null);
+                      done("Handed to Workbench", { href: `/m/workbench/${wb.id}` });
+                    },
+                  ) : arm("run"))}
               className={cn(
                 "flex items-center gap-1 rounded-lg px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition",
                 armed === "run" ? "border border-violet/40 text-violet" : "text-ink-faint hover:text-violet",

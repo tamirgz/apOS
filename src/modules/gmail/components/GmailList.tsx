@@ -7,10 +7,20 @@ import { useState, useTransition } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ExternalLink, ListPlus, Mail, RefreshCw, Sparkles } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { mailToWorkItem, resyncGmail } from "../actions";
 import type { GmailMessage } from "../schema";
 
 const ago = (d: Date | null) => timeAgo(d, { compact: true });
+
+/** resyncGmail's "not connected" / "needs re-consent" outcomes, as failures. */
+async function resync() {
+  const r = await resyncGmail();
+  if (!r) return { ok: false as const, synced: 0, error: "Google isn't connected. Connect it in Settings → Connections." };
+  if ("needsReconsent" in r)
+    return { ok: false as const, synced: 0, error: "Google needs you to re-approve Gmail access. Reconnect in Settings → Connections." };
+  return r;
+}
 
 export function GmailList({
   messages,
@@ -54,7 +64,7 @@ export function GmailList({
         </p>
         <button
           type="button"
-          onClick={() => start(async () => void (await resyncGmail()))}
+          onClick={() => start(async () => void (await act(resync, { failed: "Couldn't sync Gmail", done: (r) => `Gmail synced · ${r.synced} messages` })))}
           disabled={pending}
           className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:bg-white/5 disabled:opacity-40"
         >

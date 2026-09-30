@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Check, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { done, errorText } from "@/core/ui/feedback";
 import { shortDate } from "@/core/ui/time";
 import { useNow } from "@/core/ui/useNow";
 import {
@@ -23,6 +24,11 @@ export const CYCLE_META: Record<CycleStatus, { label: string; color: string }> =
   upcoming: { label: "Upcoming", color: "var(--color-ink-faint)" },
   completed: { label: "Completed", color: "var(--color-plasma)" },
 };
+
+/** "3 items moved to Cycle 5" / "3 items moved to the backlog". */
+function rolledOver(n: number, next: { name: string } | null) {
+  return `${n} item${n === 1 ? "" : "s"} moved to ${next ? next.name : "the backlog"}`;
+}
 
 export const dateInput = (d: Date | string | number) => {
   const x = new Date(d);
@@ -125,14 +131,14 @@ function CycleRow({
   const [armed, setArmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const now = useNow();
-  const run = (fn: () => Promise<unknown>) =>
+  const run = <T,>(fn: () => Promise<T>, after?: (r: T) => void) =>
     start(async () => {
       setError(null);
       try {
-        await fn();
+        after?.(await fn());
         router.refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       }
     });
 
@@ -211,7 +217,7 @@ function CycleRow({
           </span>
           <button
             type="button"
-            onClick={() => run(() => rollOverCycleAction(c.id, next?.id ?? null))}
+            onClick={() => run(() => rollOverCycleAction(c.id, next?.id ?? null), (n) => done(rolledOver(n, next)))}
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/10"
           >
             <RefreshCw className="size-3" />
@@ -333,14 +339,14 @@ export function CycleHeader({
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = (fn: () => Promise<unknown>) =>
+  const run = <T,>(fn: () => Promise<T>, after?: (r: T) => void) =>
     start(async () => {
       setError(null);
       try {
-        await fn();
+        after?.(await fn());
         router.refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       }
     });
   const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
@@ -414,7 +420,7 @@ export function CycleHeader({
           </span>
           <button
             type="button"
-            onClick={() => run(() => rollOverCycleAction(c.id, next?.id ?? null))}
+            onClick={() => run(() => rollOverCycleAction(c.id, next?.id ?? null), (n) => done(rolledOver(n, next)))}
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/10"
           >
             <RefreshCw className="size-3" />

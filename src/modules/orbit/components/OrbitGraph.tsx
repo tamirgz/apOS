@@ -739,7 +739,7 @@ export function OrbitGraph({ data }: { data: Graph }) {
   const shownCount = allNodes.filter((n) => !hidden.has(n.kind)).length;
 
   return (
-    <div className="relative h-[calc(100vh-8.5rem)] overflow-hidden rounded-2xl glass">
+    <div className="relative h-[calc(100vh-12rem)] overflow-hidden rounded-2xl glass">
       <div
         ref={holderRef}
         className="absolute inset-0"

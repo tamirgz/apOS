@@ -6,7 +6,7 @@ export const orbitManifest: ModuleManifest = {
   title: "Orbit",
   icon: Orbit,
   accent: "var(--color-ion)",
-  nav: { order: 46 },
+  nav: { order: 49, group: "Library" },
   commands: [
     {
       id: "orbit.open",

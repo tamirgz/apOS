@@ -3,15 +3,15 @@ import type { ModuleManifest } from "@/core/modules/types";
 
 export const obsidianManifest: ModuleManifest = {
   id: "vault",
-  title: "Obsidian",
+  title: "Vault",
   icon: BookOpen,
   accent: "var(--color-violet)",
-  nav: { order: 63, group: "Sources", external: true },
+  nav: { order: 46, group: "Library", external: true },
   searchable: true,
   commands: [
     {
       id: "vault.open",
-      title: "Go to Obsidian",
+      title: "Go to Vault",
       keywords: ["obsidian", "vault", "second brain", "notes"],
       href: "/m/vault",
     },

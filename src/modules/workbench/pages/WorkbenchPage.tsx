@@ -9,6 +9,7 @@ import { NewTaskBox } from "../components/NewTaskBox";
 import { TaskBoard } from "../components/TaskBoard";
 import { ArchivedTasks } from "../components/ArchivedTasks";
 import { RoutinesPanel } from "../components/RoutinesPanel";
+import { SectionTabs } from "@/core/ui/SectionTabs";
 
 export async function WorkbenchPage() {
   const [tasks, archived, executors, routines, tgChannels] = await Promise.all([
@@ -39,6 +40,7 @@ export async function WorkbenchPage() {
 
   return (
     <div>
+      <SectionTabs section="automation" />
       {/* The repo you work in most is the sane default for code tasks. */}
       <NewTaskBox
         defaultRepo={process.cwd()}

@@ -19,7 +19,7 @@ export function ReportButton() {
           router.push(`/m/workbench/${id}`);
         })
       }
-      title="Generate a thorough, structured investment report in the Workbench"
+      title="Generate a thorough, structured investment report as a background run"
       className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:bg-white/6 hover:text-ink disabled:opacity-50"
     >
       {pending ? (

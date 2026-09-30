@@ -3,14 +3,14 @@ import type { ModuleManifest } from "@/core/modules/types";
 
 export const studioManifest: ModuleManifest = {
   id: "studio",
-  title: "Studio",
+  title: "Flows",
   icon: Workflow,
   accent: "var(--color-plasma)",
-  nav: { order: 47 },
+  nav: { order: 72, group: "Automation" },
   commands: [
     {
       id: "studio.open",
-      title: "Open Studio",
+      title: "Open Flows",
       keywords: [
         "studio",
         "flows",

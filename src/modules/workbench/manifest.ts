@@ -3,16 +3,16 @@ import type { ModuleManifest } from "@/core/modules/types";
 
 export const workbenchManifest: ModuleManifest = {
   id: "workbench",
-  title: "Workbench",
+  title: "Runs",
   icon: Hammer,
   accent: "var(--color-plasma)",
-  nav: { order: 16 },
+  nav: { order: 70, group: "Automation" },
   searchable: true,
   commands: [
     {
       id: "workbench.open",
-      title: "Go to Workbench",
-      keywords: ["workbench", "tasks", "delegate", "agent", "run", "jobs"],
+      title: "Go to Runs",
+      keywords: ["runs", "workbench", "tasks", "delegate", "agent", "run", "jobs"],
       href: "/m/workbench",
     },
     {

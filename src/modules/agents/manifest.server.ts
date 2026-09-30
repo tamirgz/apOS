@@ -6,12 +6,14 @@ import { memoryMaintenanceJobs } from "./memory-maintenance";
 import { memoryDistillJobs } from "./memory-distill";
 import { AgentsPage } from "./pages/AgentsPage";
 import { AgentDetailPage } from "./pages/AgentDetailPage";
+import { AgentModelsPage } from "./pages/AgentModelsPage";
 import { AgentActivityWidget } from "./widgets/AgentActivityWidget";
 
 export const agentsServerManifest: ModuleServerManifest = {
   id: "agents",
   routes: {
     "": AgentsPage,
+    models: AgentModelsPage,
     "[id]": AgentDetailPage,
   },
   widgets: [

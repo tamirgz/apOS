@@ -380,7 +380,7 @@ export function ModuleHeader({
                 "flex items-center gap-1 rounded-lg px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition",
                 armed === "run" ? "border border-violet/40 text-violet" : "text-ink-faint hover:text-violet",
               )}
-              title="One Workbench run takes all the module's open items; they move to In review when it finishes"
+              title="One run takes all the module's open items; they move to In review when it finishes"
             >
               <Bot className="size-3.5" />
               {armed === "run" ? `again to hand ${s!.open} over` : "workbench"}

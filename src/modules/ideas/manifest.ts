@@ -6,7 +6,7 @@ export const ideasManifest: ModuleManifest = {
   title: "Ideas",
   icon: Lightbulb,
   accent: "var(--color-gold)",
-  nav: { order: 40 },
+  nav: { order: 40, group: "Library" },
   searchable: true,
   commands: [
     {

@@ -17,9 +17,9 @@ const KEY_LABELS: Record<string, string> = {
   "ideas.analyze": "Idea reality-check",
   ask: "Ask (cited Q&A)",
   "project.advisor": "Project advisor (per-project read + re-angle)",
-  "workbench.native": "Workbench · docs tasks (apOS data + module tools)",
-  "workbench.judge": "Workbench · delegation judge — PRIMARY (local-first)",
-  "workbench.judge.fallback": "Workbench · delegation judge — FALLBACK (online, only if local is down)",
+  "workbench.native": "Runs · docs tasks (apOS data + module tools)",
+  "workbench.judge": "Runs · delegation judge — PRIMARY (local-first)",
+  "workbench.judge.fallback": "Runs · delegation judge — FALLBACK (online, only if local is down)",
   "routine.builder": "Routines · builder (composes a routine from your description)",
   "source.relevance": "Sources · relevance gate (is this post worth a run?)",
   "routine.gate": "Routines · commit gate (does this commit need the executor?)",
@@ -127,7 +127,7 @@ export function RoutesEditor({ routes }: { routes: AiRoute[] }) {
             "or Gemini (your metered AI Studio key). " +
             "OpenAI/GPT-5 isn't listed here because its no-key subscription path is " +
             "CLI-only (Codex) and can't host apOS's module tools — so GPT-5 lives in " +
-            'the Workbench as the "Codex (GPT-5, ChatGPT sub)" executor, not in this dropdown.'
+            'Runs as the "Codex (GPT-5, ChatGPT sub)" executor, not in this dropdown.'
           }
         >
           <Info className="size-3" />

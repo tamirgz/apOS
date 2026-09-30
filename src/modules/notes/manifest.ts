@@ -6,7 +6,7 @@ export const notesManifest: ModuleManifest = {
   title: "Notes",
   icon: NotebookPen,
   accent: "var(--color-violet)",
-  nav: { order: 30 },
+  nav: { order: 30, group: "Library" },
   searchable: true,
   commands: [
     {

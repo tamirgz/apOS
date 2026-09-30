@@ -359,12 +359,12 @@ export function WorkItemDetail({
                 className="flex w-fit items-center gap-1.5 rounded-lg border border-violet/25 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-widest text-violet transition hover:bg-violet/10"
                 title="A background executor works on this item; the result comes back for your review"
               >
-                <Bot className="size-3.5" /> hand to Workbench
+                <Bot className="size-3.5" /> hand off as a run
               </button>
             ) : (
               <div className="flex flex-col gap-2 rounded-xl border border-violet/25 p-3">
                 <p className="text-xs text-ink-faint">
-                  The Workbench gets the title, description{children.length ? " and open sub-items" : ""}. It runs in an isolated copy of the
+                  The run gets the title, description{children.length ? " and open sub-items" : ""}. It runs in an isolated copy of the
                   project&apos;s repo (if one is attached) and the item moves to In review when it finishes.
                 </p>
                 <textarea
@@ -512,7 +512,7 @@ export function WorkItemDetail({
             {runs.map((l) => (
               <Link key={l.id} href={l.url ?? `/m/workbench/${l.ref}`} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm transition hover:bg-white/4">
                 <Bot className="size-3.5 shrink-0 text-violet" />
-                <span className="truncate text-ink-dim">{l.title ?? "Workbench run"}</span>
+                <span className="truncate text-ink-dim">{l.title ?? "Run"}</span>
                 <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">{(l.state ?? "queued").replace("_", " ")}</span>
               </Link>
             ))}

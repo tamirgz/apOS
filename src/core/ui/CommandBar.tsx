@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  BookOpen,
   CornerDownLeft,
   Inbox,
   LayoutGrid,
@@ -59,9 +60,12 @@ function parseFastPath(search: string) {
 function ChatView({
   chat,
   onExit,
+  onOpenAsk,
 }: {
   chat: ReturnType<typeof useChat>;
   onExit: () => void;
+  /** Close the bar and open Ask, where finished chats are listed. */
+  onOpenAsk: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -114,11 +118,28 @@ function ChatView({
           <X className="size-4" />
         </button>
       </form>
-      {chat.meta && (
-        <p className="border-t border-white/4 px-4 py-1.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
-          via {chat.meta.provider} · {chat.meta.model}
-        </p>
-      )}
+      <div className="flex items-center gap-3 border-t border-white/4 px-4 py-1.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+        {chat.meta && (
+          <span className="truncate">
+            via {chat.meta.provider} · {chat.meta.model}
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-3">
+          {chat.turns.length > 0 && (
+            <button
+              type="button"
+              disabled={chat.busy}
+              onClick={chat.reset}
+              className="transition hover:text-ink-dim disabled:opacity-40"
+            >
+              new chat
+            </button>
+          )}
+          <button type="button" onClick={onOpenAsk} className="transition hover:text-ink-dim">
+            past chats in Ask
+          </button>
+        </span>
+      </div>
     </div>
   );
 }
@@ -133,7 +154,8 @@ export function CommandBar() {
   >([]);
   const router = useRouter();
   const pathname = usePathname();
-  const chat = useChat();
+  // Persisted, so a chat survives a reload; finished chats also list in Ask.
+  const chat = useChat({ storageKey: "aios-cmdk-chat" });
 
   // Context-aware search: on a searchable module's page, ⌘K searches that
   // module's own content. `/m/knowledge` and `/m/knowledge/<id>` → knowledge.
@@ -248,7 +270,7 @@ export function CommandBar() {
             onClick={(e) => e.stopPropagation()}
           >
             {mode === "chat" ? (
-              <ChatView chat={chat} onExit={() => setMode("commands")} />
+              <ChatView chat={chat} onExit={() => setMode("commands")} onOpenAsk={() => go("/m/ask")} />
             ) : (
               <Command label="Command bar" shouldFilter>
                 <div className="flex items-center gap-2 border-b border-white/6 px-4">
@@ -308,6 +330,24 @@ export function CommandBar() {
                     </Command.Item>
                   )}
 
+                  {search.trim() && (
+                    <Command.Item
+                      value={`ask-knowledge ${search}`}
+                      forceMount
+                      onSelect={() => go(`/m/ask?q=${encodeURIComponent(search.trim())}`)}
+                      className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink transition data-[selected=true]:bg-plasma/10"
+                    >
+                      <BookOpen className="size-4 text-ion" />
+                      <span>
+                        Ask your knowledge{" "}
+                        <span className="text-ink-dim">“{search.trim().slice(0, 40)}{search.trim().length > 40 ? "…" : ""}”</span>
+                      </span>
+                      <span className="ml-auto font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+                        cited answer
+                      </span>
+                    </Command.Item>
+                  )}
+
                   <Command.Item
                     value={`ask-ai ${search}`}
                     forceMount
@@ -319,7 +359,7 @@ export function CommandBar() {
                   >
                     <Sparkles className="size-4 text-plasma" />
                     <span>
-                      Ask AI{" "}
+                      Chat with AI{" "}
                       {search.trim() && (
                         <span className="text-ink-dim">“{search.trim()}”</span>
                       )}

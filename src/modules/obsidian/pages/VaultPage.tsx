@@ -7,6 +7,7 @@ import { GlassPanel } from "@/core/ui/GlassPanel";
 import { obsidianNotes } from "../schema";
 import { OBSIDIAN_PATH_KEY, vaultStats } from "../sync";
 import { VaultControls } from "../components/VaultControls";
+import { SectionTabs } from "@/core/ui/SectionTabs";
 
 export async function VaultPage() {
   const [root, stats, recent] = await Promise.all([
@@ -21,6 +22,8 @@ export async function VaultPage() {
 
   if (!root) {
     return (
+      <>
+      <SectionTabs section="library" />
       <GlassPanel className="flex flex-col items-center gap-3 px-8 py-16 text-center">
         <BookOpen className="size-6 text-violet" />
         <h2 className="font-display text-2xl font-semibold text-ink">
@@ -36,10 +39,13 @@ export async function VaultPage() {
           ever written to the vault.
         </p>
       </GlassPanel>
+      </>
     );
   }
 
   return (
+    <>
+    <SectionTabs section="library" />
     <div className="max-w-3xl">
       <VaultControls
         root={root}
@@ -74,5 +80,6 @@ export async function VaultPage() {
         </div>
       )}
     </div>
+    </>
   );
 }

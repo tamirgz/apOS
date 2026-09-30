@@ -136,3 +136,55 @@ export async function searchEverywhere(
       "/",
   }));
 }
+
+/**
+ * Section search: one box over a nav section's sources (Library = notes, ideas,
+ * knowledge and the vault; Automation = runs and agent reports). Same lexical
+ * index as ⌘K, scoped by kind, with the hit's kind for labelling.
+ */
+const SECTION_KINDS: Record<string, string[]> = {
+  library: ["note", "idea", "knowledge", "vault"],
+  automation: ["workbench", "report"],
+};
+
+export async function searchSection(
+  section: string,
+  query: string,
+): Promise<(CommandSearchHit & { kind: string })[]> {
+  const q = query.trim();
+  const kinds = SECTION_KINDS[section];
+  if (q.length < 2 || !kinds) return [];
+  const like = `%${q}%`;
+  const rows = await db
+    .select({
+      id: searchIndex.id,
+      kind: searchIndex.kind,
+      title: searchIndex.title,
+      snippet: searchIndex.snippet,
+      href: searchIndex.href,
+    })
+    .from(searchIndex)
+    .where(
+      and(
+        inArray(searchIndex.kind, kinds),
+        or(
+          ilike(searchIndex.title, like),
+          ilike(searchIndex.snippet, like),
+          ilike(searchIndex.embedText, like),
+        ),
+      ),
+    )
+    .orderBy(desc(searchIndex.updatedAt))
+    .limit(12);
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    title: r.title,
+    subtitle: r.snippet ?? undefined,
+    href:
+      (isDetailHref(r.href) ? r.href : null) ??
+      r.href ??
+      KIND_FALLBACK_HREF[r.kind] ??
+      "/",
+  }));
+}

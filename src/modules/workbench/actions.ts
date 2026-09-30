@@ -339,6 +339,7 @@ export async function updateExecutor(
     .where(eq(executors.id, id));
   revalidatePath("/m/settings");
   revalidatePath("/m/workbench");
+  revalidatePath("/m/workbench/executors");
 }
 
 // ── Routines (A1) ──────────────────────────────────────────────────────────

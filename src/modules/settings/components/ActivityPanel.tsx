@@ -19,7 +19,7 @@ const WRITE_SURFACES: { module: string; label: string; table: string }[] = [
   { module: "knowledge", label: "Knowledge captures", table: "knowledge_items" },
   { module: "ideas", label: "Ideas", table: "ideas" },
   { module: "notes", label: "Notes", table: "notes" },
-  { module: "workbench", label: "Workbench tasks", table: "workbench_tasks" },
+  { module: "workbench", label: "Runs", table: "workbench_tasks" },
   { module: "studio", label: "Flows", table: "flows" },
   { module: "workbench", label: "Routines", table: "routines" },
   { module: "chat", label: "Chats", table: "chat_runs" },

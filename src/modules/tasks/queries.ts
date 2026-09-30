@@ -1,4 +1,4 @@
-import { asc, eq, isNull, ne } from "drizzle-orm";
+import { asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { features, projects, type FeatureStatus } from "@/modules/projects/schema";
 import { blockedItemIds, listWorkItems, type WorkItem } from "./core";
@@ -24,6 +24,13 @@ export interface WorkFeature {
   sortOrder: number;
 }
 
+export interface WorkCommit {
+  ref: string;
+  title: string | null;
+  url: string | null;
+  at: Date;
+}
+
 export interface WorkData {
   items: WorkItem[];
   projects: WorkProject[];
@@ -35,11 +42,17 @@ export interface WorkData {
   delegated: Record<string, string>;
   /** Saved views for this surface (the project's, or all-work ones). */
   views: WorkView[];
+  /** Open "blocks" relations (blocker → blocked, both still open): the blocked marker and timeline dependency lines. */
+  deps: { from: string; to: string }[];
+  /** itemId → its latest linked commit (from the repo watcher). */
+  commits: Record<string, WorkCommit>;
+  /** The newest linked commits, newest first — the "Repo" line of the cycle strip. */
+  recentCommits: (WorkCommit & { taskId: string })[];
 }
 
 /** Everything a Work view needs: items (+identifiers), the project picker, features. */
 export async function loadWorkData(projectId?: string): Promise<WorkData> {
-  const [items, projectRows, featureRows, cycleRows, blocked, wbLinks, views] = await Promise.all([
+  const [items, projectRows, featureRows, cycleRows, blocked, wbLinks, views, depRows, commitRows] = await Promise.all([
     listWorkItems(db, { projectId }),
     db
       .select({ id: projects.id, name: projects.name, key: projects.key, kind: projects.kind })
@@ -74,7 +87,30 @@ export async function loadWorkData(projectId?: string): Promise<WorkData> {
       .from(workViews)
       .where(projectId ? eq(workViews.projectId, projectId) : isNull(workViews.projectId))
       .orderBy(asc(workViews.sortOrder), asc(workViews.createdAt)),
+    db.execute<{ from: string; to: string }>(sql`
+      select r.from_id as "from", r.to_id as "to"
+      from task_relations r
+      join tasks b on b.id = r.from_id
+      join tasks t on t.id = r.to_id
+      where r.kind = 'blocks'
+        and b.status not in ('done','cancelled')
+        and t.status not in ('done','cancelled')`),
+    db
+      .select({ taskId: taskLinks.taskId, ref: taskLinks.ref, title: taskLinks.title, url: taskLinks.url, at: taskLinks.createdAt })
+      .from(taskLinks)
+      .where(eq(taskLinks.kind, "commit"))
+      .orderBy(desc(taskLinks.createdAt))
+      .limit(500),
   ]);
+  const inScope = new Set(items.map((t) => t.id));
+  const commits: Record<string, WorkCommit> = {};
+  const recentCommits: WorkData["recentCommits"] = [];
+  for (const c of commitRows) {
+    if (!inScope.has(c.taskId)) continue;
+    const row = { ref: c.ref, title: c.title, url: c.url, at: c.at };
+    commits[c.taskId] ??= row; // newest first, so the first one wins
+    if (recentCommits.length < 3) recentCommits.push({ ...row, taskId: c.taskId });
+  }
   const delegated: Record<string, string> = {};
   for (const l of wbLinks) delegated[l.taskId] = l.state ?? "queued"; // later rows win
   return {
@@ -85,5 +121,8 @@ export async function loadWorkData(projectId?: string): Promise<WorkData> {
     blocked: [...blocked],
     delegated,
     views,
+    deps: [...depRows].map((r) => ({ from: r.from, to: r.to })),
+    commits,
+    recentCommits,
   };
 }

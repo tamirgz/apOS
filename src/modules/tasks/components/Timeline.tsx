@@ -9,7 +9,7 @@ import { updateFeature } from "@/modules/projects/features-actions";
 import { updateTask } from "../actions";
 import type { WorkItem } from "../core";
 import type { WorkFeature, WorkProject } from "../queries";
-import { STATUS_META, plainTitle } from "../states";
+import { STATUS_META, displayTitle, plainTitle } from "../states";
 import { FEATURE_META, moduleStats } from "./ModulesView";
 import { readPref, writePref } from "./prefs";
 
@@ -397,7 +397,7 @@ export function Timeline({
     <button type="button" onClick={() => onOpen(t.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
       <span className="w-16 shrink-0 font-mono text-[10px] text-ink-faint">{t.identifier}</span>
       <span dir="auto" className={cn("truncate text-xs text-ink-dim group-hover:text-ink", (t.status === "done" || t.status === "cancelled") && "line-through opacity-60")}>
-        {plainTitle(t.title)}
+        {displayTitle(t)}
       </span>
     </button>
   );

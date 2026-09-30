@@ -44,3 +44,28 @@ export function plainTitle(title: string): string {
     .replace(/\*\*|__/g, "")
     .trim();
 }
+
+/** FNV-1a (32-bit, hex) of a title — ties a stored short title to the exact
+ *  title it was made from. Same result on server and client; not for security. */
+export function titleHash(title: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < title.length; i++) {
+    h ^= title.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * The title for list views: the generated short title while it still matches
+ * the current title, otherwise the plain full title. The stored title is never
+ * rewritten — tooltips and the detail page keep showing it in full.
+ */
+export function displayTitle(t: {
+  title: string;
+  shortTitle?: string | null;
+  shortTitleOf?: string | null;
+}): string {
+  if (t.shortTitle && t.shortTitleOf && t.shortTitleOf === titleHash(t.title)) return t.shortTitle;
+  return plainTitle(t.title);
+}

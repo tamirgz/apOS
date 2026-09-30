@@ -2,7 +2,7 @@ import { and, asc, gte, isNotNull, lte } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { taskIsOpen, tasks } from "../tasks/schema";
 import { calendarEvents } from "./schema";
-import { plainTitle } from "../tasks/states";
+import { displayTitle } from "../tasks/states";
 
 export interface AgendaItem {
   id: string;
@@ -77,7 +77,7 @@ export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
     ...dueTasks.map((t) => ({
       id: t.id,
       kind: "task" as const,
-      title: plainTitle(t.title),
+      title: displayTitle(t),
       at: t.dueAt!,
       endAt: null,
       allDay: false,

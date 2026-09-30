@@ -1,5 +1,6 @@
 "use client";
 
+import { displayName } from "../display";
 import { dayAgo } from "@/core/ui/time";
 
 import Link from "next/link";
@@ -59,11 +60,11 @@ export function PeopleList({ people }: { people: PersonWithFollowups[] }) {
                 className="glass flex items-center gap-3 rounded-xl p-3.5 transition hover:bg-white/4"
               >
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-ion/15 font-mono text-[11px] font-medium text-ion">
-                  {initials(p.name ?? p.email)}
+                  {initials(displayName(p))}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-ink">
-                    {p.name ?? p.email}
+                    {displayName(p)}
                   </p>
                   <p className="truncate font-mono text-[10px] text-ink-faint">
                     {p.meetingCount} mtg · {lastMet(p.lastSeenAt)}

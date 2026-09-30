@@ -118,6 +118,10 @@ function ProjectCard({
         ) : null}
 
         <div className="mt-4">
+          {/* No work items yet: a dashed track + "not started", not an empty 0/0 bar. */}
+          {total === 0 ? (
+            <div className="h-1.5 rounded-full border border-dashed border-white/10" />
+          ) : (
           <div className="h-1.5 overflow-hidden rounded-full bg-white/6">
             <motion.div
               initial={{ width: 0 }}
@@ -126,11 +130,12 @@ function ProjectCard({
               className="h-full rounded-full bg-gradient-to-r from-plasma-dim to-plasma"
             />
           </div>
+          )}
           <div className="mt-1.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-ink-faint">
             <span>{lastActiveLabel(project.lastActivityAt)}</span>
             <span className="tabular-nums">
               {overdue > 0 && <span className="text-flare">{overdue} overdue · </span>}
-              {done}/{total} tasks
+              {total === 0 ? "not started" : `${done}/${total} tasks`}
             </span>
           </div>
         </div>

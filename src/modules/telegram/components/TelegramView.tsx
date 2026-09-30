@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
-import { Send, Plus, RefreshCw, Trash2, Check, X, SlidersHorizontal, Search } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import { Send, Plus, RefreshCw, Trash2, Check, X, SlidersHorizontal, Search, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { readPref, writePref } from "@/modules/tasks/components/prefs";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import {
   addChannel,
@@ -48,6 +49,15 @@ export function TelegramView({
   // Keyword search + a relevant-only filter over the shown posts.
   const [query, setQuery] = useState("");
   const [relevantOnly, setRelevantOnly] = useState(false);
+
+  // The channel list is a side rail beside the feed; it folds away (remembered).
+  const [railOpen, setRailOpen] = useState(true);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- restore the remembered choice after hydration (localStorage is client-only)
+  useEffect(() => setRailOpen(readPref("telegram.rail", "open", ["open", "closed"]) === "open"), []);
+  const toggleRail = () => {
+    writePref("telegram.rail", railOpen ? "closed" : "open");
+    setRailOpen(!railOpen);
+  };
 
   const relevant = posts.filter((p) => p.relevant === "yes");
 
@@ -111,9 +121,29 @@ export function TelegramView({
         </div>
       )}
 
+      <div
+        className={
+          railOpen && channels.length > 0
+            ? "grid grid-cols-1 items-start gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]"
+            : "flex flex-col gap-6"
+        }
+      >
       {channels.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {channels.map((c) => {
+        <aside className={railOpen ? "flex flex-col gap-2 lg:sticky lg:top-4" : "flex flex-col"}>
+          <button
+            type="button"
+            onClick={toggleRail}
+            aria-expanded={railOpen}
+            className="flex items-center gap-2 self-start rounded-lg px-1 py-1 font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint transition hover:text-ink"
+            title={railOpen ? "Hide the channel list" : "Show the channel list"}
+          >
+            {railOpen ? <PanelLeftClose className="size-3.5" /> : <PanelLeftOpen className="size-3.5" />}
+            channels <span className="text-ion">{channels.length}</span>
+            {!railOpen && activeUsername && (
+              <span className="normal-case tracking-normal text-ink-dim">· @{activeUsername}</span>
+            )}
+          </button>
+          {railOpen && channels.map((c) => {
             const on = c.enabled === "true";
             const editingThis = editId === c.id;
             return (
@@ -240,7 +270,7 @@ export function TelegramView({
               </div>
             );
           })}
-        </div>
+        </aside>
       )}
 
       {activeUsername && (
@@ -355,6 +385,7 @@ export function TelegramView({
           })()}
         </section>
       )}
+      </div>
     </div>
   );
 }

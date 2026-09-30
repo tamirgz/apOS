@@ -16,6 +16,8 @@ import { readPref, writePref } from "./prefs";
 const DAY = 86_400_000;
 const DAY_PX = 22;
 const LABEL_W = 240;
+const LABEL_MIN = 160;
+const LABEL_MAX = 560;
 /** Pointer travel before a press on a bar counts as a drag, not a click. */
 const DRAG_SLOP = 3;
 
@@ -99,6 +101,35 @@ export function Timeline({
   };
 
   // Optimistic positions after a drop, cleared when the server sends fresh data.
+  // The label column is resizable (drag its header edge); the width is remembered.
+  const [labelW, setLabelW] = useState(LABEL_W);
+  useEffect(() => {
+    try {
+      const v = Number(localStorage.getItem("work.timeline.labelW"));
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- restore the remembered width after hydration (localStorage is client-only)
+      if (v >= LABEL_MIN && v <= LABEL_MAX) setLabelW(v);
+    } catch {
+      /* private mode — default width */
+    }
+  }, []);
+  const resizeLabels = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const x0 = e.clientX;
+    const w0 = labelW;
+    let w = w0;
+    const move = (ev: PointerEvent) => {
+      w = Math.min(LABEL_MAX, Math.max(LABEL_MIN, w0 + ev.clientX - x0));
+      setLabelW(w);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      writePref("work.timeline.labelW", String(Math.round(w)));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const [drafts, setDrafts] = useState<Record<string, Span>>({});
   const [seed, setSeed] = useState({ items, features });
   if (seed.items !== items || seed.features !== features) {
@@ -343,7 +374,7 @@ export function Timeline({
 
   const row = (key: string, labelEl: ReactNode, bar: Bar | undefined, opts: { head?: boolean; hint?: string } = {}) => (
     <div key={key} className={cn("group relative flex items-center transition hover:bg-white/[0.03]", opts.head ? "h-9 border-t border-white/5" : "h-8")}>
-      <span className="sticky left-0 z-[1] flex h-full shrink-0 items-center bg-panel/95 px-3" style={{ width: LABEL_W }}>
+      <span className="sticky left-0 z-[1] flex h-full shrink-0 items-center bg-panel/95 px-3" style={{ width: labelW }}>
         {labelEl}
       </span>
       <span className="relative h-full" style={{ width }}>
@@ -355,7 +386,7 @@ export function Timeline({
   const moduleLabel = (name: ReactNode, open?: () => void, pct?: number) => (
     <button type="button" onClick={open} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!open}>
       <Layers className="size-3.5 shrink-0 text-ion" />
-      <span dir="auto" className="truncate font-mono text-[10px] uppercase tracking-[0.14em] text-ink-dim hover:text-ink">
+      <span dir="auto" className="truncate text-xs font-medium text-ink-dim hover:text-ink">
         {name}
       </span>
       {pct != null && <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-ink-faint">{pct}%</span>}
@@ -381,11 +412,19 @@ export function Timeline({
       <Toolbar hideDone={hideDone} onToggle={toggleHideDone} />
       <div className={cn("glass overflow-hidden rounded-xl", drag && "select-none")}>
         <div className="overflow-x-auto">
-          <div className="relative" style={{ width: LABEL_W + width }}>
+          <div className="relative" style={{ width: labelW + width }}>
             {/* header */}
             <div className="sticky top-0 z-10 flex h-8 border-b border-white/6 bg-panel/80 backdrop-blur">
-              <div className="sticky left-0 z-10 flex shrink-0 items-center bg-panel/95 px-3 font-mono text-[10px] uppercase tracking-widest text-ink-faint" style={{ width: LABEL_W }}>
+              <div className="sticky left-0 z-10 flex shrink-0 items-center bg-panel/95 px-3 font-mono text-[10px] uppercase tracking-widest text-ink-faint" style={{ width: labelW }}>
                 {byFeature ? "module / item" : "project / item"}
+                <span
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize the label column"
+                  title="Drag to resize"
+                  onPointerDown={resizeLabels}
+                  className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize border-r border-white/8 transition hover:border-ion/60 hover:bg-ion/10"
+                />
               </div>
               <div className="relative" style={{ width }}>
                 {months.map((m) => (
@@ -402,7 +441,7 @@ export function Timeline({
             </div>
 
             {/* grid + today line */}
-            <div className="pointer-events-none absolute bottom-0 top-8" style={{ left: LABEL_W, width }} aria-hidden>
+            <div className="pointer-events-none absolute bottom-0 top-8" style={{ left: labelW, width }} aria-hidden>
               {weeks.map((x) => (
                 <span key={x} className="absolute inset-y-0 w-px bg-white/[0.04]" style={{ left: x }} />
               ))}
@@ -413,7 +452,7 @@ export function Timeline({
 
             {moduleRows.length > 0 && (
               <div className="border-b border-white/6 pb-1">
-                <div className="sticky left-0 flex h-7 items-center px-3 font-mono text-[10px] uppercase tracking-[0.2em] text-ink-dim" style={{ width: LABEL_W }}>
+                <div className="sticky left-0 flex h-7 items-center px-3 font-mono text-[10px] uppercase tracking-[0.2em] text-ink-dim" style={{ width: labelW }}>
                   Modules
                 </div>
                 {moduleRows.map(({ f, bar }) =>
@@ -438,7 +477,7 @@ export function Timeline({
                 {byFeature ? (
                   row(`g:${g.key}`, moduleLabel(g.head.label, g.head.open, g.key !== "none" ? pctOf(g.key) : undefined), g.head.bar, { head: true, hint: g.head.hint })
                 ) : (
-                  <div className="sticky left-0 flex h-7 items-center px-3 font-mono text-[10px] uppercase tracking-[0.2em] text-ink-dim" style={{ width: LABEL_W }}>
+                  <div className="sticky left-0 flex h-7 items-center px-3 text-xs font-medium text-ink-dim" style={{ width: labelW }}>
                     <span className="truncate">{g.head.label}</span>
                   </div>
                 )}

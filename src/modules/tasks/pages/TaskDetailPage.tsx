@@ -18,7 +18,7 @@ export async function TaskDetailPage({ params }: ModuleRouteProps) {
   const { projects } = await loadWorkData();
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl lg:max-w-6xl">
       <Link
         href="/m/tasks"
         className="mb-3 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:text-ink"

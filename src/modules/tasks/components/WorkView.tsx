@@ -31,7 +31,7 @@ import type { WorkItem } from "../core";
 import { parseQuick } from "../parse";
 import type { WorkData } from "../queries";
 import { TASK_STATUSES, type TaskPriority, type TaskStatus, type WorkView as SavedView, type WorkViewFilters } from "../schema";
-import { BOARD_STATUSES, PRIORITY_META, STATUS_META, plainTitle } from "../states";
+import { BOARD_STATUSES, PRIORITY_META, STATUS_META, displayTitle, plainTitle } from "../states";
 import { CalendarView } from "./CalendarView";
 import { CycleHeader, CyclesView, nextCycleFor } from "./CyclePanel";
 import { ModuleHeader, ModulesView } from "./ModulesView";
@@ -265,7 +265,7 @@ function Card({
             title={plainTitle(item.title)}
             className={cn("min-w-0 flex-1 truncate text-xs", closed(item.status) ? "text-ink-faint line-through" : "text-ink-dim group-hover:text-ink")}
           >
-            {plainTitle(item.title)}
+            {displayTitle(item)}
           </span>
           <Flags blocked={blocked} delegated={delegated} />
         </div>
@@ -287,7 +287,7 @@ function Card({
         title={plainTitle(item.title)}
         className={cn("line-clamp-2 text-sm leading-snug", closed(item.status) ? "text-ink-faint line-through" : "text-ink-dim group-hover:text-ink")}
       >
-        {plainTitle(item.title)}
+        {displayTitle(item)}
       </p>
       {(item.labels.length > 0 || item.dueAt || subCount || blocked || delegated) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -555,7 +555,7 @@ function ListView({
                         <span className="w-16 shrink-0 font-mono text-[10px] text-ink-faint">{t.identifier}</span>
                         <span dir="auto" className={cn("min-w-0 flex-1 truncate text-sm", closed(t.status) ? "text-ink-faint line-through" : "text-ink-dim")}>
                           {t.parentId && <span className="mr-1 text-ink-faint">↳</span>}
-                          {plainTitle(t.title)}
+                          {displayTitle(t)}
                         </span>
                         <span className="hidden items-center gap-1.5 sm:flex">
                           <Flags blocked={flags.blocked.has(t.id)} delegated={flags.delegated[t.id]} />

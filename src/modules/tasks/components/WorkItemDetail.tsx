@@ -17,7 +17,7 @@ import {
 } from "../actions";
 import type { WorkItemPatch } from "../core";
 import { TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } from "../schema";
-import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, plainTitle, type RelationSide } from "../states";
+import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, displayTitle, plainTitle, type RelationSide } from "../states";
 import type { WorkProject } from "../queries";
 
 type Loaded = NonNullable<Awaited<ReturnType<typeof loadWorkItem>>>;
@@ -177,7 +177,7 @@ export function WorkItemDetail({
                 title="Open parent"
               >
                 <CornerDownRight className="size-3 rotate-180" />
-                {parent.identifier} {plainTitle(parent.title)}
+                {parent.identifier} {displayTitle(parent)}
               </button>
             )}
             {!full && (
@@ -206,6 +206,12 @@ export function WorkItemDetail({
             aria-label="Title"
             className="w-full resize-none overflow-hidden rounded-lg bg-transparent px-1 py-1 font-display text-xl font-semibold leading-snug text-ink outline-none transition hover:bg-white/4 focus:bg-white/6"
           />
+          {displayTitle(item) !== plainTitle(item.title) && (
+            <p className="px-1 text-xs text-ink-faint" title="A shortened form made by a local model; the title above is unchanged">
+              <span className="font-mono text-[9px] uppercase tracking-widest">in lists</span>{" "}
+              {displayTitle(item)}
+            </p>
+          )}
         </div>
     </>
   );
@@ -418,7 +424,7 @@ export function WorkItemDetail({
               <span className="size-2 shrink-0 rounded-full" style={{ background: STATUS_META[c.status].color }} />
               <span className="font-mono text-[10px] text-ink-faint">{c.identifier}</span>
               <span className={cn("truncate", c.status === "done" || c.status === "cancelled" ? "text-ink-faint line-through" : "text-ink-dim")}>
-                {plainTitle(c.title)}
+                {displayTitle(c)}
               </span>
             </button>
           ))}
@@ -462,7 +468,7 @@ export function WorkItemDetail({
               <button type="button" onClick={() => onOpenItem?.(rel.other.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left transition hover:text-ion">
                 <span className="size-2 shrink-0 rounded-full" style={{ background: STATUS_META[rel.other.status].color }} />
                 <span className="font-mono text-[10px] text-ink-faint">{rel.other.identifier}</span>
-                <span className="truncate text-ink-dim">{plainTitle(rel.other.title)}</span>
+                <span className="truncate text-ink-dim">{displayTitle(rel.other)}</span>
               </button>
               <button
                 type="button"

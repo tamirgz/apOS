@@ -7,7 +7,7 @@ import { cn } from "@/core/ui/cn";
 import { useNow } from "@/core/ui/useNow";
 import { updateTask } from "../actions";
 import type { WorkItem } from "../core";
-import { STATUS_META, plainTitle } from "../states";
+import { STATUS_META, displayTitle, plainTitle } from "../states";
 
 const DAY = 86_400_000;
 const CELL_CAP = 3;
@@ -160,7 +160,7 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
                       )}
                       style={{ borderLeftColor: STATUS_META[t.status].color }}
                     >
-                      <span dir="auto" className="truncate">{plainTitle(t.title)}</span>
+                      <span dir="auto" className="truncate">{displayTitle(t)}</span>
                     </button>
                   );
                 })}

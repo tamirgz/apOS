@@ -34,6 +34,11 @@ export const tasks = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     title: text("title").notNull(),
+    /** A short display title for list views, made by a local model from `title`
+     *  (which is never rewritten). Valid only while `shortTitleOf` equals
+     *  `titleHash(title)` — an edited title falls back to the original. */
+    shortTitle: text("short_title"),
+    shortTitleOf: text("short_title_of"),
     notes: text("notes"),
     status: text("status", { enum: TASK_STATUSES }).notNull().default("todo"),
     priority: text("priority", { enum: TASK_PRIORITIES })

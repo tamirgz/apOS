@@ -5,6 +5,17 @@ import { syncFromWorkbench, syncPendingWorkbenchLinks } from "./delegate";
 
 export const workJobs: ModuleJob[] = [
   {
+    // Short display titles for long titles (local model, originals untouched).
+    // Ledgered by title hash, so a pass with nothing new is a cheap no-op.
+    channel: "work_short_titles",
+    schedule: "7,37 * * * *",
+    handle: async (_payload, ctx) => {
+      const { fillShortTitles } = await import("./short-titles");
+      const r = await fillShortTitles(ctx.db, 30, (m) => console.log(`[work] ${m}`));
+      if (r.written) console.log(`[work] short titles: ${r.written} written, ${r.pending} pending`);
+    },
+  },
+  {
     // Identifiers stay complete (every project a key, every item a number) and
     // Workbench outcomes missed while the worker was down get written back.
     // Idempotent — a no-op when nothing is missing.

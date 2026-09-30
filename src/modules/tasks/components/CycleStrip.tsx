@@ -3,54 +3,13 @@
 import { useMemo } from "react";
 import { shortDate, timeAgo } from "@/core/ui/time";
 import { useNow } from "@/core/ui/useNow";
-import type { CycleSummary } from "../cycles";
 import type { WorkItem } from "../core";
 import type { WorkData } from "../queries";
-import { moduleStats } from "./ModulesView";
+import { fmtRate as fmt, modulePct, moduleStats } from "../stats";
+import { Burn, SEGMENTS } from "./cycle-kit";
 import { isClosed } from "./work-ui";
 
 const DAY = 86_400_000;
-
-/** Remaining work per day against the ideal straight line, drawn to fill its box. */
-function Burn({ c }: { c: CycleSummary }) {
-  const days = Math.max(2, Math.round((+new Date(c.endsAt) - +new Date(c.startsAt)) / DAY) + 1);
-  const pts = c.burndown;
-  if (!pts.length) return null;
-  const top = Math.max(1, ...pts.map((p) => p.remaining));
-  const W = 300;
-  const H = 46;
-  const X = (i: number) => (i / (days - 1)) * W;
-  const Y = (v: number) => 4 + (1 - v / top) * (H - 8);
-  const line = pts.map((p, i) => `${X(i).toFixed(1)},${Y(p.remaining).toFixed(1)}`).join(" ");
-  const last = pts[pts.length - 1];
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className="mt-1 block h-[46px] w-full overflow-visible"
-      role="img"
-      aria-label={`Burndown: ${last.remaining} of ${top} items still open`}
-    >
-      <polyline
-        points={`0,${Y(pts[0].remaining)} ${W},${Y(0)}`}
-        fill="none"
-        stroke="color-mix(in oklab, var(--color-ink) 22%, transparent)"
-        strokeDasharray="3 3"
-        strokeWidth="1.2"
-        vectorEffect="non-scaling-stroke"
-      />
-      <polygon points={`0,${H} ${line} ${X(pts.length - 1)},${H}`} fill="color-mix(in oklab, var(--color-plasma) 14%, transparent)" />
-      <polyline points={line} fill="none" stroke="var(--color-plasma)" strokeWidth="1.8" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-      <circle cx={X(pts.length - 1)} cy={Y(last.remaining)} r="3" fill="var(--color-plasma)" vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
-}
-
-const SEGMENTS = [
-  { status: "done", label: "done", color: "var(--color-plasma)" },
-  { status: "review", label: "review", color: "var(--color-violet)" },
-  { status: "doing", label: "doing", color: "var(--color-solar)" },
-] as const;
 
 /**
  * The project's (or all work's) pulse, above the views: the running cycle's
@@ -123,7 +82,6 @@ export function CycleStrip({
   const needsInput = Object.entries(data.delegated).filter(([id, s]) => s === "needs_input" && byId.has(id)).length;
   const commit = data.recentCommits[0];
   const commitItem = commit ? byId.get(commit.taskId) : undefined;
-  const fmt = (n: number) => (n >= 10 ? Math.round(n).toString() : n.toFixed(1).replace(/\.0$/, ""));
 
   const link = "underline decoration-dotted underline-offset-2 transition hover:text-ink";
 
@@ -163,7 +121,7 @@ export function CycleStrip({
                 {total ? Math.round((by.done / total) * 100) : 0}% of {total} {unit}
               </span>
             </div>
-            <Burn c={cycle} />
+            <Burn c={cycle} className="mt-1" />
           </>
         ) : (
           <>
@@ -187,7 +145,7 @@ export function CycleStrip({
           <div className="flex flex-col gap-[7px]">
             {milestones.map((f) => {
               const s = stats.get(f.id);
-              const pct = s?.total ? Math.round((s.closed / s.total) * 100) : 0;
+              const pct = modulePct(s);
               const late = f.targetAt && +new Date(f.targetAt) + DAY < now;
               return (
                 <button

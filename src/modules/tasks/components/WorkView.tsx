@@ -395,9 +395,26 @@ export function WorkView({
       )}
 
       {tab === "cycles" && !openCycle && (
-        <CyclesView cycles={data.cycles} items={items} projectId={projectId} projects={data.projects} onSelect={(id) => go({ cycle: id })} />
+        <CyclesView
+          cycles={data.cycles}
+          items={items}
+          blocked={data.blocked}
+          projectId={projectId}
+          projects={data.projects}
+          onSelect={(id) => go({ cycle: id })}
+          onOpenItem={setOpenId}
+        />
       )}
-      {openCycle && <CycleHeader c={openCycle} next={nextCycleFor(data.cycles, openCycle)} onBack={() => go({ cycle: null })} />}
+      {openCycle && (
+        <CycleHeader
+          c={openCycle}
+          items={items}
+          blocked={data.blocked}
+          next={nextCycleFor(data.cycles, openCycle)}
+          onBack={() => go({ cycle: null })}
+          onOpenItem={setOpenId}
+        />
+      )}
 
       {workSurface && !openModule && !openCycle && (
         <CycleStrip

@@ -82,15 +82,11 @@ export function ProjectFiles({
   };
 
   return (
-    <section className="mt-6">
-      <header className="mb-3 flex items-center gap-2 px-1">
-        <Paperclip className="size-3.5 text-ion" />
-        <h2 className="font-display text-sm font-medium uppercase tracking-[0.2em] text-ink-dim">
-          Files
-        </h2>
-        <span className="font-mono text-xs tabular-nums text-ink-faint">
-          {files.length}
-        </span>
+    <section aria-label="Files" className="glass flex flex-col gap-2.5 rounded-2xl p-5">
+      <header className="flex items-center gap-2">
+        <h3 className="wk-sec-h">
+          <Paperclip className="size-3.5 text-ion" /> Files <span className="tabular-nums">{files.length}</span>
+        </h3>
       </header>
 
       <div
@@ -106,14 +102,14 @@ export function ProjectFiles({
         }}
         onClick={() => inputRef.current?.click()}
         className={cn(
-          "mb-3 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed py-6 font-mono text-[11px] uppercase tracking-widest transition",
+          "flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-[12.5px] transition",
           dragOver
             ? "border-ion/50 bg-ion/5 text-ion"
             : "border-ion/12 text-ink-faint hover:border-ion/24 hover:text-ink-dim",
         )}
       >
         <UploadCloud className="size-4" />
-        {pending ? "uploading…" : "drop files here, or click to browse"}
+        {pending ? "Uploading…" : "Drop files here, or click to browse"}
         <input
           ref={inputRef}
           type="file"
@@ -126,12 +122,8 @@ export function ProjectFiles({
         />
       </div>
 
-      {files.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-ion/10 py-8 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
-          no files attached yet
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
+      {files.length > 0 && (
+        <div className="-mx-2 flex flex-col">
           <AnimatePresence mode="popLayout">
             {files.map((f) => {
               const meta = STATUS_META[f.status];
@@ -142,7 +134,7 @@ export function ProjectFiles({
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
-                  className="group glass flex items-center gap-3 rounded-xl px-3.5 py-2.5"
+                  className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-ink/4"
                 >
                   <FileText className="size-3.5 shrink-0 text-ink-faint" />
                   <a
@@ -150,17 +142,17 @@ export function ProjectFiles({
                     target="_blank"
                     rel="noopener noreferrer"
                     title="View / download"
-                    className="min-w-0 flex-1 truncate text-sm text-ink-dim transition hover:text-ink"
+                    className="min-w-0 flex-1 truncate text-[13px] text-ink-dim transition hover:text-ink"
                   >
                     {f.filename}
                   </a>
-                  <span className="shrink-0 font-mono text-[9px] text-ink-faint">
+                  <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-faint">
                     {formatBytes(f.sizeBytes)}
                   </span>
                   <span
                     title={f.statusDetail ?? undefined}
                     className={cn(
-                      "flex shrink-0 items-center gap-1 font-mono text-[9px] uppercase tracking-widest",
+                      "flex shrink-0 items-center gap-1 text-[11px]",
                       meta.pulse && "animate-pulse-soft",
                     )}
                     style={{ color: meta.color }}
@@ -174,6 +166,7 @@ export function ProjectFiles({
                   <button
                     type="button"
                     title="Delete"
+                    aria-label={`Delete ${f.filename}`}
                     disabled={pending}
                     onClick={() =>
                       startTransition(async () => {
@@ -181,7 +174,7 @@ export function ProjectFiles({
                         router.refresh();
                       })
                     }
-                    className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition group-hover:opacity-100 hover:bg-flare/10 hover:text-flare disabled:opacity-40"
+                    className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 hover:bg-flare/10 hover:text-flare disabled:opacity-40"
                   >
                     <Trash2 className="size-3.5" />
                   </button>

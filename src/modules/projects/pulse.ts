@@ -5,7 +5,7 @@ import { moduleStats } from "@/modules/tasks/stats";
 export function pulseProps(work: WorkData) {
   const cycle = work.cycles.find((c) => c.status === "current") ?? null;
   const stats = moduleStats(work.items);
-  const milestones = work.features
+  const modules = work.features
     .filter((f) => f.status === "active" || f.status === "planned" || f.status === "paused")
     .filter((f) => (stats.get(f.id)?.total ?? 0) > 0 || f.targetAt)
     .sort(
@@ -20,6 +20,6 @@ export function pulseProps(work: WorkData) {
     cycle,
     cycleItems: cycle ? work.items.filter((t) => t.cycleId === cycle.id) : [],
     blocked: work.blocked,
-    milestones,
+    modules,
   };
 }

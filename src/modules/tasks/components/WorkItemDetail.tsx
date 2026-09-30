@@ -13,6 +13,7 @@ import {
   CircleDot,
   Copy,
   CornerDownRight,
+  Flag,
   FolderKanban,
   GitBranch,
   GitCommitHorizontal,
@@ -121,6 +122,7 @@ export function WorkItemDetail({
   onOpenItem,
   onDeleted,
   onClose,
+  milestones,
   full = false,
 }: {
   id: string;
@@ -132,6 +134,8 @@ export function WorkItemDetail({
   onDeleted?: () => void;
   /** Drawer only: close it. */
   onClose?: () => void;
+  /** The item's milestones, rendered by the host (it holds the milestone data). */
+  milestones?: ReactNode;
   full?: boolean;
 }) {
   const now = useNow();
@@ -443,6 +447,7 @@ export function WorkItemDetail({
             ))}
           </select>,
         )}
+      {milestones && projectId && propRow(<Flag className={ic} />, "Milestones", milestones)}
       {propRow(
         <FolderKanban className={ic} />,
         "Project",

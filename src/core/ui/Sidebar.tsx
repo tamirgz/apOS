@@ -9,6 +9,7 @@ import { motion } from "motion/react";
 import { ArrowUpRight, Bell, ChevronRight, Menu } from "lucide-react";
 import { navModules } from "@/modules/registry";
 import type { ModuleManifest } from "@/core/modules/types";
+import { IntentLink } from "./IntentLink";
 import { getSidebarBadges } from "./sidebar-badges";
 import { useLiveEvents } from "./useLiveEvents";
 import { cn } from "./cn";
@@ -33,7 +34,7 @@ function NavItem({
   badge?: number;
 }) {
   return (
-    <Link href={href} className="group relative block">
+    <IntentLink href={href} className="group relative block">
       {active && (
         <motion.span
           layoutId="nav-active"
@@ -62,7 +63,7 @@ function NavItem({
           <span className="dot ml-auto animate-pulse-soft" style={{ color: accent }} />
         ) : null}
       </span>
-    </Link>
+    </IntentLink>
   );
 }
 

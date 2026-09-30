@@ -15,9 +15,10 @@
  */
 import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
-import { sql as dsql } from "drizzle-orm";
+import { eq, sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { getSetting, setSetting } from "@/core/app-settings";
+import { appSettings } from "@/core/db/schema/app-settings";
 
 export interface OrbitRegion {
   id: number;
@@ -400,9 +401,28 @@ export async function refreshAtlas(): Promise<void> {
   await setSetting(ATLAS_KEY, JSON.stringify(blob));
 }
 
+/**
+ * The parsed atlas, kept per server process. The blob is ~1.7 MB and the DB is
+ * remote, so fetching it cost ~200 ms on every Orbit render; now a render asks
+ * only for the row's updated_at and refetches when the job has rebuilt it.
+ */
+let memo: { stamp: string; atlas: Atlas | null } | null = null;
+
 /** Read the persisted atlas for the render path. Never computes. */
 export async function readAtlas(): Promise<Atlas | null> {
-  const raw = await getSetting(ATLAS_KEY);
+  const [row] = await db
+    .select({ updatedAt: appSettings.updatedAt })
+    .from(appSettings)
+    .where(eq(appSettings.key, ATLAS_KEY));
+  if (!row) return null;
+  const stamp = new Date(row.updatedAt).toISOString();
+  if (memo?.stamp === stamp) return memo.atlas;
+  const atlas = parseAtlas(await getSetting(ATLAS_KEY));
+  memo = { stamp, atlas };
+  return atlas;
+}
+
+function parseAtlas(raw: string | null): Atlas | null {
   if (!raw) return null;
   try {
     const blob = JSON.parse(raw) as AtlasBlob;

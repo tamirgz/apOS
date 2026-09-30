@@ -46,31 +46,31 @@ export async function orbitGraph(): Promise<OrbitGraph> {
   // Mail + calendar are excluded from the graph (the mails that matter are
   // auto-analysed daily and already in the Obsidian vault).
   const excluded = dsql`kind not in ('mail', 'event')`;
-  const totalRow = await db.execute<{ n: number }>(
-    dsql`select count(*)::int as n from search_index
-          where embedding is not null and ${excluded}`,
-  );
+  const [totalRow, nodeRows, atlas] = await Promise.all([
+    db.execute<{ n: number }>(
+      dsql`select count(*)::int as n from search_index
+            where embedding is not null and ${excluded}`,
+    ),
+    db.execute<{
+      id: string;
+      kind: string;
+      title: string;
+      href: string | null;
+      area_ref: string | null;
+      project_refs: unknown;
+    }>(dsql`
+      select id::text as id, kind,
+             coalesce(nullif(title, ''), '(untitled)') as title,
+             href, area_ref, project_refs
+        from search_index
+       where embedding is not null and ${excluded}
+       order by updated_at desc
+       limit ${NODE_LIMIT}
+    `),
+    readAtlas(),
+  ]);
   const total = Number([...totalRow][0]?.n ?? 0);
-
-  const nodeRows = await db.execute<{
-    id: string;
-    kind: string;
-    title: string;
-    href: string | null;
-    area_ref: string | null;
-    project_refs: unknown;
-  }>(dsql`
-    select id::text as id, kind,
-           coalesce(nullif(title, ''), '(untitled)') as title,
-           href, area_ref, project_refs
-      from search_index
-     where embedding is not null and ${excluded}
-     order by updated_at desc
-     limit ${NODE_LIMIT}
-  `);
   const rows = [...nodeRows];
-
-  const atlas = await readAtlas();
 
   const nodes: OrbitNode[] = rows.map((r) => {
     const refs = Array.isArray(r.project_refs) ? (r.project_refs as string[]) : [];

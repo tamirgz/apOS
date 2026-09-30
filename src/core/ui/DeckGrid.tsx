@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { Suspense, type ComponentType } from "react";
 import { WidgetFrame } from "./WidgetFrame";
 
 export type DeckWidget = {
@@ -32,6 +32,30 @@ function TierLabel({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * Each widget queries on its own; without a boundary apiece the whole deck
+ * waited for the slowest one. Now the frames paint at once and every widget
+ * streams in as soon as its own data is back.
+ */
+function WidgetPending() {
+  return (
+    <div className="flex animate-pulse flex-col gap-2 pt-1" aria-hidden>
+      <div className="h-3 w-3/4 rounded bg-ink/[0.06]" />
+      <div className="h-3 w-1/2 rounded bg-ink/[0.06]" />
+      <div className="h-3 w-2/3 rounded bg-ink/[0.06]" />
+    </div>
+  );
+}
+
+function StatPending() {
+  return (
+    <div className="flex animate-pulse flex-col gap-2 px-4 py-3" aria-hidden>
+      <div className="h-2.5 w-16 rounded bg-ink/[0.06]" />
+      <div className="h-5 w-10 rounded bg-ink/[0.06]" />
+    </div>
+  );
+}
+
+/**
  * The tiered widget grid (the home page's layout): Now → In motion → At a
  * glance. On large screens it is height-locked to the viewport (minus the top
  * bar) and the tiers flex to fill it, so everything fits on one screen; cards
@@ -55,7 +79,9 @@ export function DeckGrid({ widgets }: { widgets: DeckWidget[] }) {
         href={w.href ?? `/m/${w.moduleId}`}
         className={extra}
       >
-        <Widget />
+        <Suspense fallback={<WidgetPending />}>
+          <Widget />
+        </Suspense>
       </WidgetFrame>
     );
   };
@@ -94,7 +120,11 @@ export function DeckGrid({ widgets }: { widgets: DeckWidget[] }) {
           <div className="glass grid grid-cols-2 divide-x divide-y divide-white/5 overflow-hidden rounded-(--radius-panel) sm:grid-cols-4 sm:divide-y-0">
             {tier3.map((w) => {
               const Stat = w.stat ?? w.component;
-              return <Stat key={`${w.moduleId}:${w.id}`} />;
+              return (
+                <Suspense key={`${w.moduleId}:${w.id}`} fallback={<StatPending />}>
+                  <Stat />
+                </Suspense>
+              );
             })}
           </div>
         </section>

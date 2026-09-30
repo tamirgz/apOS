@@ -5,7 +5,7 @@
  *
  * Worker-safe: no "use server", no revalidatePath, db passed in.
  */
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "@/core/db/client";
 import { features, projects } from "@/modules/projects/schema";
 import {
@@ -507,19 +507,33 @@ export async function getWorkItem(db: Db, id: string) {
 
 export async function listWorkItems(
   db: Db,
-  opts: { projectId?: string; statuses?: TaskStatus[]; limit?: number } = {},
+  opts: {
+    projectId?: string;
+    statuses?: TaskStatus[];
+    limit?: number;
+    /** false: leave out descriptions (null) — most of the table's bytes, and a
+     *  list view never shows them. */
+    notes?: boolean;
+  } = {},
 ): Promise<WorkItem[]> {
   const where = [
     opts.projectId ? eq(tasks.projectRef, `projects:${opts.projectId}`) : undefined,
     opts.statuses?.length ? inArray(tasks.status, opts.statuses) : undefined,
   ].filter((w) => w !== undefined);
-  const rows = await db
-    .select()
-    .from(tasks)
-    .where(where.length ? and(...where) : undefined)
-    .orderBy(asc(tasks.sortOrder), desc(tasks.createdAt))
-    .limit(opts.limit ?? 2000);
-  return withIdentifiers(db, rows);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped from the select on purpose
+  const { notes: _notes, ...lean } = getTableColumns(tasks);
+  // The key lookup doesn't depend on the rows, so both go in one round trip.
+  const [rows, keys] = await Promise.all([
+    (opts.notes === false
+      ? db.select(lean).from(tasks).$dynamic()
+      : db.select().from(tasks).$dynamic()
+    )
+      .where(where.length ? and(...where) : undefined)
+      .orderBy(asc(tasks.sortOrder), desc(tasks.createdAt))
+      .limit(opts.limit ?? 2000),
+    projectKeyMap(db),
+  ]);
+  return rows.map((t) => ({ notes: null, ...t, identifier: identifierOf(t, keys) }));
 }
 
 // ── maintenance ────────────────────────────────────────────────────────────

@@ -35,9 +35,14 @@ export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
   // Three queries total regardless of agent count (was one per agent).
   const [all, latest, gateRows] = await Promise.all([
     db.select().from(agents).orderBy(desc(agents.createdAt)),
+    // The list shows only the latest run's status and timing — leave out the
+    // transcript and result, which made this the Agents page's slowest read.
     db.execute<AgentRun & { agent_id: string }>(
-      dsql`select distinct on (agent_id) * from agent_runs
-           order by agent_id, created_at desc`,
+      dsql`select distinct on (agent_id)
+                  id, agent_id, status, trigger, started_at, finished_at, heartbeat_at,
+                  error, tokens_in, tokens_out, created_at
+             from agent_runs
+            order by agent_id, created_at desc`,
     ),
     // Latest gate verdict per agent — read from the audit trail (the single
     // source of truth for agent decisions).
@@ -67,8 +72,9 @@ export async function listAgentsWithLatestRun(): Promise<AgentWithLatestRun[]> {
         startedAt: (r as unknown as { started_at: Date | null }).started_at,
         finishedAt: (r as unknown as { finished_at: Date | null }).finished_at,
         heartbeatAt: (r as unknown as { heartbeat_at: Date | null }).heartbeat_at,
-        transcript: r.transcript,
-        result: r.result,
+        transcript: [],
+        result: null,
+        flowNodeRunId: null,
         error: r.error,
         tokensIn: (r as unknown as { tokens_in: number }).tokens_in,
         tokensOut: (r as unknown as { tokens_out: number }).tokens_out,
@@ -302,9 +308,17 @@ export async function listRuns(agentId: string, limit = 20) {
 }
 
 export async function listRecentRunsAcrossAgents(limit = 5) {
+  // Status and a line of text per run — not the transcripts, which made this
+  // the home page's slowest widget.
   return db
     .select({
-      run: agentRuns,
+      run: {
+        id: agentRuns.id,
+        agentId: agentRuns.agentId,
+        status: agentRuns.status,
+        result: dsql<string | null>`left(${agentRuns.result}, 60)`,
+        error: dsql<string | null>`left(${agentRuns.error}, 60)`,
+      },
       agentName: dsql<string>`(select ${agents.name} from ${agents} where ${agents.id} = ${agentRuns.agentId})`,
     })
     .from(agentRuns)

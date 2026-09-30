@@ -7,7 +7,7 @@
 export default function Loading() {
   return (
     <div className="flex animate-pulse flex-col gap-4">
-      <div className="h-7 w-44 rounded-lg bg-white/4" />
+      <div className="h-7 w-44 rounded-lg bg-ink/[0.04]" />
       <div className="glass h-28 rounded-2xl" />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="glass h-44 rounded-2xl" />

@@ -7,6 +7,15 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "20mb",
     },
+    // Client router cache. Module pages are dynamic, so by default every click
+    // — even back to a page seen seconds ago — waited on a full server render.
+    // Keep a visited or hover-prefetched page for 30s: saves already clear it
+    // (revalidatePath), and useLiveEvents refreshes the page you're on, so the
+    // only staleness is background change on a page you aren't looking at.
+    staleTimes: {
+      dynamic: 30,
+      static: 30,
+    },
   },
   // Home = Today. A plain 307 before anything renders: the old in-page
   // `redirect()` streamed the shell's loading fallback first, and Next's router

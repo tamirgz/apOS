@@ -30,20 +30,28 @@ export async function embedText(text: string): Promise<number[]> {
   // Serialized through the local-inference queue so the embed sweep doesn't
   // contend with (and get evicted by) a big chat model on the same machine.
   return withLocalSlot(async () => {
-    const res = await fetch(`${OLLAMA_BASE}/api/embeddings`, {
+    // /api/embed, not the legacy /api/embeddings: the legacy route answers 500
+    // "input length exceeds the context length" for anything past the model's
+    // window (nomic: 2048 tokens — ~3k chars of Hebrew or code), so long rows
+    // never embedded. /api/embed truncates to the window. Its vectors are
+    // L2-normalised but point the same way (cosine 1.0 vs the legacy route),
+    // and every query here uses cosine `<=>`, so stored vectors stay valid.
+    const res = await fetch(`${OLLAMA_BASE}/api/embed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, prompt: text.slice(0, 8000) }),
+      body: JSON.stringify({ model, input: text.slice(0, 8000), truncate: true }),
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) {
-      throw new Error(`ollama embeddings (${model}) → ${res.status}`);
+      const detail = (await res.text().catch(() => "")).slice(0, 160);
+      throw new Error(`ollama embeddings (${model}) → ${res.status}${detail ? ` ${detail}` : ""}`);
     }
-    const data = (await res.json()) as { embedding?: number[] };
-    if (!data.embedding?.length) {
+    const data = (await res.json()) as { embeddings?: number[][] };
+    const embedding = data.embeddings?.[0];
+    if (!embedding?.length) {
       throw new Error(`model "${model}" returned no embedding — is it an embedding model?`);
     }
-    return data.embedding;
+    return embedding;
   });
 }
 

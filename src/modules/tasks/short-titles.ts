@@ -11,6 +11,7 @@
 import { gt, sql as dsql } from "drizzle-orm";
 import type { db as Db } from "@/core/db/client";
 import { withLocalSlot } from "@/core/ai/local-queue";
+import { withTrackedCall } from "@/core/ai/model-track";
 import { tasks } from "./schema";
 import { plainTitle, titleHash } from "./states";
 
@@ -49,6 +50,7 @@ async function modelShorten(plain: string, budget: number): Promise<string | nul
   // Native /api/chat so thinking can be switched off (qwen3 otherwise reasons
   // for 10–20s on a one-line rewrite).
   const res = await withLocalSlot(() =>
+    withTrackedCall("ollama", MODEL, { source: "job", label: "short titles" }, () =>
     fetch(`${OLLAMA_BASE}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -63,7 +65,7 @@ async function modelShorten(plain: string, budget: number): Promise<string | nul
         options: { temperature: 0 },
       }),
       signal: AbortSignal.timeout(60_000),
-    }),
+    })),
   );
   if (!res.ok) throw new Error(`short-title model → HTTP ${res.status}`);
   const data = (await res.json()) as { message?: { content?: string } };

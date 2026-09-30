@@ -545,6 +545,12 @@ async function main() {
     })();
   }, HEARTBEAT_MS).unref();
 
+  // A restart mid-call leaves the previous process's model-call rows behind;
+  // clear them now so the queue doesn't show them as live (or as contenders).
+  import("@/core/ai/model-track")
+    .then((m) => m.sweepStaleModelCalls())
+    .catch((e) => log(`boot model-call sweep failed: ${e}`));
+
   // Periodic safety net: orphan sweep + schedule resync + stale queued
   // pick-up every 5 minutes.
   new Cron("*/5 * * * *", () => {

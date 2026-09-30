@@ -11,7 +11,8 @@
  * Tool sub-calls (agent.subtask, gates) pass their OWN track, so they appear as
  * their own rows — nested work stays visible.
  */
-import { and, eq, lt, or } from "drizzle-orm";
+import { hostname } from "node:os";
+import { and, eq, isNotNull, lt, or } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
 import { modelCalls } from "@/core/db/schema/model-calls";
 import type { AIEvent, ModelTrack } from "./provider";
@@ -25,6 +26,20 @@ export const GENERATION_STALE_MS = 30 * 60_000;
 /** How long the coalesced embedding heartbeat counts as "active" after the last
  *  embed. */
 export const EMBED_FRESH_MS = 30_000;
+
+/** This process, as recorded on the rows it opens. */
+const OWNER = `${hostname()}:${process.pid}`;
+
+/** Is a process on this host still running? (signal 0 = existence check) */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // EPERM: it exists but belongs to someone else — still alive.
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
 
 async function notify() {
   try {
@@ -52,6 +67,7 @@ async function openCall(
         source: track?.source ?? "unknown",
         parentKind: track?.parentKind ?? null,
         parentId: track?.parentId ?? null,
+        owner: OWNER,
       })
       .returning({ id: modelCalls.id });
     void notify();
@@ -121,6 +137,22 @@ export async function embeddingHeartbeat(model: string): Promise<void> {
   }
 }
 
+/** Record a direct (non-provider) model call — e.g. a raw Ollama fetch — in the
+ *  queue for exactly its duration, like a provider run. */
+export async function withTrackedCall<T>(
+  provider: string,
+  model: string,
+  track: ModelTrack,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const id = await openCall(provider, model, track);
+  try {
+    return await fn();
+  } finally {
+    await closeCall(id);
+  }
+}
+
 /** Remove orphaned rows: crashed-process generation rows and a stale embedding
  *  heartbeat. Called periodically by the worker. */
 export async function sweepStaleModelCalls(): Promise<number> {
@@ -136,8 +168,22 @@ export async function sweepStaleModelCalls(): Promise<number> {
         ),
       )
       .returning({ id: modelCalls.id });
-    if (gone.length) void notify();
-    return gone.length;
+    // Rows whose process on this host has exited (a deploy/restart mid-call)
+    // are dead now — don't wait out the 30-minute cutoff.
+    const host = hostname();
+    const owned = await db
+      .select({ id: modelCalls.id, owner: modelCalls.owner })
+      .from(modelCalls)
+      .where(and(eq(modelCalls.kind, "generation"), isNotNull(modelCalls.owner)));
+    const dead = owned.filter((r) => {
+      const i = r.owner!.lastIndexOf(":");
+      const pid = Number(r.owner!.slice(i + 1));
+      return r.owner!.slice(0, i) === host && Number.isInteger(pid) && !alive(pid);
+    });
+    for (const r of dead) await db.delete(modelCalls).where(eq(modelCalls.id, r.id));
+    const total = gone.length + dead.length;
+    if (total) void notify();
+    return total;
   } catch {
     return 0;
   }

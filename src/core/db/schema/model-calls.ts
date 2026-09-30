@@ -34,6 +34,10 @@ export const modelCalls = pgTable(
      *  queue suppresses this row in favor of the richer parent row. */
     parentKind: text("parent_kind"),
     parentId: text("parent_id"),
+    /** "<host>:<pid>" of the process making the call — lets a sweep drop a
+     *  row the moment its process is gone (a restart mid-call), instead of
+     *  counting it as live until the staleness cutoff. */
+    owner: text("owner"),
     startedAt: timestamp("started_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -49,8 +49,10 @@ export function TopBar() {
   };
   const title = mod?.title ?? CORE_TITLES[pathname] ?? "apOS";
 
+  // On a phone the fixed menu button sits over this row — clear it here, not
+  // with a gutter down the whole page.
   return (
-    <header className="mb-4 flex items-center justify-between gap-2">
+    <header className="mb-4 flex items-center justify-between gap-2 max-md:pl-11">
       <div className="flex min-w-0 items-baseline gap-3">
         <h1 className="truncate font-display text-xl font-semibold tracking-wide text-ink">
           {title}

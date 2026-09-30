@@ -118,7 +118,7 @@ export async function listNeedsYou(): Promise<NeedsYouItem[]> {
       body: JSON.stringify(p.input).slice(0, 200),
       source: `agent:${p.agentName}`,
       urgency: 30, // approvals block an agent — surface high
-      href: "/m/agents",
+      href: `/m/agents#approval-${p.id}`,
       createdAt: p.createdAt,
     })),
     ...wbTasks.map((w) => ({

@@ -102,7 +102,14 @@ function ProjectCard({
         {project.nextAction ? (
           <p className="mt-2 flex items-start gap-1.5 text-sm leading-snug text-ink-dim">
             <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-solar" />
-            <span className="line-clamp-2">{project.nextAction}</span>
+            <span className="line-clamp-2">
+              {project.nextActionSource === "advisor" && (
+                <span className="mr-1.5 rounded border border-ion/30 px-1 py-px align-[1px] font-mono text-[10px] uppercase tracking-wider text-ion">
+                  advisor
+                </span>
+              )}
+              {project.nextAction}
+            </span>
           </p>
         ) : project.description ? (
           <p className="mt-1.5 line-clamp-2 text-sm leading-snug text-ink-dim">

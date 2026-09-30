@@ -94,6 +94,7 @@ export const projectTools: AiToolDef[] = [
         status: p.status,
         goal: p.goal,
         nextAction: p.nextAction,
+        nextActionSource: p.nextActionSource,
         health: p.resolvedHealth.health,
         healthReason: p.resolvedHealth.reason,
         healthSource: p.resolvedHealth.source,
@@ -218,7 +219,7 @@ export const projectTools: AiToolDef[] = [
       // Attach the focused project's tasks so the model has real evidence
       // (titles, priority, due dates) without ever handling a project id. Open
       // tasks feed the derived next-action; the recently-completed ones let the
-      // pulse write an "[Advise] …" next step when nothing is open.
+      // pulse suggest a next step when nothing is open.
       const all = await getProjectTasks(it.id, ctx.db);
       const openTasks = all
         .filter((t) => !isClosed(t.status))

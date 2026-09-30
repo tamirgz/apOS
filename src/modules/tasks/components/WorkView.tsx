@@ -260,7 +260,13 @@ function Card({
           </span>
         )}
       </div>
-      <p dir="auto" className={cn("text-sm leading-snug", closed(item.status) ? "text-ink-faint line-through" : "text-ink-dim group-hover:text-ink")}>
+      {/* Two lines max — imported titles run to paragraphs; the full text is
+          in the drawer and the tooltip. */}
+      <p
+        dir="auto"
+        title={plainTitle(item.title)}
+        className={cn("line-clamp-2 text-sm leading-snug", closed(item.status) ? "text-ink-faint line-through" : "text-ink-dim group-hover:text-ink")}
+      >
         {plainTitle(item.title)}
       </p>
       {(item.labels.length > 0 || item.dueAt || subCount || blocked || delegated) && (
@@ -298,6 +304,17 @@ function Board({
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<TaskStatus | null>(null);
   const [olderDone, setOlderDone] = useState(false);
+  // Done is folded to a slim rail by default — finished work shouldn't take a
+  // fifth of the board. Remembered per browser.
+  const [doneOpen, setDoneOpen] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- restore the remembered choice after hydration (localStorage is client-only)
+  useEffect(() => setDoneOpen(readPref("work.board.done", "closed", ["open", "closed"]) === "open"), []);
+  const toggleDone = () => {
+    setDoneOpen((o) => {
+      writePref("work.board.done", o ? "closed" : "open");
+      return !o;
+    });
+  };
   // Big projects (an imported backlog runs to hundreds) would render every card: cap each column.
   const [limit, setLimit] = useState<Partial<Record<TaskStatus, number>>>({});
   const now = useNow();
@@ -348,6 +365,22 @@ function Board({
       {columns.map(({ status, col, hidden, cap }) => {
         const meta = STATUS_META[status];
         const active = overCol === status && !!dragId;
+        if (status === "done" && !doneOpen && !dragId) {
+          return (
+            <button
+              key={status}
+              type="button"
+              onClick={toggleDone}
+              title="Show the Done column"
+              className="flex w-10 shrink-0 flex-col items-center gap-3 rounded-2xl py-3 text-ink-faint transition hover:bg-white/4 hover:text-ink-dim"
+            >
+              <span className="size-2 rounded-full" style={{ background: meta.color }} />
+              <span className="font-display text-xs font-medium uppercase tracking-[0.2em] [writing-mode:vertical-rl]">
+                {meta.label} · {col.length + hidden}
+              </span>
+            </button>
+          );
+        }
         return (
           <section
             key={status}
@@ -375,6 +408,16 @@ function Board({
               <span className="size-2 rounded-full" style={{ background: meta.color }} />
               <h2 className="font-display text-xs font-medium uppercase tracking-[0.2em] text-ink-dim">{meta.label}</h2>
               <span className="ml-auto font-mono text-xs tabular-nums text-ink-faint">{col.length + hidden}</span>
+              {status === "done" && (
+                <button
+                  type="button"
+                  onClick={toggleDone}
+                  title="Fold the Done column"
+                  className="rounded px-1 font-mono text-xs text-ink-faint transition hover:bg-white/6 hover:text-ink"
+                >
+                  ‹
+                </button>
+              )}
             </header>
             {col.length === 0 && (
               <div className={cn("rounded-xl border border-dashed py-6 text-center font-mono text-[10px] uppercase tracking-widest", active ? "border-white/20 text-ink-dim" : "border-white/6 text-ink-faint")}>

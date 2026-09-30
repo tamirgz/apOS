@@ -53,10 +53,10 @@ export async function createFlowFromTemplate(templateId: string): Promise<string
 }
 
 /** Import a flow from exported JSON. Validates + sanitizes the graph shape. */
-export async function importFlow(payload: unknown): Promise<string> {
+export async function importFlow(payload: unknown): Promise<string | { ok: false; error: string }> {
   const p = payload as { name?: unknown; description?: unknown; graph?: unknown } | null;
   const graph = sanitizeFlowGraph(p?.graph);
-  if (!graph) throw new Error("not a valid flow file (missing nodes/edges)");
+  if (!graph) return { ok: false, error: "not a valid flow file (missing nodes/edges)" };
   const name = typeof p?.name === "string" && p.name.trim() ? p.name.trim() : "Imported flow";
   const description = typeof p?.description === "string" ? p.description : null;
   const [row] = await db.insert(flows).values({ name, description, graph }).returning();
@@ -126,19 +126,22 @@ export async function runFlowNow(id: string): Promise<void> {
 
 /** Set how a flow fires. A schedule cron is validated before it's stored, so a
  *  bad pattern never reaches the worker. NOTIFYs the worker to (re)sync crons. */
-export async function setFlowTrigger(id: string, trigger: FlowTrigger): Promise<void> {
+export async function setFlowTrigger(
+  id: string,
+  trigger: FlowTrigger,
+): Promise<{ ok: false; error: string } | undefined> {
   if (trigger.kind === "schedule") {
-    if (!trigger.cron?.trim()) throw new Error("a schedule needs a cron pattern");
+    if (!trigger.cron?.trim()) return { ok: false, error: "a schedule needs a cron pattern" };
     try {
       new Cron(trigger.cron).stop();
     } catch {
-      throw new Error(`invalid cron pattern: "${trigger.cron}"`);
+      return { ok: false, error: `invalid cron pattern: "${trigger.cron}"` };
     }
   }
   if (trigger.kind === "event") {
     // A LISTEN channel name — same charset Postgres identifiers allow.
     if (!/^[a-z_][a-z0-9_]*$/i.test(trigger.channel ?? "")) {
-      throw new Error(`invalid event channel: "${trigger.channel}"`);
+      return { ok: false, error: `invalid event channel: "${trigger.channel}"` };
     }
   }
   await db.update(flows).set({ trigger, updatedAt: new Date() }).where(eq(flows.id, id));

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { THEMES, type ThemeDef } from "@/core/theme";
 import { saveTheme } from "../actions";
 
@@ -18,10 +19,16 @@ export function ThemePicker({ current }: { current: string }) {
   const [pending, start] = useTransition();
 
   const pick = (t: ThemeDef) => {
+    const prev = THEMES.find((x) => x.id === selected);
     setSelected(t.id);
     applyTheme(t); // instant
     start(async () => {
-      await saveTheme(t.id); // persist (SSR uses it next load)
+      // persist (SSR uses it next load); on failure, put the old look back
+      const r = await act(() => saveTheme(t.id), { failed: "Couldn't save the theme" });
+      if (!r.ok && prev) {
+        setSelected(prev.id);
+        applyTheme(prev);
+      }
     });
   };
 

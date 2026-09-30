@@ -109,9 +109,10 @@ export async function addTaskComment(id: string, body: string) {
 /** Relate this item to another, typed as an identifier ("GL-4"). */
 export async function relateTask(id: string, side: RelationSide, identifier: string) {
   const other = await findByIdentifier(db, identifier);
-  if (!other) throw new Error(`No work item ${identifier.trim().toUpperCase()}`);
+  if (!other) return { ok: false as const, error: `No work item ${identifier.trim().toUpperCase()}` };
   await addRelation(db, id, side, other.id, "user");
   revalidateWork();
+  return { ok: true as const };
 }
 
 export async function unrelateTask(relationId: string) {
@@ -196,12 +197,13 @@ export async function startPlaneImport(mode: "preview" | "import", projectIds?: 
   // A run that stopped reporting for 10 minutes is dead (worker restart) — allow a new one.
   const lastBeat = new Date(status?.updatedAt ?? status?.startedAt ?? 0).getTime();
   const stale = status?.state === "running" && Date.now() - lastBeat > 10 * 60_000;
-  if (status?.state === "running" && !stale) throw new Error("A Plane import is already running");
+  if (status?.state === "running" && !stale) return { ok: false as const, error: "A Plane import is already running" };
   recordUsage(`work.plane.${mode}`);
   const now = new Date().toISOString();
   const queued: PlaneImportStatus = { state: "running", mode, startedAt: now, updatedAt: now, step: "queued for the worker", log: [] };
   await setSetting(PLANE_STATUS_KEY, JSON.stringify(queued));
   await sql.notify("plane_import", JSON.stringify({ mode, projectIds }));
+  return { ok: true as const };
 }
 
 // ── saved views ────────────────────────────────────────────────────────────
@@ -209,7 +211,7 @@ export async function startPlaneImport(mode: "preview" | "import", projectIds?: 
 /** Save the current filters as a named view (on a project page, or on all work when projectId is null). */
 export async function saveWorkView(projectId: string | null, name: string, filters: WorkViewFilters) {
   const clean = name.trim().slice(0, 60);
-  if (!clean) throw new Error("A view needs a name");
+  if (!clean) return { ok: false as const, error: "A view needs a name" };
   const kept = Object.fromEntries(Object.entries(filters).filter(([, v]) => typeof v === "string" && v)) as WorkViewFilters;
   const [row] = await db.insert(workViews).values({ projectId, name: clean, filters: kept }).returning();
   revalidateWork(projectId ? `projects:${projectId}` : null);

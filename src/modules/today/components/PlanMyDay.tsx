@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { CalendarClock, CalendarPlus, Sparkles, Video } from "lucide-react";
+import { act } from "@/core/ui/feedback";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import type { AgendaItem } from "@/modules/calendar/agenda";
 import { scheduleBlock } from "../actions";
@@ -38,7 +39,10 @@ function ScheduleButton({
       disabled={pending}
       onClick={() =>
         start(async () => {
-          await scheduleBlock({ title, startAt: nextHour(), minutes: 60 });
+          const r = await act(() => scheduleBlock({ title, startAt: nextHour(), minutes: 60 }), {
+            failed: "Couldn't schedule the block",
+          });
+          if (!r.ok) return;
           onDone?.();
         })
       }

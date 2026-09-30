@@ -1,6 +1,6 @@
 "use client";
 
-import { done, errorText } from "@/core/ui/feedback";
+import { act, done, errorText, resultError } from "@/core/ui/feedback";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -214,7 +214,8 @@ export function AgentDetail({
           onClick={() => {
             if (!confirmDelete) return setConfirmDelete(true);
             startTransition(async () => {
-              await deleteAgent(agent.id);
+              const r = await act(() => deleteAgent(agent.id), { failed: "Couldn't delete the agent" });
+              if (!r.ok) return;
               router.push("/m/agents");
             });
           }}
@@ -446,7 +447,7 @@ export function AgentDetail({
           onClick={() =>
             startTransition(async () => {
               try {
-                await updateAgent(agent.id, {
+                const r = await updateAgent(agent.id, {
                   name,
                   description: description || null,
                   prompt,
@@ -458,6 +459,9 @@ export function AgentDetail({
                   fallbackModel: showFallback ? fallbackModel || null : null,
                   turnBudget: turnBudget.trim() ? Number(turnBudget) : null,
                 });
+                // A bad cron comes back as a result, not a throw.
+                const err = resultError(r);
+                if (err) return setScheduleError(err);
                 setScheduleError(null);
                 done("Agent saved");
               } catch (e) {

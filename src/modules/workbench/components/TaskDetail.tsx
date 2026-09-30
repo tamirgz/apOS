@@ -282,7 +282,8 @@ export function TaskDetailView({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && titleDraft.trim()) {
                     start(async () => {
-                      await updateTaskTitle(task.id, titleDraft);
+                      const r = await act(() => updateTaskTitle(task.id, titleDraft), { failed: "Couldn't rename the task" });
+                      if (!r.ok) return;
                       setEditingTitle(false);
                       router.refresh();
                     });
@@ -299,7 +300,8 @@ export function TaskDetailView({
                 disabled={pending || !titleDraft.trim()}
                 onClick={() =>
                   start(async () => {
-                    await updateTaskTitle(task.id, titleDraft);
+                    const r = await act(() => updateTaskTitle(task.id, titleDraft), { failed: "Couldn't rename the task" });
+                    if (!r.ok) return;
                     setEditingTitle(false);
                     router.refresh();
                   })
@@ -375,7 +377,7 @@ export function TaskDetailView({
               options={projectOptions}
               value={task.projectRefs ?? []}
               onChange={async (refs) => {
-                await setTaskProjects(task.id, refs);
+                await act(() => setTaskProjects(task.id, refs), { failed: "Couldn't change the task's projects" });
                 router.refresh();
               }}
             />
@@ -387,7 +389,7 @@ export function TaskDetailView({
             <button
               type="button"
               disabled={pending}
-              onClick={() => start(async () => void (await cancelTask(task.id)))}
+              onClick={() => start(async () => void (await act(() => cancelTask(task.id), { failed: "Couldn't stop the task" })))}
               className="flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:border-flare/30 hover:text-flare disabled:opacity-40"
             >
               <Square className="size-3" />
@@ -398,7 +400,7 @@ export function TaskDetailView({
             <button
               type="button"
               disabled={pending}
-              onClick={() => start(async () => void (await retryTask(task.id)))}
+              onClick={() => start(async () => void (await act(() => retryTask(task.id), { failed: "Couldn't retry the task" })))}
               className="flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:border-ion/30 hover:text-ion disabled:opacity-40"
             >
               <RotateCw className="size-3" />
@@ -412,7 +414,7 @@ export function TaskDetailView({
             <button
               type="button"
               disabled={pending}
-              onClick={() => start(async () => void (await acceptTask(task.id)))}
+              onClick={() => start(async () => void (await act(() => acceptTask(task.id), { failed: "Couldn't accept the task" })))}
               title="Mark reviewed and close this out (done)"
               className="flex items-center gap-1.5 rounded-lg bg-plasma/15 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-plasma transition hover:bg-plasma/25 disabled:opacity-40"
             >
@@ -464,7 +466,7 @@ export function TaskDetailView({
                 disabled={pending}
                 onClick={() =>
                   start(async () => {
-                    await unarchiveTask(task.id);
+                    await act(() => unarchiveTask(task.id), { failed: "Couldn't restore the task" });
                   })
                 }
                 className="flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:border-ion/30 hover:text-ion disabled:opacity-40"
@@ -503,7 +505,8 @@ export function TaskDetailView({
               disabled={pending}
               onClick={() =>
                 start(async () => {
-                  await archiveTask(task.id);
+                  const r = await act(() => archiveTask(task.id), { failed: "Couldn't archive the task" });
+                  if (!r.ok) return;
                   // The card is hidden from the board now — don't strand the
                   // user on a page for something they can no longer find.
                   router.push("/m/workbench");
@@ -575,7 +578,8 @@ export function TaskDetailView({
                   disabled={pending || !askDraft.trim()}
                   onClick={() =>
                     start(async () => {
-                      await updateTaskPrompt(task.id, askDraft);
+                      const r = await act(() => updateTaskPrompt(task.id, askDraft), { failed: "Couldn't save the request" });
+                      if (!r.ok) return;
                       setEditingAsk(false);
                     })
                   }
@@ -608,7 +612,7 @@ export function TaskDetailView({
             <button
               type="button"
               disabled={pending}
-              onClick={() => start(async () => void (await retryTask(task.id)))}
+              onClick={() => start(async () => void (await act(() => retryTask(task.id), { failed: "Couldn't retry the task" })))}
               title="Run the delegation again with the current request"
               className="mt-3 flex items-center gap-1.5 rounded-lg border border-ion/25 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ion transition hover:bg-ion/10 disabled:opacity-40"
             >

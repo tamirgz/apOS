@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, X } from "lucide-react";
+import { act } from "@/core/ui/feedback";
 import { doneAttention, dismissAttention } from "@/modules/today/actions";
 
 interface Item {
@@ -26,7 +27,7 @@ export function ProjectAttention({ items }: { items: Item[] }) {
 
   const resolve = (fn: (id: string) => Promise<void>, id: string) =>
     start(async () => {
-      await fn(id);
+      await act(() => fn(id), { failed: "Couldn't resolve the card" });
       router.refresh();
     });
 

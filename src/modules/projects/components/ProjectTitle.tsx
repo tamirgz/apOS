@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Check, Pencil, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { updateProject } from "../actions";
 
 /**
@@ -25,7 +26,10 @@ export function ProjectTitle({ id, name }: { id: string; name: string }) {
       return;
     }
     start(async () => {
-      await updateProject(id, { name: next });
+      if (!(await act(() => updateProject(id, { name: next }), { failed: "Couldn't rename the project" })).ok) {
+        setValue(name);
+        return;
+      }
       router.refresh(); // reflect the new name across this page + refs
     });
   };

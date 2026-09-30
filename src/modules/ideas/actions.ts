@@ -22,7 +22,7 @@ export async function createIdea(input: {
   notes?: string;
 }) {
   const title = input.title.trim();
-  if (!title) throw new Error("idea title required");
+  if (!title) return { ok: false as const, error: "An idea needs a title" };
   recordUsage("ideas.create");
   const [row] = await db
     .insert(ideas)

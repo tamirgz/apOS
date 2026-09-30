@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { BrainCircuit, Sparkles, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { categoryColor } from "@/modules/projects/components/categoryColor";
 import { captureKnowledge } from "../actions";
@@ -26,7 +27,9 @@ function CaptureBox() {
         if (!value || pending) return;
         setDup(null);
         startTransition(async () => {
-          const res = await captureKnowledge(value, noteRef.current?.value);
+          const r = await act(() => captureKnowledge(value, noteRef.current?.value), { failed: "Couldn't capture the item" });
+          if (!r.ok) return;
+          const res = r.value;
           if (res.duplicate) {
             // Already saved — surface the existing item, keep the input.
             setDup(res.item);

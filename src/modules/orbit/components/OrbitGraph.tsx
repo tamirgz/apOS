@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { errorText, failed } from "@/core/ui/feedback";
 import type { OrbitGraph as Graph, OrbitNode, OrbitRegion } from "../queries";
 
 // One colour per source kind — the legend and the stars share this map.
@@ -288,8 +289,9 @@ export function OrbitGraph({ data }: { data: Graph }) {
       const g = graphRef.current;
       const top = g?.graphData().nodes.find((n: GNode) => n.id === hits[0]?.id);
       if (g && top) flyTo(g, top);
-    } catch {
-      /* leave the current highlight as-is on failure */
+    } catch (e) {
+      // Leave the current highlight as-is on failure.
+      failed("Couldn't search the graph", errorText(e));
     } finally {
       setSearching(false);
     }

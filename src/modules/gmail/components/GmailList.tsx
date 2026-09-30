@@ -7,7 +7,7 @@ import { useState, useTransition } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ExternalLink, ListPlus, Mail, RefreshCw, Sparkles } from "lucide-react";
 import { cn } from "@/core/ui/cn";
-import { act } from "@/core/ui/feedback";
+import { act, errorText } from "@/core/ui/feedback";
 import { mailToWorkItem, resyncGmail } from "../actions";
 import type { GmailMessage } from "../schema";
 
@@ -157,9 +157,11 @@ function MailActions({ message: m }: { message: GmailMessage }) {
           onClick={() =>
             start(async () => {
               try {
-                setItemId((await mailToWorkItem(m.id)).id);
+                const r = await mailToWorkItem(m.id);
+                if ("error" in r) setError(r.error);
+                else setItemId(r.id);
               } catch (e) {
-                setError(e instanceof Error ? e.message : "failed");
+                setError(errorText(e));
               }
             })
           }

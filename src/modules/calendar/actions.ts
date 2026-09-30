@@ -41,10 +41,12 @@ export async function updateEvent(
     notes?: string | null;
   },
 ) {
+  // Validation failures are returned, not thrown — production redacts a
+  // thrown message, and these are the user's to fix.
   const title = patch.title.trim();
-  if (!title) throw new Error("event title required");
+  if (!title) return { ok: false as const, error: "event title required" };
   if (patch.endAt && patch.endAt < patch.startAt) {
-    throw new Error("event can't end before it starts");
+    return { ok: false as const, error: "event can't end before it starts" };
   }
   // Only apOS-local events are editable — google/ics rows are overwritten by
   // the next sync, so an edit there would silently vanish. The WHERE enforces
@@ -63,10 +65,11 @@ export async function updateEvent(
     })
     .where(and(eq(calendarEvents.id, id), eq(calendarEvents.source, "local")))
     .returning({ id: calendarEvents.id });
-  if (!row) throw new Error("only apOS-created events can be edited here");
+  if (!row) return { ok: false as const, error: "only apOS-created events can be edited here" };
   await sql.notify("calendar_changed", id);
   revalidatePath("/m/calendar");
   revalidatePath("/");
+  return { ok: true as const };
 }
 
 export async function deleteEvent(id: string) {

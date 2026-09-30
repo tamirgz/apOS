@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Cpu, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
+import { act } from "@/core/ui/feedback";
 import { requestFreeModelVerify, updateExecutor } from "../actions";
 import type { FreeModelHealthSummary } from "../model-health";
 
@@ -43,7 +44,9 @@ function VerifyFreeModels({
 
   const start = () => {
     setRunning(true);
-    void requestFreeModelVerify(true);
+    void act(() => requestFreeModelVerify(true), { failed: "Couldn't start the free-model check" }).then((r) => {
+      if (!r.ok) setRunning(false);
+    });
     // Safety valve so the button never sticks if no event arrives.
     setTimeout(() => setRunning(false), 180_000);
   };
@@ -191,11 +194,12 @@ export function ExecutorsPanel({
                   disabled={pending}
                   onClick={() =>
                     start(async () => {
-                      await updateExecutor(x.id, {
+                      const r = await act(() => updateExecutor(x.id, {
                         defaultModel: d.defaultModel ?? null,
                         commandTemplate: d.commandTemplate ?? null,
                         enabled: d.enabled ?? "true",
-                      });
+                      }), { failed: "Couldn't save the executor" });
+                      if (!r.ok) return;
                       setDraft((s) => {
                         const n = { ...s };
                         delete n[x.id];

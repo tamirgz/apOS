@@ -7,6 +7,7 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import { ArrowRight, ChevronDown, Compass, FolderPlus, GripVertical } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { createProject, setProjectCategoryOrder } from "../actions";
 import type { ProjectCockpit } from "../queries";
 import { HealthChip } from "./HealthChip";
@@ -23,7 +24,7 @@ function NewProjectForm() {
     const name = inputRef.current?.value.trim();
     if (!name) return;
     startTransition(async () => {
-      await createProject({ name });
+      if (!(await act(() => createProject({ name }), { failed: "Couldn't create the project" })).ok) return;
       if (inputRef.current) inputRef.current.value = "";
     });
   };
@@ -269,8 +270,12 @@ export function ProjectGrid({
   const display = reconcileOrder(liveNames, order);
 
   const handleReorder = (next: string[]) => {
+    const prev = order;
     setOrder(next);
-    startSave(() => setProjectCategoryOrder(next));
+    startSave(async () => {
+      const r = await act(() => setProjectCategoryOrder(next), { failed: "Couldn't save the category order" });
+      if (!r.ok) setOrder(prev);
+    });
   };
 
   return (

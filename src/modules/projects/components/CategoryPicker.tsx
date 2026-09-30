@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Tag, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { categoryColor } from "./categoryColor";
 
 export function CategoryPicker({
@@ -23,7 +24,9 @@ export function CategoryPicker({
   const set = (value: string | null) => {
     setOpen(false);
     setDraft("");
-    start(() => onSet(id, value));
+    start(async () => {
+      await act(() => onSet(id, value), { failed: "Couldn't set the category" });
+    });
   };
 
   const suggestions = categories.filter((c) => c !== category);

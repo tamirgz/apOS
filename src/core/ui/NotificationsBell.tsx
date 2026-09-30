@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Bell, CheckCheck } from "lucide-react";
 import type { Notification } from "@/core/db/schema/notifications";
 import { cn } from "./cn";
+import { act } from "./feedback";
 import { useLiveEvents } from "./useLiveEvents";
 import {
   listNotifications,
@@ -81,7 +82,7 @@ export function NotificationsBell() {
                 <button
                   type="button"
                   onClick={() => {
-                    markAllNotificationsRead().then(refresh);
+                    void act(markAllNotificationsRead, { failed: "Couldn't mark the notifications read" }).then(refresh);
                   }}
                   className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-plasma transition hover:text-ink"
                 >

@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, Loader2 } from "lucide-react";
+import { act } from "@/core/ui/feedback";
 import { createInvestmentReport } from "../report";
 
 /** Spawns a deep investment report as a Workbench task and opens it. */
@@ -15,8 +16,9 @@ export function ReportButton() {
       disabled={pending}
       onClick={() =>
         start(async () => {
-          const { id } = await createInvestmentReport();
-          router.push(`/m/workbench/${id}`);
+          const r = await act(createInvestmentReport, { failed: "Couldn't start the investment report" });
+          if (!r.ok) return;
+          router.push(`/m/workbench/${r.value.id}`);
         })
       }
       title="Generate a thorough, structured investment report as a background run"

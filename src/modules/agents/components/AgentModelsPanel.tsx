@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check, Clock } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useProviderModels } from "@/core/ui/useProviderModels";
 import {
   AI_PROVIDERS,
@@ -98,10 +99,15 @@ function AgentRow({ agent }: { agent: AgentModelRow }) {
         disabled={!dirty || pending || (!!provider && !model)}
         onClick={() =>
           start(async () => {
-            await updateAgent(agent.id, {
-              provider: (provider || null) as AIProviderId | null,
-              model: model || null,
-            });
+            const r = await act(
+              () =>
+                updateAgent(agent.id, {
+                  provider: (provider || null) as AIProviderId | null,
+                  model: model || null,
+                }),
+              { failed: "Couldn't save the agent's model" },
+            );
+            if (!r.ok) return;
             setSaved(true);
             setTimeout(() => setSaved(false), 1600);
           })

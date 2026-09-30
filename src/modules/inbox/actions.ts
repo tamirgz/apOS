@@ -19,7 +19,7 @@ export async function listInbox() {
 export async function captureToInbox(input: string) {
   recordUsage("inbox.capture");
   const row = await captureInboxItem({ input });
-  if (!row) throw new Error("nothing to capture");
+  if (!row) return { ok: false as const, error: "Nothing to capture" };
   revalidatePath("/m/inbox");
   revalidatePath("/");
   return row;

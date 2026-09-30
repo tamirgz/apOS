@@ -156,7 +156,13 @@ export function TelegramView({
                 <div className="flex items-center gap-3 p-3">
                   <button
                     type="button"
-                    onClick={() => start(async () => void (await setChannelEnabled(c.id, !on)))}
+                    onClick={() =>
+                      start(async () =>
+                        void (await act(() => setChannelEnabled(c.id, !on), {
+                          failed: on ? "Couldn't pause the channel" : "Couldn't resume the channel",
+                        })),
+                      )
+                    }
                     className={`size-2.5 shrink-0 rounded-full ${on ? "bg-plasma shadow-[0_0_8px_var(--color-plasma)]" : "bg-ink-faint/40"}`}
                     title={on ? "enabled" : "paused"}
                   />
@@ -203,7 +209,11 @@ export function TelegramView({
                   <button
                     type="button"
                     disabled={pending}
-                    onClick={() => start(async () => void (await deleteChannel(c.id)))}
+                    onClick={() =>
+                      start(async () =>
+                        void (await act(() => deleteChannel(c.id), { failed: "Couldn't remove the channel" })),
+                      )
+                    }
                     className="rounded-md p-1.5 text-ink-faint transition hover:text-flare"
                   >
                     <Trash2 className="size-3.5" />
@@ -251,7 +261,10 @@ export function TelegramView({
                         }
                         onClick={() =>
                           start(async () => {
-                            await setChannelCriteria(c.id, editInclude, editExclude);
+                            const r = await act(() => setChannelCriteria(c.id, editInclude, editExclude), {
+                              failed: "Couldn't save the criteria",
+                            });
+                            if (!r.ok) return;
                             setEditId(null);
                           })
                         }

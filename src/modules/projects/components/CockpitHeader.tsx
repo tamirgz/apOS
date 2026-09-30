@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { ArrowRight, Check, GitBranch, Pencil, Target, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { HealthChip } from "./HealthChip";
 import { CategoryPicker } from "./CategoryPicker";
@@ -14,6 +15,7 @@ function EditableLine({
   placeholder,
   icon,
   accent,
+  failedTitle,
   onSave,
   onComplete,
 }: {
@@ -21,6 +23,8 @@ function EditableLine({
   placeholder: string;
   icon: React.ReactNode;
   accent: string;
+  /** Error title when saving fails, e.g. "Couldn't save the goal". */
+  failedTitle: string;
   onSave: (v: string | null) => Promise<void>;
   /** When set, a ✓ Done control appears while a value exists (next action). */
   onComplete?: () => Promise<void>;
@@ -33,7 +37,9 @@ function EditableLine({
     const next = draft.trim();
     setEditing(false);
     if (next === (value ?? "")) return;
-    startTransition(() => onSave(next || null));
+    startTransition(async () => {
+      await act(() => onSave(next || null), { failed: failedTitle });
+    });
   };
 
   if (editing) {
@@ -112,7 +118,11 @@ function EditableLine({
       {onComplete && value && (
         <button
           type="button"
-          onClick={() => startTransition(() => onComplete())}
+          onClick={() =>
+            startTransition(async () => {
+              await act(onComplete, { failed: "Couldn't complete the next action" });
+            })
+          }
           title="Mark done — records it and clears for the next step"
           className="flex shrink-0 items-center gap-1 rounded-md border border-plasma/25 bg-plasma/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-plasma transition hover:bg-plasma/20"
         >
@@ -204,6 +214,7 @@ export function CockpitHeader({
           placeholder="Set the goal — what outcome is this project for?"
           icon={<Target className="size-3.5" />}
           accent="var(--color-plasma)"
+          failedTitle="Couldn't save the goal"
           onSave={(v) => setGoal(id, v)}
         />
         <EditableLine
@@ -211,6 +222,7 @@ export function CockpitHeader({
           placeholder="Set the next action — one concrete step"
           icon={<ArrowRight className="size-3.5" />}
           accent="var(--color-solar)"
+          failedTitle="Couldn't save the next action"
           onSave={(v) => setNextAction(id, v)}
           onComplete={() => completeNextAction(id)}
         />
@@ -221,6 +233,7 @@ export function CockpitHeader({
               placeholder="Attach a code repo — GitHub URL or local path (agents read the real code)"
               icon={<GitBranch className="size-3.5" />}
               accent="var(--color-ion)"
+              failedTitle="Couldn't attach the repo"
               onSave={(v) => setRepo(id, v)}
             />
           </div>

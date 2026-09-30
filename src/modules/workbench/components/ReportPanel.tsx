@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { BookMarked, Check, Pencil, Sparkles, X } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { Markdown } from "@/core/ui/Markdown";
+import { act } from "@/core/ui/feedback";
 import { clipTaskToObsidian, updateAttemptResult } from "../actions";
 
 /** Which agent framework actually ran this, inferred from the executor id. */
@@ -52,7 +53,8 @@ export function ReportPanel({
 
   const save = () =>
     start(async () => {
-      await updateAttemptResult(attemptId, taskId, draft);
+      const r = await act(() => updateAttemptResult(attemptId, taskId, draft), { failed: "Couldn't save the report" });
+      if (!r.ok) return;
       setText(draft);
       setMode("view");
       router.refresh();

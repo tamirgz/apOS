@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { errorText } from "@/core/ui/feedback";
 import { AnimatePresence, motion } from "motion/react";
 import {
   CalendarDays,
@@ -51,7 +52,7 @@ function EditForm({
     setErr(null);
     start(async () => {
       try {
-        await updateEvent(item.id, {
+        const r = await updateEvent(item.id, {
           title,
           startAt: new Date(startAt),
           endAt: endAt ? new Date(endAt) : null,
@@ -59,10 +60,11 @@ function EditForm({
           location: location || null,
           notes: notes || null,
         });
+        if (!r.ok) return setErr(r.error);
         router.refresh();
         onDone();
       } catch (e) {
-        setErr(String(e instanceof Error ? e.message : e).replace(/^Error:\s*/, ""));
+        setErr(errorText(e));
       }
     });
   };

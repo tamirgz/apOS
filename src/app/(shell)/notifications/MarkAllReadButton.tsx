@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCheck } from "lucide-react";
+import { act } from "@/core/ui/feedback";
 import { markAllNotificationsRead } from "@/core/ui/notifications-actions";
 
 export function MarkAllReadButton() {
@@ -14,7 +15,7 @@ export function MarkAllReadButton() {
       disabled={pending}
       onClick={() =>
         start(async () => {
-          await markAllNotificationsRead();
+          await act(markAllNotificationsRead, { failed: "Couldn't mark the notifications read" });
           router.refresh();
         })
       }

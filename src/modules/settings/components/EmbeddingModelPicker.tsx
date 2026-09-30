@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { saveIntegration } from "../actions";
 
 export function EmbeddingModelPicker({ initial }: { initial: string }) {
@@ -14,7 +15,9 @@ export function EmbeddingModelPicker({ initial }: { initial: string }) {
   useEffect(() => {
     fetch("/api/ai/models?provider=ollama")
       .then((r) => r.json())
-      .then((d: { models: string[] }) => setModels(d.models))
+      .then((d: { models?: string[] }) => setModels(d.models ?? []))
+      // A background load, not an action: Ollama being down shows as an empty
+      // list, not a toast on every visit to Settings.
       .catch(() => {});
   }, []);
 
@@ -63,7 +66,8 @@ export function EmbeddingModelPicker({ initial }: { initial: string }) {
             disabled={!dirty || pending}
             onClick={() =>
               startTransition(async () => {
-                await saveIntegration("embedding_model", model);
+                const r = await act(() => saveIntegration("embedding_model", model), { failed: "Couldn't save the embedding model" });
+                if (!r.ok) return;
                 setSaved(true);
               })
             }

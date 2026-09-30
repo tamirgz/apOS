@@ -3,6 +3,7 @@
 import { CalendarClock, Check } from "lucide-react";
 import { useState, useTransition } from "react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { GlassPanel } from "@/core/ui/GlassPanel";
 import type { FlowTrigger } from "@/modules/flows/schema";
 import { setFlowEnabled, setFlowTrigger } from "../actions";
@@ -48,7 +49,11 @@ export function ScheduleControl({
     setErr(null);
     start(async () => {
       try {
-        await setFlowTrigger(flowId, next);
+        const r = await setFlowTrigger(flowId, next);
+        if (r) {
+          setErr(r.error);
+          return;
+        }
         await setFlowEnabled(flowId, nextEnabled);
       } catch (e) {
         setErr(String(e instanceof Error ? e.message : e).replace(/^Error:\s*/, ""));
@@ -165,7 +170,11 @@ export function ScheduleControl({
                 onClick={() => {
                   const next = !isEnabled;
                   setIsEnabled(next);
-                  setFlowEnabled(flowId, next);
+                  void act(() => setFlowEnabled(flowId, next), {
+                    failed: next ? "Couldn't arm the flow" : "Couldn't disarm the flow",
+                  }).then((r) => {
+                    if (!r.ok) setIsEnabled(!next);
+                  });
                 }}
                 className="flex items-center justify-between rounded-lg glass px-3 py-2"
               >

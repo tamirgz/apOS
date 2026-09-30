@@ -1,6 +1,6 @@
 "use client";
 
-import { done, errorText } from "@/core/ui/feedback";
+import { act as runAction, done, errorText, failed, resultError } from "@/core/ui/feedback";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
 import { ArrowUpRight, Bot, CornerDownRight, GitCommitHorizontal, Layers, Link2, MessageSquare, Plus, Trash2, X } from "lucide-react";
@@ -109,11 +109,20 @@ export function WorkItemDetail({
       setLabels(d.item.labels.join(", "));
     }
   }, []);
-  const reload = useCallback(async () => apply(await loadWorkItem(id)), [apply, id]);
+  const reload = useCallback(async () => {
+    try {
+      apply(await loadWorkItem(id));
+    } catch (e) {
+      failed("Couldn't reload the work item", errorText(e));
+    }
+  }, [apply, id]);
 
   useEffect(() => {
     let alive = true;
-    loadWorkItem(id).then((d) => alive && apply(d));
+    loadWorkItem(id).then(
+      (d) => alive && apply(d),
+      (e) => alive && failed("Couldn't load the work item", errorText(e)),
+    );
     return () => {
       alive = false;
     };
@@ -143,8 +152,9 @@ export function WorkItemDetail({
     start(async () => {
       setError(null);
       try {
-        await fn();
-        if (saved) done(saved);
+        const err = resultError(await fn());
+        if (err) setError(err);
+        else if (saved) done(saved);
       } catch (e) {
         setError(errorText(e));
       }
@@ -439,7 +449,8 @@ export function WorkItemDetail({
               const t = subTitle.trim();
               if (!t) return;
               start(async () => {
-                await createTask({ title: t, parentId: item.id });
+                const r = await runAction(() => createTask({ title: t, parentId: item.id }), { failed: "Couldn't add the sub-item" });
+                if (!r.ok) return;
                 setSubTitle("");
                 await reload();
                 onChanged?.();
@@ -490,8 +501,9 @@ export function WorkItemDetail({
               e.preventDefault();
               if (!relTarget.trim()) return;
               act(async () => {
-                await relateTask(item.id, relSide, relTarget);
-                setRelTarget("");
+                const r = await relateTask(item.id, relSide, relTarget);
+                if (r.ok) setRelTarget("");
+                return r;
               });
             }}
             className="flex items-center gap-2 px-1.5"
@@ -592,7 +604,8 @@ export function WorkItemDetail({
               const body = comment.trim();
               if (!body) return;
               start(async () => {
-                await addTaskComment(item.id, body);
+                const r = await runAction(() => addTaskComment(item.id, body), { failed: "Couldn't post the comment" });
+                if (!r.ok) return;
                 setComment("");
                 await reload();
               });
@@ -634,7 +647,8 @@ export function WorkItemDetail({
               return;
             }
             start(async () => {
-              await deleteTask(item.id);
+              const r = await runAction(() => deleteTask(item.id), { failed: "Couldn't delete the work item" });
+              if (!r.ok) return;
               onChanged?.();
               onDeleted?.();
             });

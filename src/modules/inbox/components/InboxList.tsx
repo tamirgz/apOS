@@ -13,6 +13,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { act } from "@/core/ui/feedback";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { captureToInbox, deleteInboxItem, retryTriage } from "../actions";
 import type { InboxItem, InboxStatus } from "../schema";
@@ -48,7 +49,8 @@ function CaptureBox() {
         const v = ref.current?.value.trim();
         if (!v || pending) return;
         startTransition(async () => {
-          await captureToInbox(v);
+          const r = await act(() => captureToInbox(v), { failed: "Couldn't capture to the inbox" });
+          if (!r.ok) return;
           if (ref.current) ref.current.value = "";
         });
       }}
@@ -228,8 +230,8 @@ export function InboxList({ items }: { items: InboxItem[] }) {
     <ItemCard
       key={item.id}
       item={item}
-      onRetry={() => startTransition(async () => void (await retryTriage(item.id)))}
-      onDelete={() => startTransition(async () => void (await deleteInboxItem(item.id)))}
+      onRetry={() => startTransition(async () => void (await act(() => retryTriage(item.id), { failed: "Couldn't retry the triage" })))}
+      onDelete={() => startTransition(async () => void (await act(() => deleteInboxItem(item.id), { failed: "Couldn't delete the item" })))}
     />
   );
 

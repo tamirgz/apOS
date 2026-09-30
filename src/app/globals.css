@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* Module surfaces with their own stylesheet (theme tokens only). */
+@import "../modules/tasks/components/work.css";
 
 /* ---------------------------------------------------------------------------
    apOS design system — "deep-space mission control"

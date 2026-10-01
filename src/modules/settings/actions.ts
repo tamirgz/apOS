@@ -59,6 +59,46 @@ export async function createMemoryBlock(label: string, description: string) {
   revalidatePath("/m/settings");
 }
 
+export async function deleteMemoryBlockAction(label: string) {
+  const { deleteMemoryBlock } = await import("@/core/memory");
+  try {
+    await deleteMemoryBlock(label);
+  } catch (e) {
+    return memoryError(e);
+  }
+  revalidatePath("/m/settings/memory");
+}
+
+export async function forgetMemoryEntryAction(id: string) {
+  const { forgetMemoryEntry } = await import("@/core/memory");
+  await forgetMemoryEntry(id);
+  revalidatePath("/m/settings/memory");
+}
+
+/** The Lens: what each layer would hand the model for this question. Local
+ *  embeddings only — never a paid model. */
+export async function lensMemory(question: string) {
+  const q = question.trim().slice(0, 300);
+  if (q.length < 3) return { recall: [], library: [] };
+  const { recallEntries, recallSemantic } = await import("@/core/memory");
+  const [recall, library] = await Promise.all([
+    recallEntries(q, 5).catch(() => []),
+    recallSemantic(q, { kinds: ["knowledge", "note", "vault"], limit: 8 }).catch(() => []),
+  ]);
+  // A long document is indexed in chunks — show each document once.
+  const seen = new Set<string>();
+  const docs = library.filter((r) => {
+    const key = r.href ?? r.text.slice(0, 80);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 4);
+  return {
+    recall: recall.map((r) => ({ kind: r.kind, source: r.source, text: r.text, when: r.when.toISOString() })),
+    library: docs.map((r) => ({ kind: r.kind, text: r.text.slice(0, 220), href: r.href })),
+  };
+}
+
 export async function saveIntegration(key: string, value: string) {
   if (!ALLOWED_INTEGRATION_KEYS.has(key)) throw new Error("unknown setting");
   let cleaned = value.trim();

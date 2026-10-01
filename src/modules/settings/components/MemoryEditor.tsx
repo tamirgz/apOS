@@ -1,21 +1,13 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { Check, Plus } from "lucide-react";
-import type { MemoryBlock, MemoryEntry } from "@/core/db/schema/memory";
+import { Check, Plus, Trash2 } from "lucide-react";
+import type { MemoryBlock } from "@/core/db/schema/memory";
 import { cn } from "@/core/ui/cn";
 import { act, errorText } from "@/core/ui/feedback";
-import { createMemoryBlock, saveMemoryBlock } from "../actions";
+import { createMemoryBlock, deleteMemoryBlockAction, saveMemoryBlock } from "../actions";
 
-const KIND_COLOR: Record<string, string> = {
-  fact: "var(--color-ion)",
-  decision: "var(--color-plasma)",
-  lesson: "var(--color-solar)",
-  event: "var(--color-violet)",
-  superseded: "var(--color-ink-faint)",
-};
-
-function AddBlock() {
+export function AddBlock() {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const labelRef = useRef<HTMLInputElement>(null);
@@ -68,7 +60,35 @@ function AddBlock() {
   );
 }
 
-function BlockField({ block }: { block: MemoryBlock }) {
+/** Two-click delete for a dynamic block; its last value is archived first. */
+function DeleteBlock({ label, onDeleted }: { label: string; onDeleted: () => void }) {
+  const [armed, setArmed] = useState(false);
+  const [pending, startTransition] = useTransition();
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      onClick={() =>
+        armed
+          ? startTransition(async () => {
+              const r = await act(() => deleteMemoryBlockAction(label), { failed: "Couldn't delete the block" });
+              if (r.ok) onDeleted();
+            })
+          : setArmed(true)
+      }
+      onBlur={() => setArmed(false)}
+      title="Delete this block — its last value is kept in the archive"
+      className={cn(
+        "ml-2 mt-1 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest transition",
+        armed ? "border border-flare/50 text-flare" : "border border-white/8 text-ink-faint hover:text-flare",
+      )}
+    >
+      <Trash2 className="size-3" /> {armed ? "click again to delete" : "delete block"}
+    </button>
+  );
+}
+
+export function BlockField({ block, onDelete }: { block: MemoryBlock; onDelete?: () => void }) {
   const [value, setValue] = useState(block.value);
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -118,7 +138,7 @@ function BlockField({ block }: { block: MemoryBlock }) {
           })
         }
         className={cn(
-          "mt-1 flex items-center gap-1.5 rounded-lg px-4 py-1.5 font-mono text-[10px] uppercase tracking-widest transition",
+          "mt-1 inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 font-mono text-[10px] uppercase tracking-widest transition",
           dirty
             ? "bg-plasma/15 text-plasma hover:bg-plasma/25"
             : "border border-white/8 text-ink-faint",
@@ -127,60 +147,7 @@ function BlockField({ block }: { block: MemoryBlock }) {
         {saved ? <Check className="size-3" /> : null}
         {pending ? "saving…" : saved ? "saved" : "save"}
       </button>
-    </div>
-  );
-}
-
-export function MemoryEditor({
-  blocks,
-  journal,
-  journalCount,
-}: {
-  blocks: MemoryBlock[];
-  journal: MemoryEntry[];
-  journalCount: number;
-}) {
-  return (
-    <div className="flex flex-col gap-2.5">
-      <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint">
-        persistent memory — injected into every AI call
-      </p>
-      {blocks.map((b) => (
-        <BlockField key={b.label} block={b} />
-      ))}
-      <AddBlock />
-
-      <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint">
-        memory journal — {journalCount} archival entr
-        {journalCount === 1 ? "y" : "ies"}, recalled on demand
-      </p>
-      <div className="glass rounded-xl p-3">
-        {journal.length === 0 ? (
-          <p className="py-2 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
-            empty — chat and agents store decisions/lessons here via
-            memory.remember
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {journal.map((e) => (
-              <li key={e.id} className="flex items-start gap-2.5">
-                <span
-                  className="mt-1 rounded-md border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-widest"
-                  style={{
-                    color: KIND_COLOR[e.kind],
-                    borderColor: `color-mix(in oklab, ${KIND_COLOR[e.kind]} 35%, transparent)`,
-                  }}
-                >
-                  {e.kind}
-                </span>
-                <span className="flex-1 text-xs leading-relaxed text-ink-dim">
-                  {e.text.length > 160 ? e.text.slice(0, 160) + "…" : e.text}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {onDelete && <DeleteBlock label={block.label} onDeleted={onDelete} />}
     </div>
   );
 }

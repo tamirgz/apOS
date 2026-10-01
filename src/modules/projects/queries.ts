@@ -126,6 +126,7 @@ export async function getProjectCockpit(
         project.healthReason,
         project.healthUpdatedAt,
         signals,
+        project.healthBy,
       ),
     };
   });

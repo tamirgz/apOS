@@ -246,6 +246,7 @@ export function ProjectVitals({
   stats,
   lastActive,
   setCategory,
+  clearHealth,
 }: {
   id: string;
   status: ProjectStatus;
@@ -257,8 +258,10 @@ export function ProjectVitals({
   stats: { open: number; done: number; overdue: number; notes: number };
   lastActive: string;
   setCategory: (id: string, category: string | null) => Promise<void>;
+  clearHealth?: (id: string) => Promise<void>;
 }) {
   const meta = HEALTH_META[health];
+  const [clearing, startClear] = useTransition();
   const tiles: { label: string; n: number; href?: string; tone?: string }[] = [
     { label: "open", n: stats.open, href: "?tab=items" },
     { label: "done", n: stats.done },
@@ -281,7 +284,24 @@ export function ProjectVitals({
           <i className="inline-block size-2.5 rounded-full" style={{ background: meta.accent }} />
           {cap(status === "active" ? meta.label : status)}
         </span>
-        <p className="text-[13px] leading-snug text-ink-dim">{healthReason}</p>
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 text-[13px] leading-snug text-ink-dim">{healthReason}</p>
+          {clearHealth && healthSource === "agent" && health !== "on_track" && status === "active" && (
+            <button
+              type="button"
+              disabled={clearing}
+              onClick={() =>
+                startClear(async () => {
+                  await act(() => clearHealth(id), { failed: "Couldn't clear the health" });
+                })
+              }
+              title="Overrule the Project-pulse agent: drop its call and go back to the live signals"
+              className="wk-btn shrink-0 !gap-1 !px-2 !py-0.5 text-[11.5px]"
+            >
+              <X className="size-3" /> Not {meta.label}
+            </button>
+          )}
+        </div>
       </div>
       <div className="grid grid-cols-4 gap-2">
         {tiles.map((t) => {

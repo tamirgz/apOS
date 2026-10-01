@@ -176,6 +176,21 @@ const CORE_TOOLS: AiToolDef[] = [
       if ((ctx.subagentDepth ?? 0) >= 1) {
         return { error: "A sub-task cannot spawn further sub-tasks (max depth 1)." };
       }
+      // A health sweep investigates only stalled/blocked projects — enforced
+      // here because the local model ignores the prompt's rule, and an
+      // evidence-free sub-task "finding" then fed an invented block.
+      if (ctx.focusRequireHealth && ctx.subject?.kind === "project") {
+        const { projects } = await import("@/modules/projects/schema");
+        const { eq } = await import("drizzle-orm");
+        const [p] = await ctx.db.select({ health: projects.health }).from(projects).where(eq(projects.id, ctx.subject.id)).limit(1);
+        const assessed = ctx.subjectCursor?.healthWritten?.has(ctx.subject.id);
+        if (!assessed || (p?.health !== "stalled" && p?.health !== "blocked")) {
+          return {
+            skipped: true,
+            reason: `'${ctx.subject.name}' is ${assessed ? p?.health : "not yet assessed this run"} — only stalled or blocked projects are investigated. Call projects.focusNext.`,
+          };
+        }
+      }
       const { resolveRoute } = await import("@/core/ai/routing");
       // Falls back to agent.default when no explicit agent.subtask route is set.
       const route = await resolveRoute("agent.subtask");

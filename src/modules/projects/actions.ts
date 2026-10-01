@@ -4,6 +4,7 @@ import { and, desc, eq, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
 import { getSetting, setSetting } from "@/core/app-settings";
+import { attentionItems } from "@/modules/today/schema";
 import {
   projects,
   statusRank,
@@ -74,6 +75,28 @@ export async function setProjectCategory(id: string, category: string | null) {
     .update(projects)
     .set({ category: category?.trim() || null, updatedAt: new Date() })
     .where(eq(projects.id, id));
+  revalidateProjects(id);
+}
+
+/**
+ * Overrule the agent's health call: drop the stored judgement (the cockpit
+ * falls back to the live signals) and dismiss the pulse card it raised.
+ */
+export async function clearProjectHealth(id: string) {
+  await db
+    .update(projects)
+    .set({ health: null, healthReason: null, healthUpdatedAt: null, healthBy: null })
+    .where(eq(projects.id, id));
+  await db
+    .update(attentionItems)
+    .set({ status: "dismissed", updatedAt: new Date() })
+    .where(
+      and(
+        eq(attentionItems.projectRef, `projects:${id}`),
+        eq(attentionItems.status, "open"),
+        dsql`${attentionItems.dedupeKey} like 'pulse:%'`,
+      ),
+    );
   revalidateProjects(id);
 }
 

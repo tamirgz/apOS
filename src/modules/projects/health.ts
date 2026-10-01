@@ -96,6 +96,7 @@ export function resolveHealth(
   storedReason: string | null,
   healthUpdatedAt: Date | null,
   signals: HealthSignals,
+  healthBy: "agent" | "user" | null = null,
 ): { health: ProjectHealth; reason: string; source: "agent" | "derived" } {
   const fresh =
     stored &&
@@ -103,12 +104,15 @@ export function resolveHealth(
     Date.now() - healthUpdatedAt.getTime() < HEALTH_STALE_DAYS * DAY;
   // A judgement written BEFORE the project's latest activity may describe a
   // project that no longer exists (e.g. "no open tasks" read hours before an
-  // import added 500). Only "blocked" survives — the heuristic can't see it.
+  // import added 500). Only the USER's "blocked" survives — the heuristic can't
+  // see an external wait, but an agent's "blocked" is a guess, and on
+  // 2026-10-01 a local model invented one to get past the card guard; it then
+  // stuck for days on a project that was busy every hour.
   const overtaken =
     !!healthUpdatedAt &&
     !!signals.lastActivityAt &&
     signals.lastActivityAt.getTime() > healthUpdatedAt.getTime() &&
-    stored !== "blocked";
+    !(stored === "blocked" && healthBy === "user");
   if (fresh && !overtaken) {
     return {
       health: stored!,

@@ -16,7 +16,7 @@ const DEFAULT_BLOCK_LIMIT = 1200;
  * are — the injected memory can never grow endless. Per-block char limits +
  * MAX_BLOCKS bound it too, but this is the belt-and-suspenders global ceiling.
  */
-const MAX_INJECTED_CHARS = 6000;
+export const MAX_INJECTED_CHARS = 6000;
 /** Below this cosine distance two archival entries are the same memory — a
  *  re-`remember` of a near-identical fact/lesson is deduped, not stacked. */
 const MEMORY_DUP_DISTANCE = 0.12;
@@ -40,6 +40,27 @@ const DEFAULT_BLOCKS = [
     description: "Short live summary of key projects and their state.",
   },
 ] as const;
+
+/** Blocks the memory system relies on — editable, never deletable. */
+export const PROTECTED_BLOCKS: string[] = [...DEFAULT_BLOCKS.map((b) => b.label), "operating_rules"];
+
+/** Remove a dynamic block. Its last value is archived first (same provenance
+ *  rule as a replace), so deleting never loses what it held. */
+export async function deleteMemoryBlock(label: string) {
+  if (PROTECTED_BLOCKS.includes(label)) throw new Error(`"${label}" is a core block — clear it instead of deleting it`);
+  const [block] = await db.select().from(memoryBlocks).where(eq(memoryBlocks.label, label));
+  if (!block) return;
+  if (block.value.trim()) {
+    await rememberEntry({ kind: "superseded", text: `[${label}] ${block.value.trim()}`, source: `block:${label}` });
+  }
+  await db.delete(memoryBlocks).where(eq(memoryBlocks.label, label));
+}
+
+/** Forget one archival entry — and its index row, so recall stops finding it now. */
+export async function forgetMemoryEntry(id: string) {
+  await db.delete(memoryEntries).where(eq(memoryEntries.id, id));
+  await db.execute(dsql`delete from search_index where kind = 'memory' and source_id = ${id}`);
+}
 
 export async function ensureDefaultMemoryBlocks() {
   // Read-first: only write when blocks are actually missing, so the hot path

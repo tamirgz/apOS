@@ -7,6 +7,7 @@ import {
   completeProjectNextAction,
   listProjectCategories,
   setProjectCategory,
+  clearProjectHealth,
   setProjectGoal,
   setProjectNextAction,
   setProjectRepo,
@@ -176,6 +177,7 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
                 }}
                 lastActive={lastActiveLabel(project.lastActivityAt)}
                 setCategory={setProjectCategory}
+                clearHealth={clearProjectHealth}
               />
               <ProjectPulse {...pulseProps(work)} />
             </aside>

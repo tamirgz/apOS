@@ -87,6 +87,11 @@ export const projects = pgTable("projects", {
   /** When the agent last wrote `health` (staleness gate for the fallback). */
   healthUpdatedAt: timestamp("health_updated_at", { withTimezone: true }),
   /**
+   * Who wrote `health`: an agent's guess yields to newer activity; the user's
+   * own call (via chat) is kept. Null on rows written before this existed.
+   */
+  healthBy: text("health_by", { enum: ["agent", "user"] }),
+  /**
    * P1 Project Advisor read (chief-of-staff synthesis, written by the
    * Project-advisor agent): where it stands · the real blocker · next move.
    */

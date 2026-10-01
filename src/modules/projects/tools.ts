@@ -285,7 +285,7 @@ export const projectTools: AiToolDef[] = [
   {
     name: "projects.setHealth",
     description:
-      "Record your judgement of the FOCUSED project's health with a one-line reason (it targets the project from projects.focusNext — you pass no id). Use 'blocked' when it's waiting on someone/something external (the read-time heuristic can never infer that). Prefer this over letting the heuristic guess.",
+      "Record your judgement of the FOCUSED project's health with a one-line reason (it targets the project from projects.focusNext — you pass no id). ONE judgement per project per run — it can't be changed afterwards. Use 'blocked' only when it's waiting on someone/something OUTSIDE the project (a person, vendor, approval, decision) and name it in `waitingOn`; an open task of the project's own is not a block.",
     input: z.object({
       id: z
         .string()
@@ -300,18 +300,51 @@ export const projectTools: AiToolDef[] = [
         .min(3)
         .max(120)
         .describe("One line: why this health, in plain words"),
+      waitingOn: z
+        .string()
+        .max(80)
+        .optional()
+        .describe("Required for 'blocked': who or what outside the project it waits on (a person, vendor, approval, decision)"),
     }),
     async execute(input, ctx) {
       const t = boundProjectId(ctx, input.id);
       if ("error" in t) return t;
+      const name = ctx.subject?.name ?? "this project";
+      // One judgement per project per run. On 2026-10-01 the pulse recorded
+      // ETHOS as at_risk, was refused a card for it, then re-wrote it as
+      // "blocked" with an invented reason purely to get past the card guard.
+      if (ctx.subjectCursor?.healthWritten?.has(t.id)) {
+        return {
+          skipped: true,
+          reason: `Health for '${name}' is already recorded this run — it can't be changed. Call projects.focusNext.`,
+        };
+      }
+      // "blocked" is the one health the heuristic can't check, so it must name
+      // the external thing it waits on — not one of the project's own items.
+      const waitingOn = input.waitingOn?.trim() ?? "";
+      if (input.health === "blocked") {
+        if (waitingOn.length < 3) {
+          return {
+            error: "'blocked' needs waitingOn: the person, vendor, approval or decision outside the project it waits on. If you can't name one, it isn't blocked — use at_risk.",
+          };
+        }
+        if (/\b[A-Z][A-Z0-9]*-\d+\b/.test(waitingOn) || /\btasks?\b/i.test(waitingOn)) {
+          return {
+            error: "waitingOn names one of the project's own work items — that's work to do, not an external block. Use at_risk.",
+          };
+        }
+      }
+      const reason = input.reason.trim();
       // Deliberately does NOT touch updatedAt: the agent assessing a project is
       // not user activity, so it must not reset the stall clock.
       const [row] = await ctx.db
         .update(projects)
         .set({
           health: input.health,
-          healthReason: input.reason.trim(),
+          healthReason: input.health === "blocked" ? `Waiting on ${waitingOn} — ${reason}`.slice(0, 200) : reason,
           healthUpdatedAt: new Date(),
+          // An agent run is a guess; chat (no agent) is the user's own call.
+          healthBy: ctx.agentName ? "agent" : "user",
         })
         .where(eq(projects.id, t.id))
         .returning();

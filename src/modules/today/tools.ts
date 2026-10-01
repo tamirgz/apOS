@@ -85,9 +85,15 @@ export const todayTools: AiToolDef[] = [
           .where(eq(projects.id, ctx.subject.id))
           .limit(1);
         if (p?.health !== "stalled" && p?.health !== "blocked") {
+          // Never tell the model to (re)record health here — that reads as
+          // "change the health to get the card", which is how a guessed
+          // "blocked" was born on 2026-10-01.
+          const recorded = ctx.subjectCursor?.healthWritten?.has(ctx.subject.id);
           return {
             skipped: true,
-            reason: `'${ctx.subject.name}' is ${p?.health ?? "without a recorded health"} — cards are only raised for stalled or blocked projects. Record projects.setHealth first; if it is not stalled/blocked, raise nothing and move on.`,
+            reason: recorded
+              ? `'${ctx.subject.name}' is ${p?.health ?? "unassessed"} — no card for it. Raise nothing and call projects.focusNext.`
+              : `No card: '${ctx.subject.name}' has no health recorded this run. Record your honest judgement with projects.setHealth, then call projects.focusNext.`,
           };
         }
         fixedDedupeKey = `pulse:${ctx.subject.id}:${isoWeek()}`;

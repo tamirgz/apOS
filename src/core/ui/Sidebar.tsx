@@ -44,7 +44,7 @@ function NavItem({
       )}
       <span
         className={cn(
-          "relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors",
+          "relative flex items-center gap-2.5 rounded-xl px-3 py-1.5 text-sm transition-colors",
           active ? "text-ink" : "text-ink-dim hover:text-ink hover:bg-white/3",
         )}
       >
@@ -119,12 +119,12 @@ function NavGroup({
   }, [activeInside]);
 
   return (
-    <div className="mt-2">
+    <div className="mt-1">
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-ink-faint transition hover:text-ink-dim"
+        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-1 text-ink-faint transition hover:text-ink-dim"
       >
         <ChevronRight
           className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
@@ -138,7 +138,7 @@ function NavGroup({
         </span>
       </button>
       {open && (
-        <div className="mt-1 flex flex-col gap-1">
+        <div className="mt-0.5 flex flex-col gap-1">
           {items.map((m) => (
             <NavItem
               key={m.id}
@@ -230,7 +230,7 @@ export function Sidebar() {
         )}
       >
       {/* logo */}
-      <Link href="/" className="mb-5 flex items-center gap-3 px-2 pt-1">
+      <Link href="/" className="mb-3 flex items-center gap-3 px-2 pt-1">
         <span className="relative flex size-9 items-center justify-center rounded-xl border border-plasma/30 bg-plasma/10">
           <span className="font-display text-lg font-bold text-plasma text-glow">a</span>
           <span className="absolute -right-0.5 -top-0.5 dot text-plasma animate-pulse-soft" />
@@ -291,7 +291,7 @@ export function Sidebar() {
       </nav>
 
       {/* footer */}
-      <div className="mt-auto border-t border-white/5 px-2 pt-3">
+      <div className="mt-auto border-t border-white/5 px-2 pt-2">
         <p className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
           <span className="normal-case">apOS</span> v0.1 · local
         </p>

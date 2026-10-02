@@ -40,10 +40,12 @@ export function lastActiveLabel(d: Date | string | null | undefined): string {
   return `active ${dayAgo(d)}`;
 }
 
-/** Locale-default short date ("Aug 30"). One convention instead of four. */
+/** Locale-default short date ("Aug 30"; "Jun 25, 2027" outside this year). One convention instead of four. */
 export function shortDate(d: Date | string): string {
-  return new Date(d).toLocaleDateString(undefined, {
+  const date = new Date(d);
+  return date.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
+    ...(date.getFullYear() !== new Date().getFullYear() && { year: "numeric" }),
   });
 }

@@ -170,10 +170,20 @@ export interface MilestoneStats {
   /** Item counts by state (entities are not in here). */
   by: Record<TaskStatus, number>;
   entities: GroupStats;
-  /** Units closed a day, over the last 14 days. */
+  /** Units closed a day over the pace window (estimate-weighted, imports left out). */
   pace: number;
-  /** When the open work runs out at that pace (null when nothing is closing). */
+  /**
+   * The median finish (P50) of a throughput simulation: the window's daily
+   * closes replayed at random until the open work runs out. Null when nothing
+   * closed in the window.
+   */
   forecastAt: number | null;
+  /** The pessimistic finish (P85) — 85% of the simulated runs are done by then. */
+  forecastLate: number | null;
+  /** The median lands past the simulation's horizon (~3 years). */
+  forecastBeyond: boolean;
+  /** What the forecast rests on: closes counted, over how many days; `low` = too few to trust. */
+  basis: { closes: number; days: number; low: boolean };
   outlook: Outlook;
   /** Per capability, in the milestone's order; `id: null` = ungrouped content. */
   capabilities: (GroupStats & { id: string | null; name: string; description: string | null })[];
@@ -186,7 +196,52 @@ export interface MilestoneStats {
   waitingOn: { id: string; name: string; pct: number }[];
 }
 
-const PACE_DAYS = 14;
+/** Pace window: the last six weeks, or since the oldest content existed when younger (a week at least). */
+const WINDOW_DAYS = 42;
+const MIN_WINDOW_DAYS = 7;
+/** Fewer closes than this in the window and the forecast is flagged low-confidence. */
+const MIN_CLOSES = 5;
+const TRIALS = 500;
+const HORIZON_DAYS = 3 * 365;
+/** A close stamped this soon after creation is an import of finished work, not throughput. */
+const IMPORT_GAP = 60_000;
+/** Share of an open item already behind it, by state. */
+const CREDIT: Partial<Record<TaskStatus, number>> = { doing: 0.5, review: 0.8 };
+const weightOf = (t: ScopeItem) => (t.estimate && t.estimate > 0 ? t.estimate : 1);
+
+/** Deterministic PRNG (mulberry32): the same milestone on the same day forecasts the same everywhere. */
+function rngFor(key: string, dayIndex: number) {
+  let h = 2166136261 ^ dayIndex;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619);
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Throughput forecast (the Monte Carlo method): the window's daily closes are
+ * sampled at random, day after day, until the open work is used up — repeated
+ * TRIALS times. Returns the days the 50th and 85th percentile runs needed
+ * (HORIZON_DAYS when a run never finished).
+ */
+function simulate(daily: number[], remaining: number, rand: () => number): { p50: number; p85: number } {
+  const runs: number[] = [];
+  for (let i = 0; i < TRIALS; i++) {
+    let left = remaining;
+    let d = 0;
+    while (left > 1e-9 && d < HORIZON_DAYS) {
+      left -= daily[Math.floor(rand() * daily.length)];
+      d++;
+    }
+    runs.push(d);
+  }
+  runs.sort((a, b) => a - b);
+  return { p50: runs[Math.floor(TRIALS * 0.5)], p85: runs[Math.floor(TRIALS * 0.85)] };
+}
 const emptyBy = (): Record<TaskStatus, number> => ({ backlog: 0, todo: 0, doing: 0, review: 0, done: 0, cancelled: 0 });
 const pctOf = (done: number, total: number) => (total ? Math.round((done / total) * 100) : 0);
 const group = (done: number, total: number): GroupStats => ({ total, done, pct: pctOf(done, total) });
@@ -206,12 +261,36 @@ export function milestoneStats<T extends ScopeItem>(
   const done = by.done + entDone;
   const open = total - done;
 
-  const since = now - PACE_DAYS * DAY;
-  const closedLately =
-    items.filter((s) => isDone(s) && s.item.completedAt && +new Date(s.item.completedAt) >= since).length +
-    entities.filter((e) => e.done && e.doneAt && +e.doneAt >= since).length;
-  const pace = closedLately / PACE_DAYS;
-  const forecastAt = total === 0 ? null : open === 0 ? now : pace > 0 ? now + (open / pace) * DAY : null;
+  // Pace window: six weeks back, but not before the oldest content existed —
+  // work created last week has no six weeks of history to average over.
+  const oldest = Math.min(now, ...items.map((s) => +new Date(s.item.createdAt)), ...entities.map((e) => +e.createdAt));
+  const windowDays = Math.max(MIN_WINDOW_DAYS, Math.min(WINDOW_DAYS, Math.ceil((now - oldest) / DAY)));
+  const since = now - windowDays * DAY;
+  const daily = new Array<number>(windowDays).fill(0);
+  let closes = 0;
+  const count = (created: number, closedAt: number | null, w: number) => {
+    if (closedAt == null || closedAt < since || closedAt - created < IMPORT_GAP) return;
+    daily[Math.min(windowDays - 1, Math.floor((closedAt - since) / DAY))] += w;
+    closes++;
+  };
+  for (const s of items) if (isDone(s)) count(+new Date(s.item.createdAt), s.item.completedAt ? +new Date(s.item.completedAt) : null, weightOf(s.item));
+  for (const e of entities) if (e.done) count(+e.createdAt, e.doneAt ? +e.doneAt : null, 1);
+  const throughput = daily.reduce((a, b) => a + b, 0);
+  const pace = throughput / windowDays;
+  // Open work, weighted by estimate, less what's already behind items in flight.
+  const remaining =
+    items.reduce((a, s) => (isDone(s) ? a : a + weightOf(s.item) * (1 - (CREDIT[s.item.status] ?? 0))), 0) +
+    entities.filter((e) => !e.done).length;
+  let forecastAt: number | null = null;
+  let forecastLate: number | null = null;
+  let forecastBeyond = false;
+  if (total > 0 && open === 0) forecastAt = forecastLate = now;
+  else if (total > 0 && throughput > 0) {
+    const { p50, p85 } = simulate(daily, remaining, rngFor(m.id, Math.floor(now / DAY)));
+    forecastBeyond = p50 >= HORIZON_DAYS;
+    forecastAt = now + p50 * DAY;
+    forecastLate = p85 >= HORIZON_DAYS ? null : now + p85 * DAY;
+  }
 
   const target = m.targetAt ? +m.targetAt : null;
   const outlook: Outlook =
@@ -300,6 +379,9 @@ export function milestoneStats<T extends ScopeItem>(
     entities: group(entDone, entities.length),
     pace,
     forecastAt,
+    forecastLate,
+    forecastBeyond,
+    basis: { closes, days: windowDays, low: closes < MIN_CLOSES },
     outlook,
     capabilities,
     modules,

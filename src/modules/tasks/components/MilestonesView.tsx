@@ -125,7 +125,7 @@ function TargetLine({ m, s }: { m: MilestoneInfo; s: MilestoneStats }) {
       {s.open > 0 && m.status !== "done" && (
         <>
           <span aria-hidden>·</span>
-          <span className={cn(misses && "text-flare")}>{s.forecastAt != null ? `forecast ${shortDate(new Date(s.forecastAt))}` : "no pace yet"}</span>
+          <span className={cn(misses && "text-flare")}>{s.forecastAt == null ? "no pace yet" : s.forecastBeyond ? "forecast 3 yrs+" : `forecast ${s.basis.low ? "~" : ""}${shortDate(new Date(s.forecastAt))}`}</span>
         </>
       )}
     </span>
@@ -381,7 +381,7 @@ function ScopeChart({ m, s, now }: { m: MilestoneInfo; s: MilestoneStats; now: n
         </span>
         {forecast != null && (
           <span className="inline-flex items-center gap-1.5">
-            <i className="inline-block h-0 w-3 border-t border-dashed border-plasma/60" /> at the current pace
+            <i className="inline-block h-0 w-3 border-t border-dashed border-plasma/60" /> median forecast
           </span>
         )}
         {target != null && (
@@ -394,15 +394,31 @@ function ScopeChart({ m, s, now }: { m: MilestoneInfo; s: MilestoneStats; now: n
   );
 }
 
-function Tile({ label, value, sub, tone }: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: string }) {
+function Tile({ label, value, sub, tone, title }: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: string; title?: string }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1 rounded-xl border border-ion/10 bg-ink/[0.03] px-3.5 py-3">
+    <div title={title} className="flex min-w-0 flex-col gap-1 rounded-xl border border-ion/10 bg-ink/[0.03] px-3.5 py-3">
       <span className="wk-sec-h !text-[10px]">{label}</span>
       <span className="font-display text-[22px] leading-none tabular-nums text-ink" style={tone ? { color: tone } : undefined}>
         {value}
       </span>
       {sub && <span className="text-[11.5px] tabular-nums text-ink-faint">{sub}</span>}
     </div>
+  );
+}
+
+/** Under the forecast date: the pessimistic end, the gap to target, and what it rests on. */
+function ForecastSub({ m, s }: { m: MilestoneInfo; s: MilestoneStats }) {
+  if (s.forecastAt == null) return <>nothing closed in {s.basis.days} days</>;
+  const gap = m.targetAt && !s.forecastBeyond ? Math.round((s.forecastAt - +m.targetAt) / DAY) : null;
+  const rested = `${s.basis.closes} close${s.basis.closes === 1 ? "" : "s"} in ${s.basis.days} days`;
+  return (
+    <>
+      <span className="block">
+        {s.forecastLate != null ? `85% by ${shortDate(new Date(s.forecastLate))}` : "85%: 3 yrs+"}
+        {gap != null && (gap > 0 ? ` · ${gap} days after target` : ` · ${-gap} days to spare`)}
+      </span>
+      <span className={cn("block", s.basis.low && "text-solar/80")}>{s.basis.low ? `low confidence · ${rested}` : rested}</span>
+    </>
   );
 }
 
@@ -727,9 +743,10 @@ export function MilestonePage({
           />
           <Tile
             label="Forecast"
-            value={s.open === 0 ? "done" : s.forecastAt != null ? shortDate(new Date(s.forecastAt)) : "—"}
-            sub={s.pace > 0 ? `${s.pace >= 1 ? s.pace.toFixed(1) : (s.pace * 7).toFixed(1)} a ${s.pace >= 1 ? "day" : "week"} lately` : "nothing closed in 14 days"}
+            value={s.open === 0 ? "done" : s.forecastBeyond ? "3 yrs+" : s.forecastAt != null ? shortDate(new Date(s.forecastAt)) : "—"}
+            sub={s.open > 0 && <ForecastSub m={m} s={s} />}
             tone={targetTone}
+            title="Median of 500 simulated runs that replay this milestone's daily closes (imports left out) until the open work runs out. Items in progress count half done, in review 80%."
           />
           <Tile label="Left" value={s.open} sub={`${s.by.doing + s.by.review} moving · ${s.by.todo + s.by.backlog + openEntities.length} not started`} />
           {s.criteria.total > 0 && <Tile label="Exit criteria" value={`${s.criteria.done}/${s.criteria.total}`} sub="met" />}

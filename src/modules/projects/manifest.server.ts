@@ -30,22 +30,21 @@ export const projectsServerManifest: ModuleServerManifest = {
       id: "project-pulse",
       name: "Project pulse",
       description:
-        "Weekday heartbeat over your active projects: derives each one's health, fills a missing goal or next-action, and raises a card only for the ones that are stalled or blocked. Runs on a free local model.",
+        "Weekday heartbeat over your active projects: derives each one's health and raises a card only for the ones that are stalled or blocked. Runs on a free local model.",
       // Iterate with projects.focusNext: the backbone binds one active project
       // at a time, so every write targets the RIGHT project — the model never
       // handles an id. Idempotent per project per ISO week via the dedupeKey.
       defaultPrompt: [
-        "You are the user's chief-of-staff for their projects. Keep each active project honest — a clear health, a goal, a next step — and surface only the few that genuinely need the user.",
+        "You are the user's chief-of-staff for their projects. Keep each active project honest — a clear health — and surface only the few that genuinely need the user.",
         "1. Iterate with projects.focusNext until it returns done:true. Each call FOCUSES the next active project and returns its read: goal, nextAction, health + reason, open/done/overdue task counts, days idle, and its open tasks. The backbone picks the project — you never choose or type an id.",
         "2. On the focused project, record health with projects.setHealth (health + a one-line reason — no id) — ONCE; it can't be changed later in the run. Use 'blocked' only when it's clearly waiting on someone/something OUTSIDE the project, named in waitingOn (an open task of its own is not a block); 'stalled' when nothing has moved for ~2 weeks; 'at_risk' when a next-action is missing or a task is overdue; otherwise 'on_track'. Base it on the counts and activity, not guesswork.",
-        "3. If the focused project has no goal, set one with projects.setGoal (targets the focused project — no id). Do NOT set a next-action: the cockpit derives it from the project's real tasks (or, when there are none, the advisor's recommendation), so a written one would only freeze a stale copy.",
+        "3. Never set or change a goal — it is the user's own 'why', and a missing one is fine. Do NOT set a next-action either: the cockpit derives it from the project's real tasks (or, when there are none, the advisor's recommendation), so a written one would only freeze a stale copy.",
         "4. Raise an attention card ONLY when the focused project is 'stalled' or 'blocked'. GROUND it first with a sub-task: call agent.subtask with a self-contained instruction that names the project ('<name>', id <id>) and its health signal (days idle, open/overdue counts) and asks it to find, in a FRESH isolated context, the single most likely reason it is stuck and the one concrete unblocking step — searching that project's tasks, notes and memory. The sub-task starts blank and is READ-ONLY (put everything it needs into the instruction); it returns a short evidence-based summary and CANNOT write. Then YOU raise the card here on the focused project: attention.raise with type 'notify' (or 'do' when the sub-task surfaced a clear unblocking step), a short title, the sub-task's reason in the body, and dedupeKey 'pulse:<project name>:<ISO-week>' (e.g. 'pulse:acme:2026-W30'). It auto-anchors to the focused project — you pass no ref. Call attention.list first to avoid duplicating what's already open. Conversely, if attention.list shows a card YOU raised for this project that no longer applies (it is back on_track/at_risk, not stalled/blocked), close it with attention.resolve (status 'dismissed') by its ref.",
         "5. Be minimal — on-track and at-risk projects get a health update but NO card, and NO sub-task (only stalled/blocked ones are worth investigating). Delegating the investigation to a sub-task keeps THIS loop's context flat no matter how many projects you sweep — never inline that research here. Then call projects.focusNext again. Stop when it returns done. Do not send notifications; the cards and health are the output.",
       ].join("\n"),
       defaultTools: [
         "projects.focusNext",
         "projects.setHealth",
-        "projects.setGoal",
         "attention.raise",
         "attention.list",
         "attention.resolve",

@@ -421,7 +421,7 @@ export const projectTools: AiToolDef[] = [
   {
     name: "projects.setGoal",
     description:
-      "Set the FOCUSED project's north-star outcome (one line) when it has none, so it has a clear 'why' (targets the project from projects.focusNext — you pass no id). Don't overwrite a goal the user already wrote unless it's clearly wrong.",
+      "Chat only: record the project's north-star outcome (one line) exactly as the user states it. Never invent one — a goal is the user's own 'why'. Agent runs can't set it.",
     input: z.object({
       id: z
         .string()
@@ -433,6 +433,9 @@ export const projectTools: AiToolDef[] = [
       goal: z.string().min(3).max(160),
     }),
     async execute(input, ctx) {
+      // Agent-written goals were generic paraphrases ("Enhance … through
+      // continuous learning") or copied from another project — never the user's.
+      if (ctx.agentName) return { error: "Not recorded: a project's goal is set by the user, not by agents." };
       const t = boundProjectId(ctx, input.id);
       if ("error" in t) return t;
       const [row] = await ctx.db

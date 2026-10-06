@@ -59,8 +59,8 @@ export const projects = pgTable("projects", {
     .notNull()
     .default("active"),
   /**
-   * The north-star outcome this project is for (one line). L2: the Project-pulse
-   * agent proposes one when it's missing; the user can overwrite it.
+   * The north-star outcome this project is for (one line). The user's own —
+   * agents can't set it (projects.setGoal refuses agent runs).
    */
   goal: text("goal"),
   /**

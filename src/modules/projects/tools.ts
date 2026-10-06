@@ -9,6 +9,7 @@ import { sql } from "@/core/db/client";
 import { getProjectCockpit, getProjectTasks } from "./queries";
 import { boundProjectId, resolveProjectByName } from "./subject";
 import { usableRepoPath } from "./repo";
+import { sameMove, STALE_ADVICE_DAYS } from "./advice";
 import { projectFiles, projects, PROJECT_HEALTHS, PROJECT_STATUSES } from "./schema";
 import { isClosed } from "../tasks/schema";
 import { ensureProjectKey } from "@/modules/tasks/core";
@@ -16,6 +17,20 @@ import { ensureProjectKey } from "@/modules/tasks/core";
 const DAY = 24 * 60 * 60 * 1000;
 const daysAgo = (d: Date | null) =>
   d === null ? null : Math.floor((Date.now() - d.getTime()) / DAY);
+
+/** Days since the focused project's repo last committed (null: no repo / git failed). */
+async function lastCommitDaysAgo(projectId: string, db: typeof import("@/core/db/client").db) {
+  try {
+    const [p] = await db.select({ repoUrl: projects.repoUrl }).from(projects).where(eq(projects.id, projectId));
+    const dir = usableRepoPath(projectId, p?.repoUrl ?? null);
+    if (!dir) return null;
+    const { stdout } = await promisify(execFile)("git", ["-C", dir, "log", "-1", "--format=%ct"]);
+    const ts = Number(stdout.trim());
+    return ts ? Math.floor((Date.now() - ts * 1000) / DAY) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Quality gate for an advisor brief (A2 for insights) — a cheap LOCAL judge.
@@ -173,13 +188,33 @@ export const projectTools: AiToolDef[] = [
             );
           });
         }
-        const items = active.map((p) => ({
+        const items = active.map((p) => {
+          // With nothing else to show, the cockpit falls back to the advisor's own
+          // last recommendation as the next action. Never hand that back as the
+          // user's plan: re-read as fact, it renewed itself every run (AIOS carried
+          // "Write MILESTONE.md" for two weeks that way). Name it as the agent's
+          // own earlier advice, with its age.
+          const own = p.nextActionSource === "advisor";
+          const age = daysAgo(p.advisorNextSince ?? p.advisorUpdatedAt);
+          const earlierSuggestion = p.advisorNext
+            ? {
+                text: p.advisorNext,
+                firstMadeDaysAgo: age,
+                note:
+                  age !== null && age >= STALE_ADVICE_DAYS
+                    ? `Your own advice from ${age} days ago, never acted on. Do not make it again — base the next move on the current evidence only.`
+                    : "Your own earlier advice — not a plan the user chose. Keep it only if today's evidence still calls for it.",
+              }
+            : undefined;
+          return {
             id: p.id,
             name: p.name,
             read: {
               name: p.name,
+              description: p.description,
               goal: p.goal,
-              nextAction: p.nextAction,
+              nextAction: own ? null : p.nextAction,
+              ...(earlierSuggestion && { earlierSuggestion }),
               health: p.resolvedHealth.health,
               healthReason: p.resolvedHealth.reason,
               tasks: {
@@ -190,7 +225,8 @@ export const projectTools: AiToolDef[] = [
               notes: p.noteCount,
               daysSinceActivity: daysAgo(p.lastActivityAt),
             } as Record<string, unknown>,
-          }));
+          };
+        });
         ctx.subjectCursor = { kind: "project", items, index: 0 };
       }
       const cur = ctx.subjectCursor;
@@ -216,6 +252,17 @@ export const projectTools: AiToolDef[] = [
       }
       const it = cur.items[cur.index++];
       ctx.subject = { kind: "project", id: it.id, name: it.name };
+      // Code projects move in commits, not tasks: fold the newest commit into
+      // "days idle" so a repo shipping PRs daily isn't read as dormant because
+      // its work items stopped. Best-effort — git failing leaves the task signal.
+      if (!("daysSinceCommit" in it.read)) {
+        const commitDays = await lastCommitDaysAgo(it.id, ctx.db);
+        if (commitDays !== null) {
+          const prev = it.read.daysSinceActivity as number | null;
+          it.read.daysSinceCommit = commitDays;
+          it.read.daysSinceActivity = prev === null ? commitDays : Math.min(prev, commitDays);
+        }
+      }
       // Attach the focused project's tasks so the model has real evidence
       // (titles, priority, due dates) without ever handling a project id. Open
       // tasks feed the derived next-action; the recently-completed ones let the
@@ -246,9 +293,13 @@ export const projectTools: AiToolDef[] = [
       try {
         const { recallSemantic } = await import("@/core/memory");
         const goal = (it.read as { goal?: string | null }).goal ?? "";
+        // Close matches only: the nearest library item is returned at ANY
+        // distance, so a project about "learning" pulled a bookmarked course
+        // (0.36 away) and the advisor turned it into a deadline the user never set.
         const hits = await recallSemantic(`${it.name}. ${goal}`.slice(0, 300), {
           kinds: ["memory", "knowledge", "note", "vault"],
           limit: 3,
+          maxDistance: 0.3,
         });
         relevantMemory = hits.map((h) => ({ kind: h.kind, text: h.text }));
       } catch {
@@ -256,7 +307,16 @@ export const projectTools: AiToolDef[] = [
       }
       return {
         focused: it.name,
-        project: { ...it.read, openTasks, recentlyCompleted, relevantMemory },
+        project: {
+          ...it.read,
+          openTasks,
+          recentlyCompleted,
+          relevantMemory,
+          ...(relevantMemory.length && {
+            relevantMemoryNote:
+              "Background the user saved (bookmarks, notes, past memory). NOT their plans, goals, deadlines or commitments — never state one that isn't in this project's own fields or tasks.",
+          }),
+        },
         remaining: cur.items.length - cur.index,
       };
     },
@@ -449,11 +509,32 @@ export const projectTools: AiToolDef[] = [
       // name the real cause on the spot.
       let gitError: string | null = null;
       try {
-        recentCommits = (
-          await exec("git", ["-C", dir, "log", "--oneline", "-20"], {
+        // Dated lines, so "nothing new" is a fact the model reads, not a guess.
+        // A commit that names ANOTHER project (its key, e.g. "ETHOS-578") was
+        // done here for that project — tagged so its work isn't mistaken for
+        // this project's own roadmap.
+        const raw = (
+          await exec("git", ["-C", dir, "log", "-20", "--format=%h %as %s%x00%b%x1e"], {
             maxBuffer: 4 * 1024 * 1024,
           })
-        ).stdout.trim();
+        ).stdout;
+        const others = await ctx.db
+          .select({ key: projects.key, name: projects.name })
+          .from(projects)
+          .where(and(ne(projects.id, projectId), isNotNull(projects.key)));
+        const keyRes = others
+          .filter((o) => o.key && o.key.length >= 3)
+          .map((o) => ({ name: o.name, re: new RegExp(`\\b${o.key!.replace(/[^A-Z0-9]/gi, "")}(-\\d+)?\\b`) }));
+        recentCommits = raw
+          .split("\x1e")
+          .map((c) => c.trim())
+          .filter(Boolean)
+          .map((c) => {
+            const [line, body = ""] = c.split("\x00");
+            const hit = keyRes.filter((k) => k.re.test(`${line}\n${body}`)).map((k) => k.name);
+            return hit.length ? `${line}  [names ${hit.join(", ")} — work for that project]` : line;
+          })
+          .join("\n");
       } catch (e) {
         gitError = (e instanceof Error ? e.message : String(e))
           .replace(/\s+/g, " ")
@@ -500,6 +581,21 @@ export const projectTools: AiToolDef[] = [
     async execute(input, ctx) {
       const t = boundProjectId(ctx, input.projectId);
       if ("error" in t) return t;
+      // A reworded repeat keeps its first date; one that was never acted on in
+      // STALE_ADVICE_DAYS is refused — the message says to leave it and move
+      // on, never "do X first" (a local model games a guard that names the fix).
+      const [prev] = await ctx.db
+        .select({ next: projects.advisorNext, since: projects.advisorNextSince, at: projects.advisorUpdatedAt })
+        .from(projects)
+        .where(eq(projects.id, t.id));
+      const repeat = !!prev?.next && sameMove(prev.next, input.recommendation);
+      const since = repeat ? (prev!.since ?? prev!.at ?? new Date()) : new Date();
+      const age = daysAgo(since) ?? 0;
+      if (repeat && ctx.agentName && age >= STALE_ADVICE_DAYS) {
+        return {
+          error: `Not recorded: this repeats advice first given ${age} days ago that was never acted on. Leave this project's brief as it is and call projects.focusNext.`,
+        };
+      }
       // Insight quality gate — reject a generic/ungrounded read so the advisor
       // rewrites it with real evidence (LOCAL judge; never blocks on infra).
       const grounded = await verifyBriefGrounded(input.state, input.recommendation);
@@ -515,6 +611,7 @@ export const projectTools: AiToolDef[] = [
           advisorState: input.state.trim(),
           advisorBlocker: input.blocker?.trim() || null,
           advisorNext: input.recommendation.trim(),
+          advisorNextSince: since,
           advisorUpdatedAt: new Date(),
         })
         .where(eq(projects.id, t.id))

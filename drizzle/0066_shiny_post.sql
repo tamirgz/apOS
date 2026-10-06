@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "advisor_next_since" timestamp with time zone;

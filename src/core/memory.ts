@@ -487,7 +487,8 @@ export async function reviewEntries(
  */
 export async function recallSemantic(
   query: string,
-  opts: { kinds?: string[]; limit?: number } = {},
+  /** maxDistance: drop hits farther than this (cosine) — nearest is not the same as related. */
+  opts: { kinds?: string[]; limit?: number; maxDistance?: number } = {},
 ): Promise<{ kind: string; text: string; href: string | null }[]> {
   const kinds = opts.kinds ?? ["memory", "knowledge", "note", "vault"];
   const limit = opts.limit ?? 6;
@@ -531,6 +532,7 @@ export async function recallSemantic(
          ) asc
        limit ${limit}`);
     return [...rows]
+      .filter((r) => opts.maxDistance == null || Number(r.distance) <= opts.maxDistance)
       .map((r) => ({
         kind: r.kind,
         text: (r.snippet ?? r.title ?? "").trim().slice(0, 400),

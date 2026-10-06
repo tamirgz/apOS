@@ -32,6 +32,9 @@ function firstSentence(s: string): string {
  * last time anything happened, and the resolved health (agent's if fresh, else
  * the read-time heuristic so it's never blank).
  */
+/** How long an advisor brief may stand in for a missing next action. */
+const ADVICE_FRESH_DAYS = 14;
+
 export interface ProjectCockpit extends Project {
   taskCounts: { total: number; done: number; open: number; overdue: number };
   noteCount: number;
@@ -90,7 +93,14 @@ export async function getProjectCockpit(
     //      nextActionSource) — a path-forward suggestion grounded in the project's
     //      state (incl. its completed tasks). Reliable because the advisor
     //      covers every project, unlike a flaky per-run write.
-    const advise = project.advisorNext ? firstSentence(project.advisorNext) : null;
+    // Only a FRESH brief can stand in for a next action. Areas are never
+    // re-briefed (the sweep skips them), so an old brief froze there for good —
+    // "Rohit Garg Phase 3" sat on Technology & Craft for two weeks that way.
+    const briefFresh =
+      project.kind !== "area" &&
+      !!project.advisorUpdatedAt &&
+      Date.now() - project.advisorUpdatedAt.getTime() < ADVICE_FRESH_DAYS * 86_400_000;
+    const advise = project.advisorNext && briefFresh ? firstSentence(project.advisorNext) : null;
     const nextAction =
       project.nextAction ?? (nextTaskTitle ? plainTitle(String(nextTaskTitle)) : advise);
     const nextActionSource = project.nextAction

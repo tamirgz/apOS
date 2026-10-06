@@ -99,6 +99,12 @@ export const projects = pgTable("projects", {
   advisorBlocker: text("advisor_blocker"),
   advisorNext: text("advisor_next"),
   advisorUpdatedAt: timestamp("advisor_updated_at", { withTimezone: true }),
+  /**
+   * When the advisor FIRST made its current recommendation. A reworded repeat
+   * (advice.ts sameMove) keeps it, so a suggestion can't renew itself by
+   * paraphrase — the read tells the agent its age, and a stale one is refused.
+   */
+  advisorNextSince: timestamp("advisor_next_since", { withTimezone: true }),
   /** A1 Repo-watcher routine: a short "what's moving in the code" digest of the
    * attached repo's recent commits, refreshed on a schedule. Feeds the advisor. */
   repoDigest: text("repo_digest"),

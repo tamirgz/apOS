@@ -463,6 +463,13 @@
       "when": 1790869269819,
       "tag": "0065_daily_madripoor",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1791310646682,
+      "tag": "0066_shiny_post",
+      "breakpoints": true
     }
   ]
 }

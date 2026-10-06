@@ -109,6 +109,11 @@ export const projects = pgTable("projects", {
    * attached repo's recent commits, refreshed on a schedule. Feeds the advisor. */
   repoDigest: text("repo_digest"),
   repoDigestAt: timestamp("repo_digest_at", { withTimezone: true }),
+  /** Last successful refresh of the read-only repo copy (repo-jobs). */
+  repoSyncedAt: timestamp("repo_synced_at", { withTimezone: true }),
+  /** The last refresh's failure, or null — the cockpit warns instead of
+   *  showing a copy that quietly stopped updating as fine. */
+  repoSyncError: text("repo_sync_error"),
   /** Commit-linking ledger: the last HEAD scanned for KEY-N mentions (work tracker). */
   workLinkSha: text("work_link_sha"),
   createdAt: timestamp("created_at", { withTimezone: true })

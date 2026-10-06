@@ -450,6 +450,10 @@ export async function runAttempt(attemptId: string): Promise<void> {
       if (!(await isGitRepo(task.repoPath))) {
         throw new Error(`${task.repoPath} is not a git repository`);
       }
+      // The project copies refresh nightly — bring this one up to date so the
+      // run starts from the source's latest committed code.
+      const { refreshRepoAt } = await import("@/modules/projects/repo-jobs");
+      await refreshRepoAt(task.repoPath).catch(() => {});
       isClone = executor.kind === "cli";
       const iso = isClone
         ? await createClone(task.repoPath, attempt.id)

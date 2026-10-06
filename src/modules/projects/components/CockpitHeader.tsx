@@ -5,6 +5,7 @@ import { ArrowRight, Check, GitBranch, Pencil, Target, X } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/core/ui/cn";
 import { act } from "@/core/ui/feedback";
+import { timeAgo } from "@/core/ui/time";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
 import { HEALTH_META } from "../health";
 import { CategoryPicker } from "./CategoryPicker";
@@ -145,6 +146,8 @@ export function ProjectPlan({
   nextAction,
   repoUrl,
   repoReady,
+  repoSyncedAt,
+  repoSyncError,
   repoDigest,
   setGoal,
   setNextAction,
@@ -157,6 +160,9 @@ export function ProjectPlan({
   repoUrl: string | null;
   /** True once the read-only clone exists (or the local path is a git repo). */
   repoReady: boolean;
+  /** Last successful nightly refresh of the copy, and the last failure (if any). */
+  repoSyncedAt: Date | null;
+  repoSyncError: string | null;
   /** Repo-watcher routine's latest "what's moving in the code" digest. */
   repoDigest: string | null;
   completeNextAction: (id: string) => Promise<void>;
@@ -165,7 +171,7 @@ export function ProjectPlan({
   setRepo: (id: string, repoUrl: string | null) => Promise<void>;
 }) {
   // The worker announces repo-sync (and advisor) completion on this channel —
-  // refresh so "cloning…" flips to "cloned" (and fresh reads appear) live.
+  // refresh so "copying…" flips to "synced" (and fresh reads appear) live.
   useLiveEvents(["projects_changed"]);
 
   return (
@@ -210,15 +216,29 @@ export function ProjectPlan({
           {repoUrl && (
             <span
               className="wk-chip mt-0.5 shrink-0 !px-2 !py-px !text-[11px]"
-              style={{ color: repoReady ? "var(--color-plasma)" : "var(--color-solar)" }}
+              style={{
+                color: repoSyncError
+                  ? "var(--color-flare)"
+                  : repoReady
+                    ? "var(--color-plasma)"
+                    : "var(--color-solar)",
+              }}
               title={
-                repoReady
-                  ? "Read-only clone is ready — pick it as the repo when delegating a code task"
-                  : "Cloning in the background — refresh in a moment"
+                repoSyncError
+                  ? `Couldn't refresh the read-only copy: ${repoSyncError}`
+                  : repoReady
+                    ? "Read-only copy of the repo's main branch — refreshed nightly, and before each Workbench run"
+                    : "Copying in the background — refresh in a moment"
               }
             >
               <i className="dot" />
-              {repoReady ? "cloned" : "cloning…"}
+              {repoSyncError
+                ? "sync failed"
+                : repoReady
+                  ? repoSyncedAt
+                    ? `synced ${timeAgo(repoSyncedAt)}`
+                    : "synced"
+                  : "copying…"}
             </span>
           )}
         </dd>

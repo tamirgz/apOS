@@ -21,7 +21,9 @@ export interface ArchiveEntry {
 
 const DAY = 86_400_000;
 const PALETTE = ["--color-plasma", "--color-ion", "--color-violet", "--color-solar", "--color-orchid", "--color-gold", "--color-flare"];
-const WEEKLY = ["current_focus", "active_projects"];
+// Rewritten by the weekly consolidation, so age = staleness. current_focus is
+// the user's own words — its age says nothing.
+const WEEKLY = ["active_projects"];
 const LANES: [string, string[]][] = [
   ["procedural", ["lesson", "policy"]],
   ["semantic", ["fact", "decision"]],

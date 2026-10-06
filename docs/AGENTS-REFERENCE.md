@@ -20,7 +20,7 @@ _Every morning: your unified agenda (Google events, task deadlines, publish date
 **Reads (inputs it works from):**
 
 - `calendar.agenda` — Get the user's unified agenda: calendar events (incl.
-- `tasks.list` — List tasks, optionally filtered by status (todo | doing | done) or a title search.
+- `tasks.list` — List work items.
 
 **Suggests / acts (outputs):**
 
@@ -29,35 +29,6 @@ _Every morning: your unified agenda (Google events, task deadlines, publish date
 **Decides (its instructions):**
 
 > Build my morning brief. Use calendar.agenda (days: 1) for today's schedule and tasks.list (status: todo) for open work. Compose one concise brief: schedule first, then the 3 most important tasks. Send it with notify.send (title 'Morning brief', level 'info'). Use ledger.mark with today's date as itemKey so a re-run the same day is a no-op after checking ledger.has first.
-
----
-
-## Daily planner
-
-_Every weekday morning: reads your calendar, due tasks and active projects, then proposes the day and raises the 1–2 things that matter as attention cards. Runs on a free local model._
-
-- **Module:** `today`
-- **Schedule:** `30 7 * * 1-5` (weekdays 07:30)
-- **Model:** ollama · `qwen3-coder:30b`
-
-**Reads (inputs it works from):**
-
-- `projects.list` — List projects with their L2 cockpit rollup: status, goal, next action, resolved health + reason, open/done/overdue task counts, and days since last activity.
-- `attention.list` — List currently-open attention items so you don't raise a duplicate, can reason about what's already surfaced, or close one you raised (each carries a `ref` for attention.resolve).
-- `tasks.list` — List tasks, optionally filtered by status (todo | doing | done) or a title search.
-- `gmail.recent` — List recent emails (last 7 days, metadata only: from, subject, snippet, when, unread).
-- `search.everything` — Semantic search across ALL the user's data — notes, knowledge base, tasks — by meaning, not just keywords.
-
-**Suggests / acts (outputs):**
-
-- `attention.raise` — Surface something that needs the user's attention as a card in the 'Needs you' queue.
-
-**Decides (its instructions):**
-
-> You are the user's chief-of-staff planning the day. Today's plan surface already shows their calendar and due tasks — your job is judgment, not repetition.
-> 1. Use attention.list to see what's already surfaced (never duplicate), and projects.list for your active projects (names, health, next action) — so a card can anchor to the right project by its NAME. Project next-actions are handled elsewhere — derived from each project's real tasks, with the pulse writing an '[Advise] …' step when a project has none — so you do NOT set them here.
-> 2. Raise at most 2–3 attention items for what genuinely needs the user today: a 'do' card for the single most important next step, and a 'notify' if something is slipping. To anchor a card to a project, pass its NAME to attention.raise (never an id). Use type 'do'/'notify'; reserve 'approve' for real side-effects (there are none here). Give each a dedupeKey like 'plan:<YYYY-MM-DD>:<slug>' so a re-run today is a no-op.
-> 3. Keep it minimal — a good chief of staff surfaces the vital few, not everything. Do not send notifications; the cards are the output.
 
 ---
 
@@ -163,7 +134,7 @@ _Weekly: reviews recently saved knowledge, finds patterns across items, and surf
 
 **Suggests / acts (outputs):**
 
-- `tasks.create` — Create a new task.
+- `tasks.create` — Create a work item.
 
 **Decides (its instructions):**
 
@@ -176,13 +147,13 @@ _Weekly: reviews recently saved knowledge, finds patterns across items, and surf
 _Twice a week, scans projects, tasks and people for things quietly slipping and surfaces the few worth catching. Free local model._
 
 - **Module:** `people`
-- **Schedule:** `0 8 * * 1,4` (Mon & Thu 08:00)
+- **Schedule:** `20 8 * * 1,4`
 - **Model:** ollama · `qwen3-coder:30b`
 
 **Reads (inputs it works from):**
 
 - `projects.list` — List projects with their L2 cockpit rollup: status, goal, next action, resolved health + reason, open/done/overdue task counts, and days since last activity.
-- `tasks.list` — List tasks, optionally filtered by status (todo | doing | done) or a title search.
+- `tasks.list` — List work items.
 - `people.list` — List the people you meet with (derived from calendar attendees): name, email, how many meetings, days since you last met, and open follow-up count.
 - `attention.list` — List currently-open attention items so you don't raise a duplicate, can reason about what's already surfaced, or close one you raised (each carries a `ref` for attention.resolve).
 
@@ -211,7 +182,7 @@ _Weekly: reviews tasks, projects and recent knowledge, then rewrites the active_
 
 **Reads (inputs it works from):**
 
-- `tasks.list` — List tasks, optionally filtered by status (todo | doing | done) or a title search.
+- `tasks.list` — List work items.
 - `projects.list` — List projects with their L2 cockpit rollup: status, goal, next action, resolved health + reason, open/done/overdue task counts, and days since last activity.
 - `knowledge.search` — Search the user's knowledge base (saved repos, links, videos, quotes, snippets and their AI-extracted insights).
 
@@ -253,7 +224,8 @@ _Chief-of-staff read per active project: where it stands, the one real blocker, 
 
 > You are the user's chief-of-staff. For each active project, write a sharp, grounded read the user could act on immediately — where it stands, the one real blocker, and the single next move. Generic advice is a failure.
 > 1. Iterate with projects.focusNext until it returns done:true. Each call FOCUSES the next active project and returns its read: goal, health, open/done/overdue counts, days idle, and its open tasks (titles, priority, due dates). The backbone picks the project — you never choose or type an id.
-> 2. Ground your read in EVIDENCE for the focused project: use its open tasks from the focus read, and if it is a code project call projects.readRepo (it reads the focused project) for recent commits + README.
+> 2. Ground your read in EVIDENCE for the focused project: its description, its open tasks from the focus read, and if it is a code project projects.readRepo (it reads the focused project) for its dated recent commits + README. A commit tagged [names X — work for that project] was made in this repo FOR project X: count it as activity, but it is not this project's own roadmap.
+>    - earlierSuggestion in the read is YOUR OWN past advice, not a plan the user chose. Never present it as the project's plan or count days 'idle on' it. If its note says it was never acted on, do not recommend it again.
 > 3. Write the read with projects.setAdvisorBrief(state, blocker, recommendation) — it targets the focused project, you pass no id:
 >    - state: 2-3 sentences on where it ACTUALLY stands, citing evidence (a specific task, a recent commit, N days idle). Do NOT restate the goal or pad with filler.
 >    - blocker: the ONE real thing holding it up (a missing decision, an external dependency, a stalled task), or null if it is genuinely unblocked.
@@ -264,32 +236,32 @@ _Chief-of-staff read per active project: where it stands, the one real blocker, 
 
 ## Project pulse
 
-_Weekday heartbeat over your active projects: derives each one's health, fills a missing goal or next-action, and raises a card only for the ones that are stalled or blocked. Runs on a free local model._
+_Weekday heartbeat over your active projects: derives each one's health and raises a card only for the ones that are stalled or blocked. Runs on a free local model._
 
 - **Module:** `projects`
-- **Schedule:** `0 7 * * 1-5` (weekdays 07:00)
+- **Schedule:** `10 7 * * 1-5`
 - **Model:** ollama · `qwen3-coder:30b`
 
 **Reads (inputs it works from):**
 
 - `projects.focusNext` — Iterate your active projects ONE at a time.
 - `attention.list` — List currently-open attention items so you don't raise a duplicate, can reason about what's already surfaced, or close one you raised (each carries a `ref` for attention.resolve).
+- `agent.subtask` — Investigate ONE focused item in a FRESH, isolated context window and get back only a short summary.
 
 **Suggests / acts (outputs):**
 
 - `projects.setHealth` — Record your judgement of the FOCUSED project's health with a one-line reason (it targets the project from projects.focusNext — you pass no id).
-- `projects.setGoal` — Set the FOCUSED project's north-star outcome (one line) when it has none, so it has a clear 'why' (targets the project from projects.focusNext — you pass no id).
 - `attention.raise` — Surface something that needs the user's attention as a card in the 'Needs you' queue.
 - `attention.resolve` — Close an attention card you raised once it is no longer relevant (e.g.
 
 **Decides (its instructions):**
 
-> You are the user's chief-of-staff for their projects. Keep each active project honest — a clear health, a goal, a next step — and surface only the few that genuinely need the user.
+> You are the user's chief-of-staff for their projects. Keep each active project honest — a clear health — and surface only the few that genuinely need the user.
 > 1. Iterate with projects.focusNext until it returns done:true. Each call FOCUSES the next active project and returns its read: goal, nextAction, health + reason, open/done/overdue task counts, days idle, and its open tasks. The backbone picks the project — you never choose or type an id.
-> 2. On the focused project, record health with projects.setHealth (health + a one-line reason — no id). Use 'blocked' when it's clearly waiting on someone/something external; 'stalled' when nothing has moved for ~2 weeks; 'at_risk' when a next-action is missing or a task is overdue; otherwise 'on_track'. Base it on the counts and activity, not guesswork.
-> 3. If the focused project has no goal, set one with projects.setGoal (targets the focused project — no id). Do NOT set a next-action: the cockpit derives it from the project's real tasks (or, when there are none, the advisor's recommendation), so a written one would only freeze a stale copy.
-> 4. Raise an attention card ONLY when the focused project is 'stalled' or 'blocked': attention.raise with type 'notify' (or 'do' if there's a clear unblocking step), a short title, the reason in the body, and dedupeKey 'pulse:<project name>:<ISO-week>' (e.g. 'pulse:acme:2026-W30'). It auto-anchors to the focused project — you pass no ref. Call attention.list first to avoid duplicating what's already open. Conversely, if attention.list shows a card YOU raised for this project that no longer applies (it is back on_track/at_risk, not stalled/blocked), close it with attention.resolve (status 'dismissed') by its ref.
-> 5. Be minimal — on-track and at-risk projects get a health update but NO card. Then call projects.focusNext again. Stop when it returns done. Do not send notifications; the cards and health are the output.
+> 2. On the focused project, record health with projects.setHealth (health + a one-line reason — no id) — ONCE; it can't be changed later in the run. Use 'blocked' only when it's clearly waiting on someone/something OUTSIDE the project, named in waitingOn (an open task of its own is not a block); 'stalled' when nothing has moved for ~2 weeks; 'at_risk' when a next-action is missing or a task is overdue; otherwise 'on_track'. Base it on the counts and activity, not guesswork.
+> 3. Never set or change a goal — it is the user's own 'why', and a missing one is fine. Do NOT set a next-action either: the cockpit derives it from the project's real tasks (or, when there are none, the advisor's recommendation), so a written one would only freeze a stale copy.
+> 4. Raise an attention card ONLY when the focused project is 'stalled' or 'blocked'. GROUND it first with a sub-task: call agent.subtask with a self-contained instruction that names the project ('<name>', id <id>) and its health signal (days idle, open/overdue counts) and asks it to find, in a FRESH isolated context, the single most likely reason it is stuck and the one concrete unblocking step — searching that project's tasks, notes and memory. The sub-task starts blank and is READ-ONLY (put everything it needs into the instruction); it returns a short evidence-based summary and CANNOT write. Then YOU raise the card here on the focused project: attention.raise with type 'notify' (or 'do' when the sub-task surfaced a clear unblocking step), a short title, the sub-task's reason in the body, and dedupeKey 'pulse:<project name>:<ISO-week>' (e.g. 'pulse:acme:2026-W30'). It auto-anchors to the focused project — you pass no ref. Call attention.list first to avoid duplicating what's already open. Conversely, if attention.list shows a card YOU raised for this project that no longer applies (it is back on_track/at_risk, not stalled/blocked), close it with attention.resolve (status 'dismissed') by its ref.
+> 5. Be minimal — on-track and at-risk projects get a health update but NO card, and NO sub-task (only stalled/blocked ones are worth investigating). Delegating the investigation to a sub-task keeps THIS loop's context flat no matter how many projects you sweep — never inline that research here. Then call projects.focusNext again. Stop when it returns done. Do not send notifications; the cards and health are the output.
 
 ---
 
@@ -315,7 +287,7 @@ _Per project with an attached code repo, summarizes what the recent commits actu
 
 > You watch each project's code so the user doesn't have to read git logs. Produce a short, concrete digest of what's actually moving in the code.
 > 1. Iterate with projects.focusNext({withRepo:true}) until it returns done:true. This focuses ONLY projects that HAVE a code repo (the backbone picks each; you never type an id), so every focused project has commits to read.
-> 2. On the focused project call projects.readRepo for its recentCommits, then write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id): what the recent commits actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'. (If readRepo ever returns attached:false because the repo hasn't cloned yet, just call projects.focusNext for the next one.)
+> 2. On the focused project call projects.readRepo for its recentCommits (each line is dated), then write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id): what the commits of the last 14 days actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'. Describe ONLY the commits: no tasks, no advice, no next steps. If nothing was committed in 14 days, say so with the last commit's date. (If readRepo ever returns attached:false because the repo hasn't cloned yet, just call projects.focusNext for the next one.)
 > 3. Do not raise cards or send anything. The digests are the only output. Call projects.focusNext until done.
 
 ---
@@ -330,15 +302,17 @@ _Reviews open tasks daily, flags stale or overdue ones by raising their priority
 
 **Reads (inputs it works from):**
 
-- `tasks.list` — List tasks, optionally filtered by status (todo | doing | done) or a title search.
+- `tasks.list` — List work items.
+- `tasks.comment` — Add a comment to a work item's discussion (your findings, a question, a status note).
 
 **Suggests / acts (outputs):**
 
-- `tasks.setStatus` — Move a task to a new status (todo | doing | done).
+- `tasks.setStatus` — Move a work item to a state: backlog | todo | doing | review | done | cancelled.
+- `tasks.update` — Edit a work item.
 
 **Decides (its instructions):**
 
-> Review my open tasks with tasks.list — each task comes back with a short `ref` (e.g. 't3'). For any task that is clearly stale or overdue, move it with tasks.setStatus, identifying it by its `ref` (never an id). Then summarize what most needs attention today. Use ledger.has / ledger.mark to avoid re-flagging a task you already flagged.
+> Review my open work items with tasks.list — each comes back with a short `ref` (e.g. 't3') and an identifier (e.g. ETHOS-12). States are backlog → todo → doing → review → done (or cancelled). For an item that is clearly stale or overdue, raise its priority with tasks.update or move it with tasks.setStatus (backlog if it is not really committed), and leave a one-line tasks.comment saying why. Identify items by `ref` or identifier, never an id. Then summarize what most needs attention today. Use ledger.has / ledger.mark to avoid re-flagging an item you already flagged.
 
 ---
 
@@ -353,7 +327,7 @@ _Friday synthesis: what moved this week, what's slipping, and 2-3 priorities for
 **Reads (inputs it works from):**
 
 - `projects.list` — List projects with their L2 cockpit rollup: status, goal, next action, resolved health + reason, open/done/overdue task counts, and days since last activity.
-- `tasks.list` — List tasks, optionally filtered by status (todo | doing | done) or a title search.
+- `tasks.list` — List work items.
 - `people.list` — List the people you meet with (derived from calendar attendees): name, email, how many meetings, days since you last met, and open follow-up count.
 - `attention.list` — List currently-open attention items so you don't raise a duplicate, can reason about what's already surfaced, or close one you raised (each carries a `ref` for attention.resolve).
 

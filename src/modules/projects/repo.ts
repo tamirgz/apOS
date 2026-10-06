@@ -6,7 +6,7 @@
 // repo or its origin: the source is only ever read (clone/fetch), never pushed.
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -50,10 +50,41 @@ export interface RepoSyncResult {
   detail: string;
 }
 
+const run = (args: string[]) =>
+  exec("git", args, { env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 });
+
 /**
- * Clone (first time) or fast-forward the project's read-only cache clone.
- * A local-path repo is validated and used in place. Public remotes work as-is;
- * a private remote fails cleanly (no prompt) — it needs a token in the URL.
+ * Point the copy at the source's main line — main, else master, else whatever
+ * the source has checked out. A clone otherwise inherits the branch the source
+ * happened to be on when it was attached and follows it forever, so the copy
+ * silently froze on an old feature branch.
+ */
+async function followMainLine(dir: string): Promise<string> {
+  let branch: string | null = null;
+  for (const b of ["main", "master"]) {
+    try {
+      await run(["-C", dir, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${b}`]);
+      branch = b;
+      break;
+    } catch {
+      /* not on this source */
+    }
+  }
+  if (!branch) {
+    await run(["-C", dir, "remote", "set-head", "origin", "--auto"]);
+    const { stdout } = await run(["-C", dir, "rev-parse", "--abbrev-ref", "origin/HEAD"]);
+    branch = stdout.trim().replace(/^origin\//, "");
+  }
+  // -f -B: the copy is read-only, so local state is always disposable.
+  await run(["-C", dir, "checkout", "-f", "-B", branch, `origin/${branch}`]);
+  return branch;
+}
+
+/**
+ * Clone (first time) or refresh the project's read-only cache copy. A changed
+ * source (the user re-pointed the project) is re-cloned — fetching would keep
+ * mirroring the old repo. Public remotes work as-is; a private remote fails
+ * cleanly (no prompt) — it needs a token in the URL.
  */
 export async function syncProjectRepo(
   projectId: string,
@@ -70,24 +101,26 @@ export async function syncProjectRepo(
 
   const dir = projectRepoDir(projectId);
   try {
+    let detail = local ? "copied (read-only)" : "cloned";
     if (existsSync(join(dir, ".git"))) {
-      // Read-only mirror: pull the source's committed state into our copy.
-      // `fetch` only READS the source; we never push, so the original is safe.
-      await exec("git", ["-C", dir, "fetch", "origin"], {
-        env: GIT_ENV,
-        maxBuffer: 64 * 1024 * 1024,
-      });
-      await exec("git", ["-C", dir, "reset", "--hard", "@{u}"], { env: GIT_ENV });
-      return { ok: true, path: dir, detail: "updated" };
+      const { stdout } = await run(["-C", dir, "remote", "get-url", "origin"]).catch(() => ({ stdout: "" }));
+      const norm = (u: string) => u.trim().replace(/\/+$/, "");
+      if (norm(stdout) === norm(source)) {
+        // `fetch` only READS the source; we never push, so the original is safe.
+        // --prune drops branches deleted at the source.
+        await run(["-C", dir, "fetch", "--prune", "origin"]);
+        const branch = await followMainLine(dir);
+        return { ok: true, path: dir, detail: `updated (${branch})` };
+      }
+      await rm(dir, { recursive: true, force: true });
+      detail = "re-cloned (repo changed)";
     }
     await mkdir(REPOS_ROOT, { recursive: true });
     // --no-hardlinks --local for a local source = a fully independent copy, so
     // nothing apOS does to the copy can ever reach the user's original repo.
-    const cloneArgs = local
-      ? ["clone", "--no-hardlinks", "--local", source, dir]
-      : ["clone", source, dir];
-    await exec("git", cloneArgs, { env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 });
-    return { ok: true, path: dir, detail: local ? "copied (read-only)" : "cloned" };
+    await run(local ? ["clone", "--no-hardlinks", "--local", source, dir] : ["clone", source, dir]);
+    const branch = await followMainLine(dir);
+    return { ok: true, path: dir, detail: `${detail} (${branch})` };
   } catch (e) {
     const msg = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ");
     return { ok: false, detail: msg.slice(0, 300) };

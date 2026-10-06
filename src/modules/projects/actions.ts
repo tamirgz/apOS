@@ -105,8 +105,9 @@ export async function setProjectRepo(id: string, repoUrl: string | null) {
   const url = repoUrl?.trim() || null;
   await db
     .update(projects)
-    // The old digest describes the old repo (or none) — drop it with it.
-    .set({ repoUrl: url, repoDigest: null, repoDigestAt: null, updatedAt: new Date() })
+    // The old digest, sync status and commit-link ledger describe the old repo
+    // (or none) — drop them with it; a new repo gets a link-only baseline scan.
+    .set({ repoUrl: url, repoDigest: null, repoDigestAt: null, repoSyncedAt: null, repoSyncError: null, workLinkSha: null, updatedAt: new Date() })
     .where(eq(projects.id, id));
   if (url) await sql.notify("project_repos_sync", id); // worker clones/refreshes
   revalidateProjects(id);

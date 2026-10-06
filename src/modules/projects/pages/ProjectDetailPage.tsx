@@ -138,6 +138,8 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
                 nextAction={project.nextAction}
                 repoUrl={project.repoUrl}
                 repoReady={!!usableRepoPath(project.id, project.repoUrl)}
+                repoSyncedAt={project.repoSyncedAt}
+                repoSyncError={project.repoSyncError}
                 repoDigest={project.repoDigest}
                 setGoal={setProjectGoal}
                 setNextAction={setProjectNextAction}

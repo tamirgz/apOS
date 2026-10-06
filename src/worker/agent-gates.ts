@@ -118,7 +118,7 @@ const GATES: Record<string, Gate> = {
     return SKIP(`no project activity since ${lastSuccessAt.toISOString()}`);
   },
 
-  // Summarizes NEW commits. The read-only clones refresh every 30 min
+  // Summarizes NEW commits. The read-only clones refresh nightly
   // (repo-jobs), so comparing each clone's last commit time against the
   // stored digest time is a purely local check. This also stops the
   // "verification failed: never called recordRepoDigest" pseudo-failures

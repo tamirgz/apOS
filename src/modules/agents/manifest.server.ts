@@ -38,16 +38,15 @@ export const agentsServerManifest: ModuleServerManifest = {
       id: "memory-consolidation",
       name: "Memory consolidation",
       description:
-        "Weekly: reviews tasks, projects and recent knowledge, then rewrites the active_projects and current_focus memory blocks so every AI call starts with fresh context.",
+        "Weekly: reviews tasks and projects, then rewrites the active_projects memory block so every AI call starts from the projects' real state. Never writes the user's focus or priorities.",
       defaultPrompt: [
-        "Consolidate the user's WORKING MEMORY — the two blocks injected into EVERY AI call. Keep them tight, accurate, current.",
+        "Consolidate the user's WORKING MEMORY — the active_projects block injected into EVERY AI call. Keep it tight, accurate, current.",
         "Follow these steps IN ORDER. Read each source ONCE — never re-read. Do NOT call memory.review or memory.recall; you do not need them. The WRITES are the point — never stop before both are done.",
         "1. ledger.has for this ISO week (e.g. 2026-W33). If it is already marked, STOP — done.",
         "2. projects.list, then tasks.list — read each ONCE. That is your complete picture.",
-        "3. memory.update 'active_projects' — ONE compressed line per ACTIVE project: name — state — the real next thing. Terse; no filler. (REQUIRED.)",
-        "4. memory.update 'current_focus' — 2-4 lines synthesising what the user is ACTUALLY pushing this week (infer from health, next-actions, overdue counts, idleness). Specific and honest, not a list restatement. (REQUIRED.)",
-        "5. ledger.mark the ISO week. Only now are you done — STOP. Do NOT touch other memory blocks.",
-        "You are NOT finished until BOTH memory.update calls AND ledger.mark have run.",
+        "3. memory.update 'active_projects' — ONE compressed line per ACTIVE project: name — state — its top open item (or 'no open items'). Facts from the data only: never guess priorities, focus, plans or deadlines. Terse; no filler. (REQUIRED.)",
+        "4. ledger.mark the ISO week. Only now are you done — STOP. Do NOT touch other memory blocks — current_focus, who_i_am and preferences are the user's own.",
+        "You are NOT finished until memory.update AND ledger.mark have run.",
       ].join("\n"),
       defaultTools: [
         "tasks.list",

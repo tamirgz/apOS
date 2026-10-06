@@ -28,7 +28,7 @@ const DEFAULT_BLOCKS = [
   },
   {
     label: "current_focus",
-    description: "What the user is actively working on right now.",
+    description: "What the user says they're working on right now — written by the user, never inferred by an agent.",
   },
   {
     label: "preferences",
@@ -40,6 +40,13 @@ const DEFAULT_BLOCKS = [
     description: "Short live summary of key projects and their state.",
   },
 ] as const;
+
+/**
+ * Blocks that state the user's own intent. Agents read them but can't write
+ * them: the weekly consolidation used to "infer what the user is pushing this
+ * week" into current_focus, and every other agent then repeated the guess.
+ */
+export const USER_OWNED_BLOCKS: string[] = ["who_i_am", "current_focus", "preferences"];
 
 /** Blocks the memory system relies on — editable, never deletable. */
 export const PROTECTED_BLOCKS: string[] = [...DEFAULT_BLOCKS.map((b) => b.label), "operating_rules"];
@@ -292,13 +299,13 @@ export async function rememberEntry(input: {
 /**
  * Block-freshness health-check. Bounding the injected snapshot only stays safe
  * if that snapshot keeps being refreshed — otherwise the always-injected memory
- * silently rots. The weekly-consolidated blocks (current_focus, active_projects)
- * are expected to update ~weekly; if one goes past STALE_BLOCK_DAYS the
+ * silently rots. The weekly-consolidated block (active_projects) is expected to
+ * update ~weekly — current_focus is the user's own, so its age says nothing; if one goes past STALE_BLOCK_DAYS the
  * consolidation agent has likely stopped, and the daily maintenance sweep
  * surfaces it. This is what makes "bounded injection doesn't harm growth" true.
  */
 const STALE_BLOCK_DAYS = 9;
-const WEEKLY_BLOCKS = ["current_focus", "active_projects"];
+const WEEKLY_BLOCKS = ["active_projects"];
 export async function checkMemoryFreshness(): Promise<
   { label: string; ageDays: number }[]
 > {

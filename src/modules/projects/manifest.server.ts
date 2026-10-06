@@ -76,7 +76,8 @@ export const projectsServerManifest: ModuleServerManifest = {
       defaultPrompt: [
         "You are the user's chief-of-staff. For each active project, write a sharp, grounded read the user could act on immediately — where it stands, the one real blocker, and the single next move. Generic advice is a failure.",
         "1. Iterate with projects.focusNext until it returns done:true. Each call FOCUSES the next active project and returns its read: goal, health, open/done/overdue counts, days idle, and its open tasks (titles, priority, due dates). The backbone picks the project — you never choose or type an id.",
-        "2. Ground your read in EVIDENCE for the focused project: use its open tasks from the focus read, and if it is a code project call projects.readRepo (it reads the focused project) for recent commits + README.",
+        "2. Ground your read in EVIDENCE for the focused project: its description, its open tasks from the focus read, and if it is a code project projects.readRepo (it reads the focused project) for its dated recent commits + README. A commit tagged [names X — work for that project] was made in this repo FOR project X: count it as activity, but it is not this project's own roadmap.",
+        "   - earlierSuggestion in the read is YOUR OWN past advice, not a plan the user chose. Never present it as the project's plan or count days 'idle on' it. If its note says it was never acted on, do not recommend it again.",
         "3. Write the read with projects.setAdvisorBrief(state, blocker, recommendation) — it targets the focused project, you pass no id:",
         "   - state: 2-3 sentences on where it ACTUALLY stands, citing evidence (a specific task, a recent commit, N days idle). Do NOT restate the goal or pad with filler.",
         "   - blocker: the ONE real thing holding it up (a missing decision, an external dependency, a stalled task), or null if it is genuinely unblocked.",
@@ -109,7 +110,7 @@ export const projectsServerManifest: ModuleServerManifest = {
       defaultPrompt: [
         "You watch each project's code so the user doesn't have to read git logs. Produce a short, concrete digest of what's actually moving in the code.",
         "1. Iterate with projects.focusNext({withRepo:true}) until it returns done:true. This focuses ONLY projects that HAVE a code repo (the backbone picks each; you never type an id), so every focused project has commits to read.",
-        "2. On the focused project call projects.readRepo for its recentCommits, then write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id): what the recent commits actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'. (If readRepo ever returns attached:false because the repo hasn't cloned yet, just call projects.focusNext for the next one.)",
+        "2. On the focused project call projects.readRepo for its recentCommits (each line is dated), then write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id): what the commits of the last 14 days actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'. Describe ONLY the commits: no tasks, no advice, no next steps. If nothing was committed in 14 days, say so with the last commit's date. (If readRepo ever returns attached:false because the repo hasn't cloned yet, just call projects.focusNext for the next one.)",
         "3. Do not raise cards or send anything. The digests are the only output. Call projects.focusNext until done.",
       ].join("\n"),
       defaultTools: [

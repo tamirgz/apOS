@@ -223,7 +223,9 @@ export function ProjectPlan({
           )}
         </dd>
       </dl>
-      {repoDigest && (
+      {/* A digest outlives a detached repo — and one written before the
+          agents were bound per project described another repo entirely. */}
+      {repoUrl && repoDigest && (
         <p dir="auto" className="wk-read plasma">
           <b>Repo watcher</b> · {repoDigest}
         </p>

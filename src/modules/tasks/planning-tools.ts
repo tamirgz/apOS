@@ -12,9 +12,27 @@ import { FEATURE_STATUSES, features, projects } from "@/modules/projects/schema"
 import { createCycle, cycleStatus, deleteCycle, listCycles, rollOverCycle, updateCycle } from "./cycles";
 import { resolveCycle, resolveFeature, resolveProject } from "./tools";
 import { isClosed, tasks } from "./schema";
+import { WEEK_START, WEEKDAY_LABELS } from "@/core/work-week";
 
 const dateOrNull = (s: string | undefined) => (s === undefined ? undefined : s ? new Date(s) : null);
 const errorOf = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
+
+/**
+ * Cycles follow the user's work week, so every one starts on WEEK_START
+ * (Sunday). Judged on the calendar date as written ("2026-10-05…"), not the
+ * UTC instant, so an offset can't flip the day. Returns the refusal, or null.
+ */
+function offWeekStart(startsAt: string): { error: string } | null {
+  const ymd = /^\d{4}-\d{2}-\d{2}/.exec(startsAt)?.[0];
+  if (!ymd) return null; // unparseable — parseRange reports it
+  const d = new Date(`${ymd}T12:00:00Z`);
+  const off = (d.getUTCDay() - WEEK_START + 7) % 7;
+  if (!off) return null;
+  const fix = new Date(+d - off * 86_400_000).toISOString().slice(0, 10);
+  return {
+    error: `Not saved: cycles start on a Sunday (the work week is Sun–Thu), and ${ymd} is a ${WEEKDAY_LABELS[off]}. Start it on ${fix} — a one-week cycle then ends on the Saturday, 6 days later.`,
+  };
+}
 
 async function moduleProgress(db: Parameters<AiToolDef["execute"]>[1]["db"], ids: string[]) {
   if (!ids.length) return new Map<string, { total: number; done: number }>();
@@ -69,14 +87,17 @@ export const planningTools: AiToolDef[] = [
   },
   {
     name: "cycles.create",
-    description: "Create a cycle (sprint) with a start and end date, for one project (or cross-project when no project applies).",
+    description:
+      "Create a cycle (sprint) with a start and end date, for one project (or cross-project when no project applies). Cycles start on a Sunday (the work week is Sun–Thu): a one-week cycle runs Sunday → Saturday.",
     input: z.object({
       name: z.string().min(1),
-      startsAt: z.string().describe("Start date, ISO 8601"),
+      startsAt: z.string().describe("Start date, ISO 8601 — a Sunday"),
       endsAt: z.string().describe("End date, ISO 8601"),
       project: z.string().optional().describe("Project NAME or key; omit for the focused project, or a cross-project cycle"),
     }),
     async execute(input, ctx) {
+      const wrongDay = offWeekStart(input.startsAt);
+      if (wrongDay) return wrongDay;
       const p = await resolveProject(ctx, input.project);
       if (p && "error" in p) return p;
       try {
@@ -90,7 +111,7 @@ export const planningTools: AiToolDef[] = [
   },
   {
     name: "cycles.update",
-    description: "Rename a cycle or change its dates. Pass only what changes.",
+    description: "Rename a cycle or change its dates (a cycle starts on a Sunday). Pass only what changes.",
     input: z.object({
       cycle: z.string().describe("Cycle ref ('c1'), NAME, or 'current'"),
       name: z.string().min(1).optional(),
@@ -98,6 +119,8 @@ export const planningTools: AiToolDef[] = [
       endsAt: z.string().optional().describe("ISO 8601"),
     }),
     async execute(input, ctx) {
+      const wrongDay = input.startsAt ? offWeekStart(input.startsAt) : null;
+      if (wrongDay) return wrongDay;
       const c = await resolveCycle(ctx, null, input.cycle);
       if ("error" in c) return c;
       try {

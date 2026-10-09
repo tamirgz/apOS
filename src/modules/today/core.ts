@@ -68,16 +68,6 @@ export interface RaiseInput {
   oncePerKey?: boolean;
 }
 
-/** ISO-8601 week label, e.g. "2026-W40" — the pulse card's dedupe window. */
-export function isoWeek(d = new Date()): string {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = t.getUTCDay() || 7;
-  t.setUTCDate(t.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((+t - +yearStart) / 86400000 + 1) / 7);
-  return `${t.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
-}
-
 /**
  * A stable dedupe key derived from the card's CONTENT — the same real thing
  * gets the same key no matter which agent raises it. This is deliberately

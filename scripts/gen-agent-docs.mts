@@ -8,16 +8,15 @@ import { allAgentTemplateDocs, AGENT_LEARNS } from "@/modules/agents/agent-doc";
 
 const HUMAN_CRON: Record<string, string> = {
   "0 7 * * *": "daily 07:00",
-  "30 7 * * 1-5": "weekdays 07:30",
-  "0 7 * * 1-5": "weekdays 07:00",
-  "15 7 * * 1-5": "weekdays 07:15",
-  "45 7 * * 1-5": "weekdays 07:45",
-  "0 18 * * 1-5": "weekdays 18:00",
-  "0 8 * * 1,4": "Mon & Thu 08:00",
+  "10 7 * * 0-4": "Sun–Thu 07:10",
+  "15 7 * * 0-4": "Sun–Thu 07:15",
+  "45 7 * * 0-4": "Sun–Thu 07:45",
+  "0 18 * * 0-4": "Sun–Thu 18:00",
+  "20 8 * * 0,3": "Sun & Wed 08:20",
   "0 8 * * *": "daily 08:00",
-  "0 16 * * 5": "Fri 16:00",
-  "0 20 * * 0": "Sun 20:00",
-  "0 9 * * 1": "Mon 09:00",
+  "0 16 * * 4": "Thu 16:00",
+  "0 20 * * 6": "Sat 20:00",
+  "0 9 * * 0": "Sun 09:00",
 };
 const sched = (c: string | null) =>
   c ? `\`${c}\`${HUMAN_CRON[c] ? ` (${HUMAN_CRON[c]})` : ""}` : "manual only";

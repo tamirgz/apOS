@@ -171,7 +171,7 @@ export async function distillMemory(): Promise<{ policies: number; facts: number
 export const memoryDistillJobs: ModuleJob[] = [
   {
     channel: "memory_distill",
-    schedule: "0 4 * * 0", // Sunday 04:00, after the daily maintenance sweep
+    schedule: "0 4 * * 6", // Saturday 04:00 (weekend), after the daily maintenance sweep
     handle: async () => {
       await distillMemory();
     },

@@ -345,7 +345,7 @@ export function RoutinesPanel({
   const [executorId, setExecutorId] = useState("opencode");
   const [newModel, setNewModel] = useState("");
   const [trigger, setTrigger] = useState<"commit" | "schedule" | "both" | "source">("commit");
-  const [schedule, setSchedule] = useState("0 8 * * 1-5");
+  const [schedule, setSchedule] = useState("0 8 * * 0-4");
   const [sourceRef, setSourceRef] = useState(sources[0]?.ref ?? "");
 
   // builder: describe → cheap model composes the config (keeps your ask)
@@ -484,7 +484,7 @@ export function RoutinesPanel({
               <input
                 value={schedule}
                 onChange={(e) => setSchedule(e.target.value)}
-                placeholder="cron e.g. 0 8 * * 1-5"
+                placeholder="cron e.g. 0 8 * * 0-4"
                 className="w-40 rounded-lg border border-white/8 bg-void/50 px-3 py-2 font-mono text-xs text-ink-dim outline-none focus:border-ion/40"
               />
             )}

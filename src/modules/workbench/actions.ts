@@ -411,7 +411,7 @@ export async function composeRoutine(description: string): Promise<
         name: String(o.name ?? "Untitled routine").slice(0, 90),
         ask: String(o.ask ?? desc),
         triggerKind,
-        schedule: triggerKind === "commit" ? null : (o.schedule ? String(o.schedule) : "0 8 * * 1-5"),
+        schedule: triggerKind === "commit" ? null : (o.schedule ? String(o.schedule) : "0 8 * * 0-4"),
         note: o.note ? String(o.note).slice(0, 200) : undefined,
       },
     };

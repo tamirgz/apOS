@@ -39,7 +39,7 @@ export const peopleServerManifest: ModuleServerManifest = {
         "people.setNotes",
         "gmail.recent",
       ],
-      defaultSchedule: "0 18 * * 1-5", // 18:00 weekdays, after the day's meetings
+      defaultSchedule: "0 18 * * 0-4", // 18:00 workdays (Sun–Thu), after the day's meetings
       defaultProvider: "ollama",
       defaultModel: "qwen3-coder:30b",
     },
@@ -63,7 +63,7 @@ export const peopleServerManifest: ModuleServerManifest = {
         "attention.list",
         "attention.resolve",
       ],
-      defaultSchedule: "20 8 * * 1,4", // Mon & Thu 08:20 — staggered off Task triage (08:00)
+      defaultSchedule: "20 8 * * 0,3", // Sun & Wed 08:20 — staggered off Task triage (08:00)
       defaultProvider: "ollama",
       defaultModel: "qwen3-coder:30b",
     },
@@ -71,13 +71,12 @@ export const peopleServerManifest: ModuleServerManifest = {
       id: "weekly-reviewer",
       name: "Weekly reviewer",
       description:
-        "Friday synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local synthesis model.",
+        "End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local synthesis model.",
       defaultPrompt: [
         "You are the user's chief-of-staff writing their weekly review. Synthesize — don't just list.",
         "1. Gather: projects.list (health + progress), tasks.list (done vs open, overdue), people.list (who you met, who's gone quiet), attention.list (what's still open).",
         "2. Write a tight review: (a) what actually moved, (b) what's slipping or blocked, (c) 2-3 concrete priorities for next week. A few short paragraphs, specific, no filler.",
-        "3. Raise exactly ONE card with attention.raise: type 'review', title 'Weekly review — <this week's Monday date>', the synthesis in the body, urgency 10, dedupeKey 'weekly:<YYYY-Wxx>'.",
-        "4. Also call memory.remember to store the 2-3 priorities as a durable note so next week's agents know the focus.",
+        "3. Raise exactly ONE card with attention.raise: type 'review', title 'Weekly review — <this week's Sunday date>', the synthesis in the body, urgency 10, dedupeKey 'weekly:<YYYY-Wxx>'.",
       ].join("\n"),
       defaultTools: [
         "projects.list",
@@ -86,7 +85,7 @@ export const peopleServerManifest: ModuleServerManifest = {
         "attention.list",
         "attention.raise",
       ],
-      defaultSchedule: "0 16 * * 5", // Friday 16:00
+      defaultSchedule: "0 16 * * 4", // Thursday 16:00 — end of the Sun–Thu work week
       // The one heavier synthesis job — still FREE and local.
       defaultProvider: "ollama",
       defaultModel: "gemma4:31b-it-qat",

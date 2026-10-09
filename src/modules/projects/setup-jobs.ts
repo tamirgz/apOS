@@ -61,7 +61,7 @@ export async function raiseSetupCards(): Promise<number> {
 export const projectSetupJobs: ModuleJob[] = [
   {
     channel: "project_setup_cards",
-    schedule: "20 7 * * 1", // Monday 07:20 — after the pulse, once a week
+    schedule: "20 7 * * 0", // Sunday 07:20 (work-week start) — after the pulse, once a week
     handle: async () => {
       const n = await raiseSetupCards();
       console.log(`[projects] setup cards: raised ${n}`);

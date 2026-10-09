@@ -34,7 +34,7 @@ export const knowledgeServerManifest: ModuleServerManifest = {
       defaultPrompt:
         "Use knowledge.search with a few broad queries (recent topics, 'ai', 'business') to review the knowledge base. Identify patterns across recently saved items and surface 2-3 connections or themes worth acting on. Use ledger.has/ledger.mark with item ids to avoid re-reporting the same connections every week.",
       defaultTools: ["knowledge.search", "knowledge.read", "tasks.create"],
-      defaultSchedule: "0 9 * * 1",
+      defaultSchedule: "0 9 * * 0", // Sunday 09:00 (work-week start)
     },
   ],
   jobs: knowledgeJobs,

@@ -7,6 +7,7 @@ import { cn } from "@/core/ui/cn";
 import { done, errorText } from "@/core/ui/feedback";
 import { shortDate } from "@/core/ui/time";
 import { useNow } from "@/core/ui/useNow";
+import { daysIntoWeek } from "@/core/work-week";
 import {
   createCycleAction,
   deleteCycleAction,
@@ -18,6 +19,7 @@ import type { WorkItem } from "../core";
 import type { WorkProject } from "../queries";
 import { cycleMetrics, fmtRate, type CycleMetrics } from "../stats";
 import { Burn, CycleBar } from "./cycle-kit";
+
 
 const DAY = 86_400_000;
 
@@ -494,9 +496,11 @@ export function CyclesView({
   const upcoming = cycles.filter((c) => c.status === "upcoming").sort(byStart);
   const completed = cycles.filter((c) => c.status === "completed").sort((a, b) => byStart(b, a));
 
-  // Default a new cycle to start the day after the latest one ends (or today), two weeks long.
+  // Default a new cycle to the first week start (Sunday) after the latest one
+  // ends (or from today), two weeks long — Sunday → Saturday.
   const latestEnd = Math.max(0, ...cycles.map((c) => +new Date(c.endsAt)));
-  const startDefault = latestEnd > now ? latestEnd + DAY : now;
+  const after = latestEnd > now ? latestEnd + DAY : now;
+  const startDefault = after + ((7 - daysIntoWeek(new Date(after))) % 7) * DAY;
   const n = cycles.length + 1;
 
   const grid = (list: CycleSummary[]) => (

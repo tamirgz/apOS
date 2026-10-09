@@ -5,7 +5,8 @@ import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
 import { registerRefs, resolveRef } from "@/core/ai/refs";
 import { projects } from "@/modules/projects/schema";
 import { resolveProjectTarget } from "@/modules/projects/subject";
-import { insertAttentionItem, isoWeek } from "./core";
+import { workWeek } from "@/core/work-week";
+import { insertAttentionItem } from "./core";
 import { attentionItems, ATTENTION_TYPES } from "./schema";
 
 /**
@@ -75,7 +76,7 @@ export const todayTools: AiToolDef[] = [
       // most for on-track projects, each under a fresh content key). A
       // health-writing sweep (focusRequireHealth = Project pulse) may raise a
       // card for the focused project only when its recorded health is stalled
-      // or blocked, and at most ONE per project per ISO week — ever, so a
+      // or blocked, and at most ONE per project per work week — ever, so a
       // dismissed card doesn't come back the next morning.
       let fixedDedupeKey: string | undefined;
       if (ctx.focusRequireHealth && fromFocus && ctx.subject) {
@@ -96,7 +97,7 @@ export const todayTools: AiToolDef[] = [
               : `No card: '${ctx.subject.name}' has no health recorded this run. Record your honest judgement with projects.setHealth, then call projects.focusNext.`,
           };
         }
-        fixedDedupeKey = `pulse:${ctx.subject.id}:${isoWeek()}`;
+        fixedDedupeKey = `pulse:${ctx.subject.id}:${workWeek()}`;
       }
       const row = await insertAttentionItem({
         ...i,

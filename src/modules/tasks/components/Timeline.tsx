@@ -6,6 +6,7 @@ import { ChevronRight, Crosshair, Diamond, Flag } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { act } from "@/core/ui/feedback";
 import { useNow } from "@/core/ui/useNow";
+import { WEEK_START, isWeekend } from "@/core/work-week";
 import { updateFeature } from "@/modules/projects/features-actions";
 import { updateTask } from "../actions";
 import type { WorkItem } from "../core";
@@ -349,7 +350,7 @@ export function Timeline({
   const dayTicks: { x: number; label: string; weekend: boolean }[] = [];
   for (let t = start; t <= end; t += DAY) {
     const d = new Date(t);
-    const weekend = d.getDay() === 0 || d.getDay() === 6;
+    const weekend = isWeekend(d);
     if (zoom === "week") {
       if (weekend) weekends.push(xOf(t));
       dayTicks.push({ x: xOf(t), label: `${"SMTWTFS"[d.getDay()]} ${d.getDate()}`, weekend });
@@ -359,7 +360,7 @@ export function Timeline({
       const withYear = t === start || d.getMonth() === 0;
       months.push({ x: xOf(t), label: d.toLocaleDateString(undefined, withYear ? { month: "short", year: "numeric" } : { month: "long" }) });
     }
-    if (d.getDay() === 1) weeks.push(xOf(t));
+    if (d.getDay() === WEEK_START) weeks.push(xOf(t));
   }
 
   /** Press on a bar: a click opens it, a drag moves it (or one end) by whole days. */

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "task_attachments_version" ON "task_attachments" USING btree ("task_id","name","version");

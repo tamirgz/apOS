@@ -20,6 +20,7 @@ import {
   type RelationSide,
   type WorkItemPatch,
 } from "./core";
+import { deleteAttachment } from "./attachments";
 import { createCycle, cycleStatus, deleteCycle, rollOverCycle, updateCycle } from "./cycles";
 import { delegateFeature, delegateWorkItem } from "./delegate";
 import { PLANE_STATUS_KEY, type PlaneImportStatus } from "./plane/import";
@@ -102,6 +103,11 @@ export async function addTaskComment(id: string, body: string) {
   const row = await addComment(db, id, body, "user");
   recordUsage("work.comment", { entityRef: `tasks:${id}` });
   return row;
+}
+
+/** Hide an attachment from the drawer (soft delete — bytes kept, logged in activity). */
+export async function deleteTaskAttachment(id: string) {
+  await deleteAttachment(db, id, "user");
 }
 
 // ── relations ──────────────────────────────────────────────────────────────

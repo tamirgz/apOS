@@ -12,6 +12,7 @@ import {
   cycles,
   isClosed,
   taskActivity,
+  taskAttachments,
   taskLinks,
   taskRelations,
   tasks,
@@ -385,6 +386,11 @@ export async function deleteWorkItem(db: Db, id: string): Promise<boolean> {
   // Children survive as top-level items; history goes with the item.
   await db.update(tasks).set({ parentId: null }).where(eq(tasks.parentId, id));
   await db.delete(taskActivity).where(eq(taskActivity.taskId, id));
+  // Attachments outlive the item, hidden (their bytes are evidence; never hard-deleted).
+  await db
+    .update(taskAttachments)
+    .set({ deletedAt: new Date(), deletedBy: "system:item-deleted" })
+    .where(and(eq(taskAttachments.taskId, id), isNull(taskAttachments.deletedAt)));
   await db.delete(taskLinks).where(eq(taskLinks.taskId, id));
   await db.delete(taskRelations).where(or(eq(taskRelations.fromId, id), eq(taskRelations.toId, id)));
   await syncFeatureStatus(db, row.featureRef);
@@ -485,11 +491,16 @@ export async function addLink(
 export async function getWorkItem(db: Db, id: string) {
   const [row] = await db.select().from(tasks).where(eq(tasks.id, id));
   if (!row) return null;
-  const [children, activity, relations, links] = await Promise.all([
+  const [children, activity, relations, links, attachments] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.parentId, id)).orderBy(asc(tasks.sortOrder)),
     listActivity(db, id),
     listRelations(db, id),
     db.select().from(taskLinks).where(eq(taskLinks.taskId, id)).orderBy(desc(taskLinks.createdAt)),
+    db
+      .select()
+      .from(taskAttachments)
+      .where(and(eq(taskAttachments.taskId, id), isNull(taskAttachments.deletedAt)))
+      .orderBy(desc(taskAttachments.createdAt)),
   ]);
   const parent = row.parentId
     ? (await db.select().from(tasks).where(eq(tasks.id, row.parentId)))[0] ?? null
@@ -502,6 +513,7 @@ export async function getWorkItem(db: Db, id: string) {
     activity,
     relations,
     links,
+    attachments,
   };
 }
 

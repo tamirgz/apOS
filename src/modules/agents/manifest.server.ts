@@ -55,7 +55,7 @@ export const agentsServerManifest: ModuleServerManifest = {
         "memory.review",
         "memory.update",
       ],
-      defaultSchedule: "0 20 * * 0",
+      defaultSchedule: "0 20 * * 6", // Saturday 20:00 — before the Sun–Thu week starts
       // Memory work runs on a FREE LOCAL model — periodic, must never bill.
       // The MLX abliterated-35B wins on TEXT quality AND, once it can PLAN, on the
       // agentic loop: it earlier looped on reads and never wrote — the cause was

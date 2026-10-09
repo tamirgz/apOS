@@ -11,8 +11,8 @@ import { setFlowEnabled, setFlowTrigger } from "../actions";
 const PRESETS: { label: string; cron: string }[] = [
   { label: "Hourly", cron: "0 * * * *" },
   { label: "Daily 8am", cron: "0 8 * * *" },
-  { label: "Weekdays 9am", cron: "0 9 * * 1-5" },
-  { label: "Mondays 9am", cron: "0 9 * * 1" },
+  { label: "Workdays 9am", cron: "0 9 * * 0-4" },
+  { label: "Sundays 9am", cron: "0 9 * * 0" },
 ];
 
 const fieldCls =

@@ -201,7 +201,7 @@ const GATES: Record<string, Gate> = {
       : RUN("no external morning briefing arrived today — running as fallback");
   },
 
-  // Friday synthesis of the week — skip only a completely dead week.
+  // End-of-week (Thursday) synthesis — skip only a completely dead week.
   "Weekly reviewer": async () => {
     const weekAgo = new Date(Date.now() - 7 * 86_400_000);
     return (await indexChangedSince(

@@ -19,9 +19,9 @@ export const todayJobs: ModuleJob[] = [
   },
   {
     // Deterministic day planner — replaces the old LLM "Daily planner" agent.
-    // Weekday mornings; also runnable on demand via NOTIFY "today.plan".
+    // Workday (Sun–Thu) mornings; also runnable on demand via NOTIFY "today.plan".
     channel: "today.plan",
-    schedule: "30 7 * * 1-5",
+    schedule: "30 7 * * 0-4",
     handle: async () => {
       const { planDay } = await import("./planner");
       const { raised, closed } = await planDay();

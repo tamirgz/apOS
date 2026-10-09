@@ -30,10 +30,10 @@ export const projectsServerManifest: ModuleServerManifest = {
       id: "project-pulse",
       name: "Project pulse",
       description:
-        "Weekday heartbeat over your active projects: derives each one's health and raises a card only for the ones that are stalled or blocked. Runs on a free local model.",
+        "Workday (Sun–Thu) heartbeat over your active projects: derives each one's health and raises a card only for the ones that are stalled or blocked. Runs on a free local model.",
       // Iterate with projects.focusNext: the backbone binds one active project
       // at a time, so every write targets the RIGHT project — the model never
-      // handles an id. Idempotent per project per ISO week via the dedupeKey.
+      // handles an id. Idempotent per project per work week via the dedupeKey.
       defaultPrompt: [
         "You are the user's chief-of-staff for their projects. Keep each active project honest — a clear health — and surface only the few that genuinely need the user.",
         "1. Iterate with projects.focusNext until it returns done:true. Each call FOCUSES the next active project and returns its read: goal, nextAction, health + reason, open/done/overdue task counts, days idle, and its open tasks. The backbone picks the project — you never choose or type an id.",
@@ -54,7 +54,7 @@ export const projectsServerManifest: ModuleServerManifest = {
         // makes the capability explicit in the agent's tool doc.
         "agent.subtask",
       ],
-      defaultSchedule: "10 7 * * 1-5", // 07:10 weekdays — staggered off Daily brief (07:00)
+      defaultSchedule: "10 7 * * 0-4", // 07:10 workdays (Sun–Thu) — staggered off Daily brief (07:00)
       // FREE local model — the heartbeat never bills (ONE-STOP §4). Chosen by a
       // 12-model bench of this exact task (2026-07-23): qwen3-coder:30b was the
       // only model that, across repeated runs, set correct health on every
@@ -88,7 +88,7 @@ export const projectsServerManifest: ModuleServerManifest = {
         "projects.readRepo",
         "projects.setAdvisorBrief",
       ],
-      defaultSchedule: "15 7 * * 1-5", // 07:15 weekdays — just after Project-pulse
+      defaultSchedule: "15 7 * * 0-4", // 07:15 workdays (Sun–Thu) — just after Project-pulse
       // Haiku: judgement-heavy synthesis where quality compounds (the advisor is
       // the brain). Cheap at a few projects/day; a deliberate metered exception
       // to the free-periodic rule, chosen by the user. Routable per-agent.
@@ -119,7 +119,7 @@ export const projectsServerManifest: ModuleServerManifest = {
       ],
       // A2: the run fails unless it actually recorded at least one digest.
       defaultSuccessTool: "projects.recordRepoDigest",
-      defaultSchedule: "45 7 * * 1-5", // weekday 07:45, after pulse/advisor
+      defaultSchedule: "45 7 * * 0-4", // workday 07:45, after pulse/advisor
       // Read + summarize on the free bench-winner; never bills.
       defaultProvider: "ollama",
       defaultModel: "qwen3-coder:30b",

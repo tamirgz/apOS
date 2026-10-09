@@ -6,13 +6,13 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { act } from "@/core/ui/feedback";
 import { useNow } from "@/core/ui/useNow";
+import { WEEKDAY_LABELS, daysIntoWeek } from "@/core/work-week";
 import { updateTask } from "../actions";
 import type { WorkItem } from "../core";
 import { STATUS_META, displayTitle, plainTitle } from "../states";
 
 const DAY = 86_400_000;
 const CELL_CAP = 3;
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const dayStart = (t: number | Date | string) => new Date(new Date(t).setHours(0, 0, 0, 0)).getTime();
 // Re-anchored via dayStart so a day count crossing a DST change still lands on the intended day.
@@ -46,9 +46,9 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
 
   const base = new Date(now);
   const month = new Date(base.getFullYear(), base.getMonth() + offset, 1);
-  // Grid starts on the Monday on/before the 1st; six weeks covers every month.
+  // Grid starts on the work week's first day on/before the 1st; six weeks covers every month.
   const first = dayStart(month);
-  const lead = (month.getDay() + 6) % 7;
+  const lead = daysIntoWeek(month);
   const gridStart = first - lead * DAY;
   const cells = Array.from({ length: 42 }, (_, i) => dayStart(gridStart + i * DAY + 12 * 3_600_000));
 
@@ -104,7 +104,7 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
 
       <div className="glass overflow-x-auto rounded-xl">
         <div className="grid min-w-[720px] grid-cols-7">
-          {WEEKDAYS.map((d) => (
+          {WEEKDAY_LABELS.map((d) => (
             <div key={d} className="border-b border-ion/10 px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest text-ink-faint">
               {d}
             </div>

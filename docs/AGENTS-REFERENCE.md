@@ -37,7 +37,7 @@ _Every morning: your unified agenda (Google events, task deadlines, publish date
 _After your meetings, proposes the follow-ups worth doing — one card per person, into the 'Needs you' queue. Runs on a free local model._
 
 - **Module:** `people`
-- **Schedule:** `0 18 * * 1-5` (weekdays 18:00)
+- **Schedule:** `0 18 * * 0-4` (Sun–Thu 18:00)
 - **Model:** ollama · `qwen3-coder:30b`
 
 **Reads (inputs it works from):**
@@ -69,7 +69,7 @@ _After your meetings, proposes the follow-ups worth doing — one card per perso
 _Weekly: reviews sparks and exploring ideas, picks the 1-2 most worth pushing forward, and nudges you via notification._
 
 - **Module:** `ideas`
-- **Schedule:** `0 9 * * 1` (Mon 09:00)
+- **Schedule:** `0 9 * * 0` (Sun 09:00)
 - **Model:** account default
 
 **Reads (inputs it works from):**
@@ -124,7 +124,7 @@ _Reviews your iSentry portfolio (positions + recent transactions) and writes a c
 _Weekly: reviews recently saved knowledge, finds patterns across items, and surfaces connections you might have missed._
 
 - **Module:** `knowledge`
-- **Schedule:** `0 9 * * 1` (Mon 09:00)
+- **Schedule:** `0 9 * * 0` (Sun 09:00)
 - **Model:** account default
 
 **Reads (inputs it works from):**
@@ -147,7 +147,7 @@ _Weekly: reviews recently saved knowledge, finds patterns across items, and surf
 _Twice a week, scans projects, tasks and people for things quietly slipping and surfaces the few worth catching. Free local model._
 
 - **Module:** `people`
-- **Schedule:** `20 8 * * 1,4`
+- **Schedule:** `20 8 * * 0,3` (Sun & Wed 08:20)
 - **Model:** ollama · `qwen3-coder:30b`
 
 **Reads (inputs it works from):**
@@ -177,7 +177,7 @@ _Twice a week, scans projects, tasks and people for things quietly slipping and 
 _Weekly: reviews tasks and projects, then rewrites the active_projects memory block so every AI call starts from the projects' real state. Never writes the user's focus or priorities._
 
 - **Module:** `agents`
-- **Schedule:** `0 20 * * 0` (Sun 20:00)
+- **Schedule:** `0 20 * * 6` (Sat 20:00)
 - **Model:** mlx · `huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-mlx`
 
 **Reads (inputs it works from):**
@@ -207,7 +207,7 @@ _Weekly: reviews tasks and projects, then rewrites the active_projects memory bl
 _Chief-of-staff read per active project: where it stands, the one real blocker, and the single next move — grounded in the project's tasks, notes and (for code projects) its actual repo. Runs on Haiku for quality; refreshable on demand from the project cockpit._
 
 - **Module:** `projects`
-- **Schedule:** `15 7 * * 1-5` (weekdays 07:15)
+- **Schedule:** `15 7 * * 0-4` (Sun–Thu 07:15)
 - **Model:** anthropic · `claude-haiku-4-5-20251001`
 
 **Reads (inputs it works from):**
@@ -235,10 +235,10 @@ _Chief-of-staff read per active project: where it stands, the one real blocker, 
 
 ## Project pulse
 
-_Weekday heartbeat over your active projects: derives each one's health and raises a card only for the ones that are stalled or blocked. Runs on a free local model._
+_Workday (Sun–Thu) heartbeat over your active projects: derives each one's health and raises a card only for the ones that are stalled or blocked. Runs on a free local model._
 
 - **Module:** `projects`
-- **Schedule:** `10 7 * * 1-5`
+- **Schedule:** `10 7 * * 0-4` (Sun–Thu 07:10)
 - **Model:** ollama · `qwen3-coder:30b`
 
 **Reads (inputs it works from):**
@@ -269,7 +269,7 @@ _Weekday heartbeat over your active projects: derives each one's health and rais
 _Per project with an attached code repo, summarizes what the recent commits actually did into a short digest on the cockpit — so the advisor and you can see code momentum without reading the log. Read-only, free local model; a run only counts as done if it recorded a digest._
 
 - **Module:** `projects`
-- **Schedule:** `45 7 * * 1-5` (weekdays 07:45)
+- **Schedule:** `45 7 * * 0-4` (Sun–Thu 07:45)
 - **Model:** ollama · `qwen3-coder:30b`
 - **Counts as done only if it calls:** `projects.recordRepoDigest`
 
@@ -317,10 +317,10 @@ _Reviews open tasks daily, flags stale or overdue ones by raising their priority
 
 ## Weekly reviewer
 
-_Friday synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local synthesis model._
+_End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local synthesis model._
 
 - **Module:** `people`
-- **Schedule:** `0 16 * * 5` (Fri 16:00)
+- **Schedule:** `0 16 * * 4` (Thu 16:00)
 - **Model:** ollama · `gemma4:31b-it-qat`
 
 **Reads (inputs it works from):**
@@ -339,7 +339,6 @@ _Friday synthesis: what moved this week, what's slipping, and 2-3 priorities for
 > You are the user's chief-of-staff writing their weekly review. Synthesize — don't just list.
 > 1. Gather: projects.list (health + progress), tasks.list (done vs open, overdue), people.list (who you met, who's gone quiet), attention.list (what's still open).
 > 2. Write a tight review: (a) what actually moved, (b) what's slipping or blocked, (c) 2-3 concrete priorities for next week. A few short paragraphs, specific, no filler.
-> 3. Raise exactly ONE card with attention.raise: type 'review', title 'Weekly review — <this week's Monday date>', the synthesis in the body, urgency 10, dedupeKey 'weekly:<YYYY-Wxx>'.
-> 4. Also call memory.remember to store the 2-3 priorities as a durable note so next week's agents know the focus.
+> 3. Raise exactly ONE card with attention.raise: type 'review', title 'Weekly review — <this week's Sunday date>', the synthesis in the body, urgency 10, dedupeKey 'weekly:<YYYY-Wxx>'.
 
 ---

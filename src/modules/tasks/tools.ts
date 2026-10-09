@@ -17,7 +17,7 @@ import {
   withIdentifiers,
   type WorkItemPatch,
 } from "./core";
-import { addAttachment, attachmentMeta, decodeBase64, readLocalFile, typeOf } from "./attachments";
+import { ACCEPTED_EXTENSIONS, addAttachment, attachmentMeta, decodeBase64, readLocalFile, typeOf } from "./attachments";
 import { cycleStatus } from "./cycles";
 import { delegateWorkItem } from "./delegate";
 import { parseIdentifier } from "./keys";
@@ -62,7 +62,7 @@ export async function loadFile(f: { path?: string; contentBase64?: string; name?
   }
   const name = f.name?.trim() || (f.path ? f.path.split("/").pop()! : "");
   if (!name) return { error: "`name` is required with contentBase64." } as const;
-  if (!typeOf(name)) return { error: `Not attached: "${name}" isn't an accepted type (png, jpg, webp, svg, pdf, txt, md, log, json, csv, html, zip).` } as const;
+  if (!typeOf(name)) return { error: `Not attached: "${name}" isn't an accepted type (${ACCEPTED_EXTENSIONS}).` } as const;
   return { bytes, name, sourcePath } as const;
 }
 

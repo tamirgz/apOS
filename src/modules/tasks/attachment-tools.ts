@@ -6,6 +6,7 @@
 import { z } from "zod";
 import type { AiToolDef } from "@/core/modules/types.server";
 import {
+  ACCEPTED_EXTENSIONS,
   addAttachment,
   attachmentMeta,
   deleteAttachment,
@@ -25,7 +26,7 @@ export const attachmentTools: AiToolDef[] = [
   {
     name: "tasks.attach",
     description:
-      "Attach a file (screenshot, log, findings, brief, evidence, harness output) to a work item — stored durably, deduplicated, kept forever (deletes are soft). Give exactly one of `path` (a file on this Mac: the apOS MCP server runs locally and reads it) or `contentBase64`. Re-using a name adds a new version and keeps the old one. Limits: 25 MB per file, 500 MB per project; types png, jpg, webp, svg, pdf, txt, md, log, json, csv, html, zip.",
+      `Attach a file (screenshot, log, findings, brief, evidence, harness output) to a work item — stored durably, deduplicated, kept forever (deletes are soft). Give exactly one of \`path\` (a file on this Mac: the apOS MCP server runs locally and reads it) or \`contentBase64\`. Re-using a name adds a new version and keeps the old one. Limits: 25 MB per file, 500 MB per project; types ${ACCEPTED_EXTENSIONS} (the last extension counts, so Board.dc.html is HTML; source files are stored as plain text). Zips are stored as-is, never unpacked.`,
     input: z.object({
       ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')"),
       ...fileInput,

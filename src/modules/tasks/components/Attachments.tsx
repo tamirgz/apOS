@@ -188,7 +188,7 @@ export function AttachButton({ taskId, onDone }: { taskId: string; onDone: () =>
         type="file"
         multiple
         hidden
-        accept=".png,.jpg,.jpeg,.webp,.svg,.pdf,.txt,.md,.log,.json,.csv,.html,.zip"
+        accept=".png,.jpg,.jpeg,.webp,.svg,.pdf,.txt,.md,.log,.json,.csv,.html,.zip,.js,.mjs,.css,.py"
         onChange={(e) => upload(e.target.files)}
       />
       <button

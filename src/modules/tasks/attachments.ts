@@ -36,9 +36,18 @@ export const ATTACHMENT_TYPES: Record<string, string> = {
   csv: "text/csv",
   html: "text/html",
   zip: "application/zip",
+  // Source files are stored and served as plain text — never executed.
+  js: "text/plain",
+  mjs: "text/plain",
+  css: "text/plain",
+  py: "text/plain",
 };
 
-const TEXT_TYPES = new Set(["text/plain", "text/markdown", "application/json", "text/csv"]);
+/** Accepted extensions, for messages and tool descriptions. */
+export const ACCEPTED_EXTENSIONS = Object.keys(ATTACHMENT_TYPES).join(", ");
+
+/** Types attachments.get may return inline as text (HTML too — it's only text to an agent). */
+const TEXT_TYPES = new Set(["text/plain", "text/markdown", "application/json", "text/csv", "text/html"]);
 export const isTextType = (t: string) => TEXT_TYPES.has(t);
 export const isImageType = (t: string) => /^image\/(png|jpeg|webp)$/.test(t);
 /** Active content (SVG/HTML) is never rendered inline — always a download. */
@@ -125,7 +134,7 @@ export async function addAttachment(db: Db, a: NewAttachment): Promise<TaskAttac
   const name = safeName(a.name);
   const contentType = typeOf(name);
   if (!contentType) {
-    throw new Error(`Not attached: "${name}" — accepted types are ${Object.keys(ATTACHMENT_TYPES).join(", ")}.`);
+    throw new Error(`Not attached: "${name}" — accepted types are ${ACCEPTED_EXTENSIONS}.`);
   }
   if (!a.bytes.length) throw new Error(`Not attached: "${name}" is empty.`);
   if (a.bytes.length > MAX_FILE_BYTES) {

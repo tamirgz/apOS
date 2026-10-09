@@ -37,13 +37,15 @@ import {
   createTask,
   delegateTask,
   deleteTask,
+  deleteTaskAttachment,
   loadWorkItem,
   relateTask,
   unrelateTask,
   updateTask,
 } from "../actions";
 import type { WorkItemPatch } from "../core";
-import { TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } from "../schema";
+import { AttachButton, AttachmentList, Lightbox } from "./Attachments";
+import { TASK_PRIORITIES, TASK_STATUSES, type TaskAttachment, type TaskPriority, type TaskStatus } from "../schema";
 import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, displayTitle, plainTitle, type RelationSide } from "../states";
 import type { WorkProject } from "../queries";
 import { LabelPill, PriorityGlyph, StateGlyph, Who, branchName, dueTone, isClosed, splitTitle } from "./work-ui";
@@ -154,6 +156,7 @@ export function WorkItemDetail({
   const [delegating, setDelegating] = useState(false);
   const [delegateNote, setDelegateNote] = useState("");
   const [copied, setCopied] = useState(false);
+  const [lightbox, setLightbox] = useState<TaskAttachment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
@@ -247,7 +250,14 @@ export function WorkItemDetail({
     );
   }
 
-  const { item, children, parent, activity, features, relations, links, cycles } = data;
+  const { item, children, parent, activity, features, relations, links, cycles, attachments } = data;
+  const itemFiles = attachments.filter((a) => !a.commentId);
+  const commentFiles = Map.groupBy(attachments.filter((a) => a.commentId), (a) => a.commentId!);
+  const removeFile = (a: TaskAttachment) =>
+    start(async () => {
+      const r = await runAction(() => deleteTaskAttachment(a.id), { failed: `Couldn't remove ${a.name}` });
+      if (r.ok) await reload();
+    });
   const isOpen = !isClosed(item.status);
   const commits = links.filter((l) => l.kind === "commit");
   const runs = links.filter((l) => l.kind === "workbench");
@@ -709,6 +719,22 @@ export function WorkItemDetail({
     </Sec>
   );
 
+  const attachmentsEl = (
+    <Sec
+      title="Attachments"
+      count={attachments.length || undefined}
+      action={<AttachButton taskId={item.id} onDone={() => start(reload)} />}
+    >
+      {itemFiles.length ? (
+        <AttachmentList items={itemFiles} onOpenImage={setLightbox} onDelete={removeFile} />
+      ) : (
+        <p className="text-[12px] text-ink-faint">
+          {attachments.length ? "All files here are attached to comments below." : "Screenshots, logs, findings and evidence — kept for good, in Drive."}
+        </p>
+      )}
+    </Sec>
+  );
+
   const activityEl = (
     <Sec title="Activity">
       <ol className="flex flex-col gap-2.5">
@@ -720,15 +746,23 @@ export function WorkItemDetail({
               {a.kind === "comment" ? (
                 <>
                   <strong className="font-semibold text-ink">{actorLabel(a.actor)}</strong>
-                  <p dir="auto" className="mt-1 whitespace-pre-wrap rounded-lg bg-ink/4 px-2.5 py-1.5 text-[13px] leading-relaxed text-ink-dim">
-                    {a.body}
-                  </p>
+                  <div dir="auto" className="mt-1 rounded-lg bg-ink/4 px-2.5 py-1.5 text-[13px] leading-relaxed text-ink-dim">
+                    <Markdown>{a.body ?? ""}</Markdown>
+                    {commentFiles.has(a.id) && (
+                      <AttachmentList items={commentFiles.get(a.id)!} onOpenImage={setLightbox} onDelete={removeFile} compact />
+                    )}
+                  </div>
                 </>
               ) : (
                 <span>
                   <strong className="font-semibold text-ink">{actorLabel(a.actor)}</strong>{" "}
                   {a.kind === "created" ? (
                     "created this item"
+                  ) : a.kind === "attachment" ? (
+                    <>
+                      {a.field === "deleted" ? "removed" : a.field === "version" ? "added a new version of" : "attached"}{" "}
+                      <span className="text-ink">{a.toValue}</span>
+                    </>
                   ) : a.field === "notes" ? (
                     "edited the description"
                   ) : a.field === "relation" ? (
@@ -891,11 +925,13 @@ export function WorkItemDetail({
           </aside>
           <div className="glass min-w-0 overflow-hidden rounded-2xl lg:order-1 [&>section:last-child]:border-b-0">
             {descriptionEl}
+            {attachmentsEl}
             {subitemsEl}
             {relationsEl}
             {activityEl}
           </div>
         </div>
+        <Lightbox image={lightbox} onClose={() => setLightbox(null)} />
       </div>
     );
   }
@@ -907,10 +943,12 @@ export function WorkItemDetail({
       {errorEl}
       {handoffEl}
       {descriptionEl}
+      {attachmentsEl}
       {subitemsEl}
       {relationsEl}
       {activityEl}
       {actionsEl}
+      <Lightbox image={lightbox} onClose={() => setLightbox(null)} />
     </div>
   );
 }

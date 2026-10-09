@@ -302,7 +302,7 @@ _Reviews open tasks daily, flags stale or overdue ones by raising their priority
 **Reads (inputs it works from):**
 
 - `tasks.list` — List work items.
-- `tasks.comment` — Add a comment to a work item's discussion (your findings, a question, a status note).
+- `tasks.comment` — Add a markdown comment to a work item's discussion (findings, a brief, a question, a status note — up to 100 KB+).
 
 **Suggests / acts (outputs):**
 

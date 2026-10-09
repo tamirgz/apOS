@@ -17,6 +17,7 @@ import {
   withIdentifiers,
   type WorkItemPatch,
 } from "./core";
+import { ACCEPTED_EXTENSIONS, addAttachment, attachmentMeta, decodeBase64, readLocalFile, typeOf } from "./attachments";
 import { cycleStatus } from "./cycles";
 import { delegateWorkItem } from "./delegate";
 import { parseIdentifier } from "./keys";
@@ -27,12 +28,43 @@ import {
   tasks,
   TASK_PRIORITIES,
   TASK_STATUSES,
+  ATTACHMENT_KINDS,
   type Task,
 } from "./schema";
 
 const RELATION_SIDES = ["blocks", "blocked_by", "relates", "duplicates", "duplicated_by"] as const;
 
 export const actorOf = (ctx: AiToolContext) => (ctx.agentName ? `agent:${ctx.agentName}` : "agent");
+
+/** One file to attach — from a local path (read on this Mac) or inline base64. */
+export const fileInput = {
+  path: z.string().optional().describe("Absolute path of a file on this Mac — the apOS MCP server runs locally and reads it directly"),
+  contentBase64: z.string().optional().describe("The file's bytes, base64 — when the file isn't on this Mac"),
+  name: z.string().optional().describe("File name with extension (defaults to the path's file name); re-using a name adds a new version"),
+  kind: z.enum(ATTACHMENT_KINDS).default("other"),
+  caption: z.string().optional(),
+};
+
+/** Resolve a fileInput to bytes + name, validated before anything is written. */
+export async function loadFile(f: { path?: string; contentBase64?: string; name?: string }) {
+  if (!!f.path === !!f.contentBase64) return { error: "Give exactly one of `path` or `contentBase64`." } as const;
+  let bytes: Buffer;
+  let sourcePath: string | null = null;
+  if (f.path) {
+    const r = await readLocalFile(f.path);
+    if ("error" in r) return r;
+    bytes = r.bytes;
+    sourcePath = r.path;
+  } else {
+    const b = decodeBase64(f.contentBase64!);
+    if ("error" in b) return b;
+    bytes = b;
+  }
+  const name = f.name?.trim() || (f.path ? f.path.split("/").pop()! : "");
+  if (!name) return { error: "`name` is required with contentBase64." } as const;
+  if (!typeOf(name)) return { error: `Not attached: "${name}" isn't an accepted type (${ACCEPTED_EXTENSIONS}).` } as const;
+  return { bytes, name, sourcePath } as const;
+}
 
 /** A work item is targeted by its list `ref` (t3) or its identifier (ETHOS-12) — never a raw id. */
 export async function resolveTask(ctx: AiToolContext, ref: string): Promise<{ id: string } | { error: string }> {
@@ -247,7 +279,7 @@ export const taskTools: AiToolDef[] = [
   },
   {
     name: "tasks.get",
-    description: "Full detail of one work item: notes, sub-items, parent, and its history/comments.",
+    description: "Full detail of one work item: notes, sub-items, parent, attachments (on the item and on each comment), and its history/comments.",
     input: z.object({ ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')") }),
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
@@ -255,14 +287,23 @@ export const taskTools: AiToolDef[] = [
       const d = await getWorkItem(ctx.db, t.id);
       if (!d) return { error: "work item not found" };
       const [item] = registerRefs(ctx, "task", "t", [summary(d.item)]);
+      const brief = (a: (typeof d.attachments)[number]) => ({ id: a.id, name: a.name, version: a.version, kind: a.kind, sizeBytes: a.sizeBytes, sha256: a.sha256 });
+      const byComment = Map.groupBy(d.attachments.filter((a) => a.commentId), (a) => a.commentId!);
       return {
         ...item,
         notes: d.item.notes,
         parent: d.parent ? { identifier: d.parent.identifier, title: d.parent.title } : null,
         subItems: registerRefs(ctx, "task", "t", d.children.map(summary)),
+        attachments: d.attachments.filter((a) => !a.commentId).map(brief),
         activity: d.activity.slice(-20).map((a) =>
           a.kind === "comment"
-            ? { at: a.createdAt, by: a.actor, comment: a.body }
+            ? {
+                at: a.createdAt,
+                by: a.actor,
+                commentId: a.id,
+                comment: a.body,
+                ...(byComment.has(a.id) ? { attachments: byComment.get(a.id)!.map(brief) } : {}),
+              }
             : { at: a.createdAt, by: a.actor, [a.kind]: a.field ?? true, from: a.fromValue, to: a.toValue },
         ),
       };
@@ -367,16 +408,35 @@ export const taskTools: AiToolDef[] = [
   },
   {
     name: "tasks.comment",
-    description: "Add a comment to a work item's discussion (your findings, a question, a status note).",
+    description:
+      "Add a markdown comment to a work item's discussion (findings, a brief, a question, a status note — up to 100 KB+). Optional `attachments` are stored durably and linked to this comment in the same call.",
     input: z.object({
       ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')"),
-      body: z.string().min(1),
+      body: z.string().min(1).describe("Markdown"),
+      attachments: z.array(z.object(fileInput)).max(20).optional(),
     }),
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
       if ("error" in t) return t;
-      await addComment(ctx.db, t.id, input.body, actorOf(ctx));
-      return { commented: true };
+      // Read + validate every file first, so a bad one leaves no half-made comment.
+      const files = [];
+      for (const f of input.attachments ?? []) {
+        const r = await loadFile(f);
+        if ("error" in r) return { error: `${r.error} Nothing was posted.` };
+        files.push({ ...r, kind: f.kind, caption: f.caption });
+      }
+      const c = await addComment(ctx.db, t.id, input.body, actorOf(ctx));
+      const attached = [];
+      const failed = [];
+      for (const f of files) {
+        try {
+          const a = await addAttachment(ctx.db, { taskId: t.id, commentId: c.id, actor: actorOf(ctx), ...f });
+          attached.push((({ id, name, version, sha256, sizeBytes, url }) => ({ id, name, version, sha256, sizeBytes, url }))(attachmentMeta(a)));
+        } catch (e) {
+          failed.push({ name: f.name, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return { commented: true, commentId: c.id, ...(files.length ? { attached } : {}), ...(failed.length ? { failed } : {}) };
     },
   },
   {

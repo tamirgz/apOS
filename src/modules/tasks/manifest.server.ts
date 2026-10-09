@@ -5,12 +5,14 @@ import {
   milestoneContent,
   milestones,
   taskActivity,
+  taskAttachments,
   taskLinks,
   taskRelations,
   tasks,
   workCounters,
   workViews,
 } from "./schema";
+import { attachmentTools } from "./attachment-tools";
 import { milestoneTools } from "./milestone-tools";
 import { planningTools } from "./planning-tools";
 import { taskTools } from "./tools";
@@ -45,8 +47,8 @@ export const tasksServerManifest: ModuleServerManifest = {
       span: 4,
     },
   ],
-  schema: { tasks, workCounters, taskActivity, cycles, taskRelations, taskLinks, workViews, milestones, milestoneCapabilities, milestoneContent },
-  aiTools: [...taskTools, ...planningTools, ...milestoneTools],
+  schema: { tasks, workCounters, taskActivity, taskAttachments, cycles, taskRelations, taskLinks, workViews, milestones, milestoneCapabilities, milestoneContent },
+  aiTools: [...taskTools, ...attachmentTools, ...planningTools, ...milestoneTools],
   jobs: workJobs,
   agentTemplates: [
     {

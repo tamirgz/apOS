@@ -109,7 +109,7 @@ export const workCounters = pgTable("work_counters", {
   value: integer("value").notNull().default(0),
 });
 
-export const TASK_ACTIVITY_KINDS = ["created", "changed", "comment"] as const;
+export const TASK_ACTIVITY_KINDS = ["created", "changed", "comment", "attachment"] as const;
 export type TaskActivityKind = (typeof TASK_ACTIVITY_KINDS)[number];
 
 /**
@@ -134,6 +134,50 @@ export const taskActivity = pgTable(
 );
 
 export type TaskActivity = typeof taskActivity.$inferSelect;
+
+export const ATTACHMENT_KINDS = ["screenshot", "log", "findings", "brief", "evidence", "harness-output", "other"] as const;
+export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
+
+/**
+ * A file on a work item (optionally cited by one of its comments). Immutable:
+ * re-attaching the same name adds version N+1 and keeps the old row. The bytes
+ * live outside the DB in the attachments folder (AIOS_ATTACHMENTS_DIR, one
+ * sub-folder per project), content-addressed by sha256 and shared between
+ * rows of the same project; `storagePath` is relative to that folder. Deleting
+ * is soft — the row is hidden, the bytes stay.
+ */
+export const taskAttachments = pgTable(
+  "task_attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    taskId: uuid("task_id").notNull(),
+    /** The task_activity comment row that cites this file, if any. */
+    commentId: uuid("comment_id"),
+    /** Owning project at upload time (quota + folder); null = unfiled item. */
+    projectId: uuid("project_id"),
+    name: text("name").notNull(),
+    version: integer("version").notNull().default(1),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    sha256: text("sha256").notNull(),
+    kind: text("kind", { enum: ATTACHMENT_KINDS }).notNull().default("other"),
+    caption: text("caption"),
+    storagePath: text("storage_path").notNull(),
+    /** The local path the file was read from (MCP `path` uploads). */
+    sourcePath: text("source_path"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: text("deleted_by"),
+  },
+  (t) => [
+    index("task_attachments_task").on(t.taskId, t.createdAt),
+    index("task_attachments_project_sha").on(t.projectId, t.sha256),
+    uniqueIndex("task_attachments_version").on(t.taskId, t.name, t.version),
+  ],
+);
+
+export type TaskAttachment = typeof taskAttachments.$inferSelect;
 
 /**
  * A time-boxed iteration (Plane "cycle", a.k.a. sprint). projectId null = a

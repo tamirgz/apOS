@@ -22,9 +22,9 @@ const { db, sql } = await import("@/core/db/client");
 type AiToolContext = import("@/core/modules/types.server").AiToolContext;
 type ZodObject = import("zod").ZodObject<import("zod").ZodRawShape>;
 
-/** The work-tracker surface: everything under tasks./cycles./modules./milestones., plus project basics. */
+/** The work-tracker surface: everything under tasks./cycles./modules./milestones./attachments., plus project basics. */
 const EXPOSED = (name: string) =>
-  /^(tasks|cycles|modules|milestones)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
+  /^(tasks|cycles|modules|milestones|attachments)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
 
 const actor = process.env.APOS_ACTOR?.trim() || "mcp";
 // One context for the whole session, so list refs (t1, c1, m1) stay valid across calls.
@@ -49,7 +49,7 @@ for (const t of tools) {
       title: t.name,
       description: t.risk === "approval" ? `${t.description} (Consequential — confirm with the user first.)` : t.description,
       inputSchema: (t.input as ZodObject).shape,
-      annotations: { destructiveHint: t.risk === "approval", readOnlyHint: /\.(list|get)$/.test(t.name) },
+      annotations: { destructiveHint: t.risk === "approval", readOnlyHint: /\.(list|get|attachments)$/.test(t.name) },
     },
     async (args: unknown) => {
       try {

@@ -3,6 +3,17 @@ import { db, sql } from "@/core/db/client";
 import { chatRuns } from "@/core/db/schema/chat-runs";
 import { recordUsage } from "@/core/usage";
 import { trimRepetitionLoop } from "@/core/ai/repetition";
+import {
+  dropUnverifiedLines,
+  headlineNumbers,
+  mislabeledFigures,
+  numbersIn,
+  openPositionsTable,
+  percentsIn,
+  unverifiedFigures,
+  wantsOpenPositions,
+  wrongPositionCounts,
+} from "@/modules/investments/grounding";
 import { getAllTools } from "@/core/ai/tool-registry";
 import { ensureDefaultRoutes, resolveRoute } from "@/core/ai/routing";
 import type { ChatMessage } from "@/core/ai/provider";
@@ -226,9 +237,13 @@ export async function POST(req: Request) {
       // reasoning so it grounds. Verification runs only on the investments route.
       const reasoning = taskKey === "chat" ? "none" : undefined;
       const verify = taskKey === "chat.investments";
+      const lastMsg = String(messages[messages.length - 1]?.content ?? "");
       const want = verify
-        ? analyzeRequest(String(messages[messages.length - 1]?.content ?? ""))
+        ? analyzeRequest(lastMsg)
         : { wantsChart: false, strategyTag: null };
+      // "Which Algo positions are open?" — the app builds the positions table
+      // from tool data; the model only comments (see grounding.ts).
+      const openQ = verify && !!want.strategyTag && wantsOpenPositions(lastMsg);
 
       // For a strategy analysis, restrict the toolset so the model can only
       // ground in byStrategy (dropping raw transactions / full positions). We
@@ -242,7 +257,9 @@ export async function POST(req: Request) {
               ["portfolio.byStrategy", "portfolio.summary"].includes(t.name),
             )
           : tools;
-      const strategyDirective = want.strategyTag
+      const strategyDirective = openQ
+        ? `This is about the OPEN positions of ONLY the '${want.strategyTag}' strategy. Call portfolio.byStrategy('${want.strategyTag}'). The app shows its \`open_positions\` as a table above your answer (shares, avg cost, price, cost basis, value, unrealized $ and %), so do NOT list the positions or restate their numbers. Write 3–6 sentences of commentary: which open position matters most and why, and how the open positions compare with the strategy's realized results. Quote any number EXACTLY as the tool returned it. No chart or tool syntax, no #ref markers.`
+        : want.strategyTag
         ? `This is an analysis of ONLY the '${want.strategyTag}' strategy. Call portfolio.byStrategy('${want.strategyTag}') and write a THOROUGH, STRUCTURED written report based strictly on ITS result: use markdown headings (## Summary, ## Per-symbol performance, ## Insights), lead with the key numbers (invested, realized/unrealized P&L, total P&L, return %), and call out the winners, the losers, and any flagged (caveat) symbols. Do NOT analyze raw transactions or the full portfolio. Do NOT draw a chart or emit any chart/tool/JSON syntax — the app attaches the P&L chart automatically. Do not output citation markers like #ref.`
         : undefined;
 
@@ -251,7 +268,22 @@ export async function POST(req: Request) {
       const results: {
         byStrategy?: Record<string, unknown>;
         allocation?: Record<string, unknown>;
-      } = {};
+        /** Every tool result this run — the ground truth for the number check. */
+        all: unknown[];
+      } = { all: [] };
+
+      // Open-positions commentary is meant to be a few sentences under the
+      // app's table. The local model instead paraphrased the same points for
+      // ~4.5 minutes (which the exact-line loop guard can't see), so the pass
+      // stops at a budget and keeps whole paragraphs/sentences.
+      const textBudget = openQ ? 1200 : undefined;
+      const cutToBudget = (t: string, max: number) => {
+        const head = t.slice(0, max);
+        const para = head.lastIndexOf("\n\n");
+        if (para > max / 2) return head.slice(0, para).trimEnd();
+        const sentence = Math.max(head.lastIndexOf(". "), head.lastIndexOf(".\n"));
+        return (sentence > 0 ? head.slice(0, sentence + 1) : head).trimEnd();
+      };
 
       // One model pass. In verify mode we forward progress (tool chips/reasoning)
       // but HOLD the text until it's been checked, so a failed answer can be
@@ -279,11 +311,16 @@ export async function POST(req: Request) {
             if (event.type === "tool_call") calls.add(event.name);
             if (event.type === "tool_result") {
               const r = event.result as Record<string, unknown>;
+              if (r && !r.error) results.all.push(r);
               if (event.name === "portfolio.byStrategy" && r && !r.error) results.byStrategy = r;
               if (event.name === "portfolio.allocation" && r && !r.error) results.allocation = r;
             }
             if (event.type === "text" || event.type === "done") {
               if (event.text) text = event.text;
+              if (textBudget && text.length > textBudget) {
+                text = cutToBudget(text, textBudget);
+                break; // closes the provider stream — generation stops
+              }
             } else if (event.type === "error") {
               err = event.message;
             } else if (verify) {
@@ -362,6 +399,52 @@ export async function POST(req: Request) {
             );
             if (!retry.err && strip(retry.text)) text = strip(retry.text);
           }
+
+          // 2c) Number grounding: every $ / % figure (and any "N positions"
+          // count) in the prose must come from this run's tool results. One
+          // retry naming the bad figures; whatever is still unsupported is
+          // dropped, with a note — never shown as fact.
+          if (openQ && !results.byStrategy) {
+            const bs = getAllTools().find((t) => t.name === "portfolio.byStrategy");
+            const r = (await bs?.execute({ tag: want.strategyTag }, { db })) as Record<string, unknown> | undefined;
+            if (r && !r.error) {
+              results.byStrategy = r;
+              results.all.push(r);
+            }
+          }
+          const openCount = Number(results.byStrategy?.open_count);
+          const unsupported = (s: string) => [
+            ...unverifiedFigures(
+              s,
+              numbersIn(results.all),
+              results.byStrategy ? headlineNumbers(results.byStrategy) : undefined,
+              percentsIn(results.all),
+            ),
+            ...(results.byStrategy ? mislabeledFigures(s, results.byStrategy) : []),
+            ...(Number.isFinite(openCount) ? wrongPositionCounts(s, openCount) : []),
+          ];
+          let bad = results.all.length ? unsupported(text) : [];
+          if (bad.length) {
+            const retry = await runOnce(
+              [
+                firstDirective,
+                `Your previous answer stated figures that are NOT in the tool results: ${bad.join(", ")}. Write the answer again using ONLY numbers exactly as the tools return them — copy them, never compute shares × price or estimate.`,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+            );
+            const again = retry.err ? "" : await stripFabricatedCharts(strip(retry.text));
+            const badAgain = again ? unsupported(again) : bad;
+            if (again && badAgain.length < bad.length) {
+              text = again;
+              bad = badAgain;
+            }
+          }
+          if (bad.length) {
+            const d = dropUnverifiedLines(text, bad);
+            text = `${d.text}\n\n_${d.dropped} line${d.dropped === 1 ? "" : "s"} removed: ${d.dropped === 1 ? "its figures don't" : "their figures don't"} match the portfolio data._`;
+          }
+          if (openQ && results.byStrategy) text = `${openPositionsTable(results.byStrategy)}\n\n${text}`.trim();
 
           // 3) Deterministic chart backstop: a chart was asked for but none was
           // really produced (the model may text-emit the call) → build it from

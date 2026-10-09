@@ -16,6 +16,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import { trimRepetitionLoop } from "@/core/ai/repetition";
 import { createNote } from "@/modules/notes/actions";
 import { saveMarkdownToVault } from "@/modules/obsidian/actions";
 import { Markdown } from "./Markdown";
@@ -429,14 +430,12 @@ export function ChatMessages({
             ))}
             {t.content &&
               (t.role === "assistant" ? (
-                <div className="[&_p:last-child]:mb-0">
-                  <Markdown>{t.content}</Markdown>
-                </div>
+                <AssistantText content={t.content} pending={t.pending} />
               ) : (
                 <p className="whitespace-pre-wrap">{t.content}</p>
               ))}
             {t.role === "assistant" && t.content && !t.pending && (
-              <MessageActions content={t.content} />
+              <MessageActions content={trimRepetitionLoop(t.content).text} />
             )}
             {t.pending && !t.content && (
               <span className="inline-flex items-center gap-1.5">
@@ -460,6 +459,24 @@ export function ChatMessages({
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * An answer saved before the repetition guard existed can be a wall of the
+ * model restating itself: show the first pass and say the rest was cut.
+ */
+function AssistantText({ content, pending }: { content: string; pending?: boolean }) {
+  const { text, trimmed } = pending ? { text: content, trimmed: false } : trimRepetitionLoop(content);
+  return (
+    <div className="[&_p:last-child]:mb-0">
+      <Markdown>{text}</Markdown>
+      {trimmed && (
+        <p className="mt-2 font-mono text-[10.5px] text-ink-faint">
+          The model started repeating itself here — the repeats are hidden.
+        </p>
+      )}
     </div>
   );
 }

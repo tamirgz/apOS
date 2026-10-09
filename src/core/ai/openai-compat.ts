@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { AIEvent, AIRunOptions } from "./provider";
 import { fromWireName, toWireName } from "./provider";
 import { acquireLocalSlot } from "./local-queue";
+import { findRepetitionLoop } from "./repetition";
 
 export async function* runOpenAICompatible(
   baseURL: string,
@@ -74,6 +75,7 @@ export async function* runOpenAICompatible(
       // Streaming: yield text as it generates — a big local model can take
       // many seconds per turn, and a silent wait reads as a hang in the UI.
       let turnText = "";
+      let loopCheckedAt = 0;
       let turnReasoning = "";
       const toolCallAcc = new Map<
         number,
@@ -119,6 +121,19 @@ export async function* runOpenAICompatible(
         }
         if (delta.content) {
           turnText += delta.content;
+          // Degenerate-repetition guard: a model that starts restating its
+          // answer over and over would otherwise run until the caller's
+          // timeout. Stop generating and keep only the first pass.
+          if (turnText.length - loopCheckedAt >= 1500) {
+            loopCheckedAt = turnText.length;
+            const cut = findRepetitionLoop(turnText);
+            if (cut !== null) {
+              turnText = turnText.slice(0, cut).trimEnd();
+              toolCallAcc.clear();
+              yield { type: "text", text: turnText };
+              break; // ends the stream — the SDK aborts the request
+            }
+          }
           yield { type: "text", text: turnText };
         }
         for (const tc of delta.tool_calls ?? []) {
@@ -129,6 +144,9 @@ export async function* runOpenAICompatible(
           toolCallAcc.set(tc.index, acc);
         }
       }
+        // The SDK ends the stream quietly when the signal aborts (e.g. the
+        // caller's run timeout): that is a cut-off answer, not a finished one.
+        if (opts.signal?.aborted) throw new Error("the run was stopped (timeout or cancel) before the model finished");
       } finally {
         releaseSlot?.();
       }

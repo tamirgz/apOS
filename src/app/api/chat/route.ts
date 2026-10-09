@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
 import { chatRuns } from "@/core/db/schema/chat-runs";
 import { recordUsage } from "@/core/usage";
+import { trimRepetitionLoop } from "@/core/ai/repetition";
 import { getAllTools } from "@/core/ai/tool-registry";
 import { ensureDefaultRoutes, resolveRoute } from "@/core/ai/routing";
 import type { ChatMessage } from "@/core/ai/provider";
@@ -106,12 +107,12 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "invalid JSON body" }, { status: 400 });
   }
-  const { messages, route: routeKey } = body;
+  const { messages: sent, route: routeKey } = body;
   recordUsage("chat.send", { meta: { route: routeKey ?? null } });
   if (
-    !Array.isArray(messages) ||
-    !messages.length ||
-    !messages.every(
+    !Array.isArray(sent) ||
+    !sent.length ||
+    !sent.every(
       (m) =>
         m &&
         (m.role === "user" || m.role === "assistant") &&
@@ -120,6 +121,12 @@ export async function POST(req: Request) {
   ) {
     return Response.json({ error: "messages required" }, { status: 400 });
   }
+
+  // A looped answer kept in the client's history goes back to the model as
+  // context and invites it to loop again: send only each answer's first pass.
+  const messages = sent.map((m) =>
+    m.role === "assistant" ? { ...m, content: trimRepetitionLoop(m.content).text } : m,
+  );
 
   await ensureDefaultRoutes();
   // A surface can ask for a dedicated route (e.g. the Investments page uses a

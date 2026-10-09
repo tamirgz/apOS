@@ -110,7 +110,7 @@ export const investmentTools: AiToolDef[] = [
   {
     name: "portfolio.byStrategy",
     description:
-      "Measure the performance of trades tagged with a strategy label in their transaction notes (e.g. 'Algo', 'Leopold'). Attributes ONLY the tagged buys/sells (not a symbol's whole P&L), split-adjusted. Returns per-symbol invested/realized/open-value/unrealized in USD plus totals and a return %. Symbols flagged with a `caveat` had a tagged sell with no tagged buy (or oversold), so their cost basis is incomplete. Read-only.",
+      "Measure the performance of trades tagged with a strategy label in their transaction notes (e.g. 'Algo', 'Leopold'). Attributes ONLY the tagged buys/sells (not a symbol's whole P&L), split-adjusted. Returns `open_positions` (ONLY the symbols still held: shares, avg cost, current price, market value, unrealized $ and %), counts of open vs closed symbols, totals with a return %, and `bySymbol` (EVERY symbol ever traded under the tag, most of them closed — status says which). Symbols flagged with a `caveat` had a tagged sell with no tagged buy (or oversold), so their cost basis is incomplete. Read-only.",
     input: z.object({
       tag: z
         .string()
@@ -145,6 +145,9 @@ export const investmentTools: AiToolDef[] = [
                 : undefined;
           return {
             symbol: r.symbol,
+            status: netQty > 0 ? ("open" as const) : ("closed" as const),
+            avg_cost_usd: avgCost == null ? null : +avgCost.toFixed(4),
+            current_price_usd: price == null ? null : +price.toFixed(4),
             invested_usd: +buyCost.toFixed(2),
             open_qty: +netQty.toFixed(4),
             open_value_usd: +openValue.toFixed(2),
@@ -160,9 +163,30 @@ export const investmentTools: AiToolDef[] = [
         const unrealized = sum("unrealized_pnl_usd");
         const openValue = sum("open_value_usd");
         const totalPnl = realized + unrealized;
+        // The held positions, spelled out: a model given only bySymbol read its
+        // length as "27 open positions" and invented per-share prices.
+        const open = per
+          .filter((r) => r.status === "open")
+          .map((r) => {
+            const costBasis = r.avg_cost_usd == null ? null : r.open_qty * r.avg_cost_usd;
+            return {
+              symbol: r.symbol,
+              shares: r.open_qty,
+              avg_cost_usd: r.avg_cost_usd == null ? null : +r.avg_cost_usd.toFixed(2),
+              current_price_usd: r.current_price_usd == null ? null : +r.current_price_usd.toFixed(2),
+              cost_basis_usd: costBasis == null ? null : +costBasis.toFixed(2),
+              market_value_usd: r.open_value_usd,
+              unrealized_pnl_usd: r.unrealized_pnl_usd,
+              unrealized_pct: costBasis ? +((100 * r.unrealized_pnl_usd) / costBasis).toFixed(2) : null,
+            };
+          })
+          .sort((a, b) => b.market_value_usd - a.market_value_usd);
         return {
           tag: input.tag,
-          symbols: per.length,
+          symbols_traded: per.length,
+          open_count: open.length,
+          closed_count: per.length - open.length,
+          open_positions: open,
           totals: {
             invested_usd: +invested.toFixed(2),
             open_value_usd: +openValue.toFixed(2),

@@ -287,7 +287,7 @@ export const taskTools: AiToolDef[] = [
       const d = await getWorkItem(ctx.db, t.id);
       if (!d) return { error: "work item not found" };
       const [item] = registerRefs(ctx, "task", "t", [summary(d.item)]);
-      const brief = (a: (typeof d.attachments)[number]) => ({ id: a.id, name: a.name, version: a.version, kind: a.kind, sizeBytes: a.sizeBytes });
+      const brief = (a: (typeof d.attachments)[number]) => ({ id: a.id, name: a.name, version: a.version, kind: a.kind, sizeBytes: a.sizeBytes, sha256: a.sha256 });
       const byComment = Map.groupBy(d.attachments.filter((a) => a.commentId), (a) => a.commentId!);
       return {
         ...item,

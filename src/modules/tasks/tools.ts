@@ -7,6 +7,7 @@ import { features, projects } from "@/modules/projects/schema";
 import {
   addComment,
   addRelation,
+  blockingRelations,
   createWorkItem,
   deleteWorkItem,
   findByIdentifier,
@@ -216,6 +217,10 @@ export const taskTools: AiToolDef[] = [
       module: z.string().optional().describe("Only items in this module (NAME or 'm2'); 'none' = items in no module"),
       cycle: z.string().optional().describe("Only items in this cycle (NAME, 'c1' or 'current'); 'none' = unplanned"),
       limit: z.number().int().min(1).max(100).default(50),
+      relations: z
+        .boolean()
+        .default(false)
+        .describe("Also return each item's blockedBy / blocks (identifier + status), in one round"),
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
@@ -265,6 +270,7 @@ export const taskTools: AiToolDef[] = [
       ]);
       const fName = new Map(featureNames.map((f) => [`features:${f.id}`, f.name]));
       const cName = new Map(cycleNames.map((c) => [c.id, c.name]));
+      const rels = input.relations ? await blockingRelations(ctx.db, items.map((t) => t.id)) : null;
       return registerRefs(
         ctx,
         "task",
@@ -273,13 +279,15 @@ export const taskTools: AiToolDef[] = [
           ...summary(t),
           module: t.featureRef ? (fName.get(t.featureRef) ?? null) : null,
           cycle: t.cycleId ? (cName.get(t.cycleId) ?? null) : null,
+          ...(rels ? rels.get(t.id) : {}),
         })),
       );
     },
   },
   {
     name: "tasks.get",
-    description: "Full detail of one work item: notes, sub-items, parent, attachments (on the item and on each comment), and its history/comments.",
+    description:
+      "Full detail of one work item: notes, sub-items, parent, relations (the full current set — blocks / blocked_by / relates / duplicates / duplicated_by, each with the other item's status), attachments (on the item and on each comment), and its recent history/comments (last 20).",
     input: z.object({ ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')") }),
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
@@ -294,6 +302,14 @@ export const taskTools: AiToolDef[] = [
         notes: d.item.notes,
         parent: d.parent ? { identifier: d.parent.identifier, title: d.parent.title } : null,
         subItems: registerRefs(ctx, "task", "t", d.children.map(summary)),
+        // Current state, read from the relations table — not from `activity`,
+        // which is capped at the last 20 events.
+        relations: d.relations.map((r) => ({
+          relation: r.side,
+          identifier: r.other.identifier,
+          title: r.other.title,
+          status: r.other.status,
+        })),
         attachments: d.attachments.filter((a) => !a.commentId).map(brief),
         activity: d.activity.slice(-20).map((a) =>
           a.kind === "comment"

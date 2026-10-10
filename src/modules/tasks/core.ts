@@ -458,6 +458,39 @@ export async function listRelations(db: Db, id: string) {
     .filter((r) => r !== null);
 }
 
+/**
+ * The current "blocks" relations of many items in one round: per item, what
+ * blocks it and what it blocks, each with the other item's identifier and
+ * status. Done/cancelled blockers are included — the caller decides.
+ */
+export async function blockingRelations(db: Db, ids: string[]) {
+  type Edge = { identifier: string | null; status: string };
+  const out = new Map<string, { blockedBy: Edge[]; blocks: Edge[] }>(
+    ids.map((id) => [id, { blockedBy: [], blocks: [] }]),
+  );
+  if (!ids.length) return out;
+  const rows = await db
+    .select({ fromId: taskRelations.fromId, toId: taskRelations.toId })
+    .from(taskRelations)
+    .where(
+      and(
+        eq(taskRelations.kind, "blocks"),
+        or(inArray(taskRelations.fromId, ids), inArray(taskRelations.toId, ids)),
+      ),
+    );
+  if (!rows.length) return out;
+  const otherIds = [...new Set(rows.flatMap((r) => [r.fromId, r.toId]))];
+  const others = await withIdentifiers(db, await db.select().from(tasks).where(inArray(tasks.id, otherIds)));
+  const byId = new Map(others.map((o) => [o.id, { identifier: o.identifier, status: o.status }]));
+  for (const r of rows) {
+    const from = byId.get(r.fromId);
+    const to = byId.get(r.toId);
+    if (from) out.get(r.toId)?.blockedBy.push(from);
+    if (to) out.get(r.fromId)?.blocks.push(to);
+  }
+  return out;
+}
+
 /** Ids of open items that still have an open blocker. */
 export async function blockedItemIds(db: Db): Promise<Set<string>> {
   const rows = await db.execute<{ id: string }>(sql`

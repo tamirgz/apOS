@@ -88,7 +88,7 @@ export function DeckGrid({ widgets }: { widgets: DeckWidget[] }) {
 
   return (
     <div className="flex flex-col gap-4 lg:h-[calc(100dvh-5rem)] lg:gap-3.5">
-      {/* TIER 1 — Now: what needs you, today's agenda, the work in play. */}
+      {/* TIER 1 — Now: what needs you and today's agenda. */}
       <section className="flex flex-col gap-2.5 lg:min-h-0 lg:flex-[1.45]">
         <TierLabel>Now</TierLabel>
         <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:auto-rows-fr lg:grid-cols-4">

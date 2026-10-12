@@ -147,7 +147,7 @@ type ViewId = Layout | "timeline" | "mywork";
 const HINT: Record<ViewId, string> = {
   board: "drag cards between columns",
   list: "grouped by state · sorted by priority",
-  calendar: "items on their due dates",
+  calendar: "items on their due dates · dashed while in progress",
   timeline: "drag a bar to reschedule",
   mywork: "everything open, across all projects",
 };

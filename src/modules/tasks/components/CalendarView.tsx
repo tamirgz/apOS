@@ -22,10 +22,14 @@ const closed = (s: WorkItem["status"]) => s === "done" || s === "cancelled";
 /** The day an item sits on: its due date, else its start date. */
 const dayOf = (t: WorkItem) => (t.dueAt ? dayStart(t.dueAt) : t.startAt ? dayStart(t.startAt) : null);
 
+type Placed = { t: WorkItem; flight: boolean };
+
 /**
  * Work items on a month grid by due date (start date when there's no due).
- * Drag a chip to another day to reschedule it — an item with a start → due
- * span keeps its length.
+ * An open item with a start date also shows, faded, on each day it is in
+ * progress: start → the day before due, or start → today when it has no due.
+ * Drag a chip (from any of its days) to another day to reschedule it — the
+ * item shifts by that many days, so a start → due span keeps its length.
  */
 export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id: string) => void }) {
   const router = useRouter();
@@ -36,7 +40,7 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
   const [over, setOver] = useState<number | null>(null);
   const [, startSave] = useTransition();
 
-  // Optimistic day per item after a drop, cleared when the server sends fresh data.
+  // Optimistic shift (ms) per item after a drop, cleared when the server sends fresh data.
   const [moved, setMoved] = useState<Record<string, number>>({});
   const [seed, setSeed] = useState(items);
   if (seed !== items) {
@@ -52,30 +56,49 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
   const gridStart = first - lead * DAY;
   const cells = Array.from({ length: 42 }, (_, i) => dayStart(gridStart + i * DAY + 12 * 3_600_000));
 
-  const byDay = new Map<number, WorkItem[]>();
+  const gridEnd = cells[cells.length - 1];
+  const shift = (d: number, id: string) => dayStart(noon(d + (moved[id] ?? 0)));
+  const byDay = new Map<number, Placed[]>();
+  const put = (d: number, p: Placed) => byDay.set(d, [...(byDay.get(d) ?? []), p]);
   let undated = 0;
   for (const t of items) {
-    const d = moved[t.id] ?? dayOf(t);
-    if (d == null) {
+    const base = dayOf(t);
+    if (base == null) {
       if (!closed(t.status)) undated++;
       continue;
     }
-    byDay.set(d, [...(byDay.get(d) ?? []), t]);
+    const d = shift(base, t.id);
+    put(d, { t, flight: false });
+    if (closed(t.status) || !t.startAt) continue;
+    // In progress: start → the day before due, or start → today when open-ended.
+    const start = shift(dayStart(t.startAt), t.id);
+    const end = t.dueAt ? d - 1 : Math.max(today, start);
+    for (let c = Math.max(start, gridStart); c <= Math.min(end, gridEnd); c = dayStart(c + DAY + 12 * 3_600_000)) {
+      if (c !== d) put(c, { t, flight: true });
+    }
   }
-  for (const list of byDay.values()) list.sort((a, b) => Number(closed(a.status)) - Number(closed(b.status)) || a.sortOrder - b.sortOrder);
+  const dueKey = (t: WorkItem) => (t.dueAt ? +new Date(t.dueAt) : Infinity);
+  for (const list of byDay.values())
+    list.sort(
+      (a, b) =>
+        Number(a.flight) - Number(b.flight) ||
+        Number(closed(a.t.status)) - Number(closed(b.t.status)) ||
+        (a.flight ? dueKey(a.t) - dueKey(b.t) || 0 : 0) ||
+        a.t.sortOrder - b.t.sortOrder,
+    );
 
-  const reschedule = (id: string, to: number) => {
+  const reschedule = (id: string, from: number, to: number) => {
     const t = items.find((x) => x.id === id);
-    const from = t && (moved[id] ?? dayOf(t));
-    if (!t || from == null || from === to) return;
-    const delta = to - from;
-    setMoved((p) => ({ ...p, [id]: to }));
+    if (!t || from === to || dayOf(t) == null) return;
+    const prev = moved[id] ?? 0;
+    const delta = prev + (to - from);
+    setMoved((p) => ({ ...p, [id]: delta }));
     const patch: { dueAt?: Date; startAt?: Date } = {};
-    if (t.dueAt) patch.dueAt = noon(to);
-    if (t.startAt) patch.startAt = noon(dayStart(t.startAt) + (t.dueAt ? delta : to - dayStart(t.startAt)));
+    if (t.dueAt) patch.dueAt = noon(dayStart(t.dueAt) + delta);
+    if (t.startAt) patch.startAt = noon(dayStart(t.startAt) + delta);
     startSave(async () => {
       const r = await act(() => updateTask(id, patch), { failed: "Couldn't reschedule the item" });
-      if (!r.ok) setMoved((p) => ({ ...p, [id]: from }));
+      if (!r.ok) setMoved((p) => ({ ...p, [id]: prev }));
       router.refresh();
     });
   };
@@ -125,8 +148,8 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
                 onDrop={(e) => {
                   e.preventDefault();
                   setOver(null);
-                  const id = e.dataTransfer.getData("text/x-work-item");
-                  if (id) reschedule(id, day);
+                  const [id, from] = e.dataTransfer.getData("text/x-work-item").split("@");
+                  if (id && from) reschedule(id, Number(from), day);
                 }}
                 className={cn(
                   "flex min-h-24 flex-col gap-1 border-b border-r border-ion/8 p-1.5 transition-colors",
@@ -142,22 +165,23 @@ export function CalendarView({ items, onOpen }: { items: WorkItem[]; onOpen: (id
                 >
                   {new Date(day).getDate()}
                 </span>
-                {shown.map((t) => {
-                  const late = !closed(t.status) && day < today && !!t.dueAt;
+                {shown.map(({ t, flight }) => {
+                  const late = !flight && !closed(t.status) && day < today && !!t.dueAt;
                   return (
                     <button
                       key={t.id}
                       type="button"
                       draggable
                       onDragStart={(e) => {
-                        e.dataTransfer.setData("text/x-work-item", t.id);
+                        e.dataTransfer.setData("text/x-work-item", `${t.id}@${day}`);
                         e.dataTransfer.effectAllowed = "move";
                       }}
                       onClick={() => onOpen(t.id)}
-                      title={`${t.identifier ?? ""} ${plainTitle(t.title)}`}
+                      title={`${t.identifier ?? ""} ${plainTitle(t.title)}${flight ? ` · in progress${t.dueAt ? ` · due ${new Date(t.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}` : ""}`}
                       className={cn(
                         "flex items-center gap-1 truncate rounded-md border-l-2 bg-ink/[0.04] px-1.5 py-0.5 text-left text-[11px] text-ink-dim hover:bg-ink/[0.08] hover:text-ink",
                         closed(t.status) && "line-through opacity-50",
+                        flight && "border-dashed bg-transparent opacity-60 hover:opacity-100",
                         late && "bg-flare/10",
                       )}
                       style={{ borderLeftColor: STATUS_META[t.status].color }}

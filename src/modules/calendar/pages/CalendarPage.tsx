@@ -8,7 +8,7 @@ export async function CalendarPage() {
   const from = new Date(now.getFullYear(), now.getMonth() - 2, 1);
   const to = new Date(now.getFullYear(), now.getMonth() + 3, 0);
   const [items, icsUrl] = await Promise.all([
-    getAgenda(from, to),
+    getAgenda(from, to, { inFlight: true }),
     getSetting(SETTING_KEYS.calendarIcsUrl),
   ]);
   return <CalendarView items={items} hasIcs={!!icsUrl} />;

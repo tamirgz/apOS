@@ -1,4 +1,4 @@
-import { and, asc, gte, isNotNull, lte } from "drizzle-orm";
+import { and, asc, gte, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { taskIsOpen, tasks } from "../tasks/schema";
 import { calendarEvents } from "./schema";
@@ -24,6 +24,12 @@ export interface AgendaItem {
   /** The event in its origin app (Google Calendar). */
   sourceUrl: string | null;
   source: string;
+  /**
+   * Open tasks only, with `inFlight`: the days the task is open — from its
+   * start date to its due date (or to today when it has no due date). The
+   * calendar lists it on each of those days, not just on the due date.
+   */
+  span: { start: Date; due: Date | null } | null;
 }
 
 /**
@@ -31,7 +37,19 @@ export interface AgendaItem {
  * due dates and content publish dates — the cross-module view that makes the
  * calendar useful even before any events exist.
  */
-export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
+export async function getAgenda(
+  from: Date,
+  to: Date,
+  opts: { inFlight?: boolean } = {},
+): Promise<AgendaItem[]> {
+  // Due in the window — plus, with inFlight, open tasks whose start→due span
+  // overlaps it (a task started today and due tomorrow belongs on today too).
+  const dueInWindow = and(isNotNull(tasks.dueAt), gte(tasks.dueAt, from), lte(tasks.dueAt, to));
+  const spansWindow = and(
+    isNotNull(tasks.startAt),
+    lte(tasks.startAt, to),
+    or(isNull(tasks.dueAt), gte(tasks.dueAt, from)),
+  );
   const [events, dueTasks] = await Promise.all([
     db
       .select()
@@ -43,14 +61,7 @@ export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
     db
       .select()
       .from(tasks)
-      .where(
-        and(
-          isNotNull(tasks.dueAt),
-          gte(tasks.dueAt, from),
-          lte(tasks.dueAt, to),
-          taskIsOpen,
-        ),
-      ),
+      .where(and(opts.inFlight ? or(dueInWindow, spansWindow) : dueInWindow, taskIsOpen)),
   ]);
 
   const items: AgendaItem[] = [
@@ -73,12 +84,14 @@ export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
       meetingUrl: e.meetingUrl,
       sourceUrl: e.sourceUrl,
       source: e.source,
+      span: null,
     })),
     ...dueTasks.map((t) => ({
       id: t.id,
       kind: "task" as const,
       title: displayTitle(t),
-      at: t.dueAt!,
+      // Placed on its due date; a start-only task on its start date.
+      at: (t.dueAt ?? t.startAt)!,
       endAt: null,
       allDay: false,
       detail: `${t.priority} priority`,
@@ -90,6 +103,7 @@ export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
       meetingUrl: null,
       sourceUrl: null,
       source: "task",
+      span: opts.inFlight && t.startAt ? { start: t.startAt, due: t.dueAt } : null,
     })),
   ];
 

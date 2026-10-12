@@ -32,7 +32,7 @@ export async function NeedsYouWidget() {
           need{items.length === 1 ? "s" : ""} you
         </span>
         <span className="ml-auto text-right font-mono text-[9px] uppercase leading-tight tracking-widest text-ink-faint">
-          {summary.events} event{summary.events === 1 ? "" : "s"} · {summary.dueTasks} due today
+          {summary.events} event{summary.events === 1 ? "" : "s"} today
           <br />
           across tasks, inbox &amp; agents
         </span>

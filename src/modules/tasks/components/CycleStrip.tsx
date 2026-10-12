@@ -5,7 +5,7 @@ import { shortDate, timeAgo } from "@/core/ui/time";
 import { useNow } from "@/core/ui/useNow";
 import type { WorkItem } from "../core";
 import type { WorkData } from "../queries";
-import { fmtRate as fmt, modulePct, moduleStats } from "../stats";
+import { cycleMetrics, fmtRate as fmt, modulePct, moduleStats, unitNote } from "../stats";
 import { Burn, SEGMENTS } from "./cycle-kit";
 import { isClosed } from "./work-ui";
 
@@ -42,17 +42,15 @@ export function CycleStrip({
 
   // ── cycle ──
   const inCycle = cycle ? items.filter((t) => t.cycleId === cycle.id && t.status !== "cancelled") : [];
-  const usePts = inCycle.some((t) => t.estimate != null);
-  const weight = (t: WorkItem) => (usePts ? (t.estimate ?? 0) : 1);
-  const sum = (pred: (t: WorkItem) => boolean) => inCycle.filter(pred).reduce((n, t) => n + weight(t), 0);
-  const total = inCycle.reduce((n, t) => n + weight(t), 0);
-  const by = {
-    done: sum((t) => t.status === "done"),
-    review: sum((t) => t.status === "review"),
-    doing: sum((t) => t.status === "doing"),
-    todo: sum((t) => t.status === "todo" || t.status === "backlog"),
+  // The shared rule (stats.ts): points only when every item is estimated.
+  const m = cycle ? cycleMetrics(cycle, items, [], now) : null;
+  const { by, items: counts, total, unit, unestimated } = m ?? {
+    by: { done: 0, review: 0, doing: 0, todo: 0 },
+    items: { done: 0, review: 0, doing: 0, todo: 0 },
+    total: 0,
+    unit: "items" as const,
+    unestimated: 0,
   };
-  const unit = usePts ? "pts" : "items";
   const daysLeft = cycle ? Math.max(0, Math.ceil((+new Date(cycle.endsAt) + DAY - now) / DAY)) : 0;
 
   // ── live modules, nearest target first ──
@@ -110,14 +108,14 @@ export function CycleStrip({
               {SEGMENTS.map((s) => (
                 <span key={s.status} className="inline-flex items-center gap-[5px]">
                   <i className="inline-block size-2 rounded-[2px]" style={{ background: s.color }} />
-                  {by[s.status]} {s.label}
+                  {counts[s.status]} {s.label}
                 </span>
               ))}
               <span className="inline-flex items-center gap-[5px]">
                 <i className="inline-block size-2 rounded-[2px] bg-ink/20" />
-                {by.todo} todo
+                {counts.todo} todo
               </span>
-              <span className="ml-auto">
+              <span className="ml-auto" title={unitNote(unit, inCycle.length, unestimated)}>
                 {total ? Math.round((by.done / total) * 100) : 0}% of {total} {unit}
               </span>
             </div>

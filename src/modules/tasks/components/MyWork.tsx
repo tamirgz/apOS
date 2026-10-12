@@ -112,8 +112,10 @@ export function MyWork({
     { key: "next", name: "Up next", hint: "highest-priority todo", color: STATUS_META.todo.color, rows: todo, cap: NEXT_CAP },
   ];
 
-  // Where the open work sits: points when estimated, otherwise item counts — split by state.
-  const usePts = open.some((t) => t.estimate != null);
+  // Where the open work sits: points when every open item is estimated (the
+  // stats.ts rule — a partly-estimated set weighs the rest as 0), otherwise
+  // item counts — split by state.
+  const usePts = open.length > 0 && open.every((t) => t.estimate != null) && open.some((t) => (t.estimate ?? 0) > 0);
   const weight = (t: WorkItem) => (usePts ? (t.estimate ?? 0) : 1);
   const load = new Map<string, { total: number; by: Partial<Record<TaskStatus, number>> }>();
   for (const t of open) {

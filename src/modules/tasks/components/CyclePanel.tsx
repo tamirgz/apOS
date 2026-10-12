@@ -17,7 +17,7 @@ import {
 import type { CycleStatus, CycleSummary } from "../cycles";
 import type { WorkItem } from "../core";
 import type { WorkProject } from "../queries";
-import { cycleMetrics, fmtRate, type CycleMetrics } from "../stats";
+import { cycleMetrics, fmtRate, unitNote, type CycleMetrics } from "../stats";
 import { Burn, CycleBar } from "./cycle-kit";
 
 
@@ -329,6 +329,7 @@ function CycleHero({
                 of {m.total} {m.unit} done
               </span>
             </div>
+            <p className="-mt-1 mb-2 text-xs text-ink-faint">{unitNote(m.unit, m.items.done + m.items.review + m.items.doing + m.items.todo, m.unestimated)}</p>
             <CycleBar m={m} big />
           </div>
           <CycleReads c={c} m={m} onOpenItem={onOpenItem} />
@@ -441,8 +442,9 @@ function CycleCard({
       </div>
       <div className="flex items-center gap-2 text-xs tabular-nums text-ink-dim">
         <span className="text-ink">{m.pct}%</span>
-        <span>
-          {c.done}/{c.total} items{c.points ? ` · ${c.pointsDone}/${c.points} pts` : ""}
+        <span title={unitNote(m.unit, c.total, m.unestimated)}>
+          {m.unit === "pts" ? `${c.pointsDone}/${c.points} pts · ${c.done}/${c.total} items` : `${c.done}/${c.total} items`}
+          {m.unestimated > 0 && m.unestimated < c.total && ` · ${m.unestimated} unestimated`}
         </span>
         {c.status === "completed" && m.open > 0 && (
           <button

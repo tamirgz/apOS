@@ -15,7 +15,7 @@ import { delegateFeatureAction } from "../actions";
 import type { WorkItem } from "../core";
 import type { WorkFeature, WorkProject } from "../queries";
 import { BOARD_STATUSES, STATUS_META } from "../states";
-import { moduleStats, modulePct, type ModuleStats } from "../stats";
+import { moduleStats, modulePct, moduleUnit, unitNote, type ModuleStats } from "../stats";
 import { dateInput } from "./CyclePanel";
 
 const DAY = 86_400_000;
@@ -120,13 +120,14 @@ function ModuleCard({ f, s, onOpen }: { f: WorkFeature; s?: ModuleStats; onOpen:
       <StateBar s={s} />
       <span className="flex items-center gap-2 text-xs tabular-nums text-ink-dim">
         <span className="text-ink">{s?.total ? `${pct}%` : "—"}</span>
-        {s?.points ? (
-          <span>
+        {s && moduleUnit(s) === "pts" ? (
+          <span title={unitNote("pts", s.total, 0)}>
             {s.pointsDone}/{s.points} pts
           </span>
         ) : (
-          <span>
+          <span title={s ? unitNote("items", s.total, s.total - s.estimated) : undefined}>
             {s?.closed ?? 0}/{s?.total ?? 0} items
+            {s && s.estimated > 0 && s.estimated < s.total && ` · ${s.total - s.estimated} unestimated`}
           </span>
         )}
         <span className={cn("ml-auto", (s?.open ?? 0) > 0 ? "text-ink-dim" : "text-ink-faint")}>
@@ -512,7 +513,7 @@ export function ModuleHeader({
             )}
             <dt>Items</dt>
             <dd className="tabular-nums text-ink-dim">
-              {s?.open ?? 0} open · {s?.closed ?? 0} done{s?.points ? ` · ${s.pointsDone}/${s.points} pts` : ""}
+              {s?.open ?? 0} open · {s?.closed ?? 0} done{s && moduleUnit(s) === "pts" ? ` · ${s.pointsDone}/${s.points} pts` : ""}
             </dd>
           </dl>
 
@@ -561,9 +562,10 @@ export function ModuleHeader({
             <div className="mb-2 flex items-baseline gap-2.5">
               <span className="font-display text-[44px] leading-none tabular-nums text-ink">{s?.total ? `${pct}%` : "—"}</span>
               <span className="text-[13px] tabular-nums text-ink-dim">
-                {s?.points ? `of ${s.points} pts done` : `of ${s?.total ?? 0} items done`}
+                {moduleUnit(s) === "pts" ? `of ${s!.points} pts done` : `of ${s?.total ?? 0} items done`}
               </span>
             </div>
+            {s?.total ? <p className="-mt-1 mb-2 text-xs text-ink-faint">{unitNote(moduleUnit(s), s.total, s.total - s.estimated)}</p> : null}
             <StateBar s={s} className="!h-2.5" />
             <div className="mt-[7px] flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-ink-dim">
               {BAR_ORDER.filter((st) => (s?.by[st] ?? 0) > 0).map((st) => (

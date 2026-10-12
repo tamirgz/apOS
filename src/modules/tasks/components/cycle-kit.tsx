@@ -75,12 +75,12 @@ export function CycleBar({ m, big = false }: { m: CycleMetrics; big?: boolean })
         {SEGMENTS.map((s) => (
           <span key={s.status} className="inline-flex items-center gap-[5px]">
             <i className="inline-block size-2 rounded-[2px]" style={{ background: s.color }} />
-            {m.by[s.status]} {s.label}
+            {m.items[s.status]} {s.label}
           </span>
         ))}
         <span className="inline-flex items-center gap-[5px]">
           <i className="inline-block size-2 rounded-[2px] bg-ink/20" />
-          {m.by.todo} todo
+          {m.items.todo} todo
         </span>
       </div>
     </>

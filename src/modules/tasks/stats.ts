@@ -8,12 +8,30 @@ import type { TaskStatus } from "./schema";
  */
 
 const DAY = 86_400_000;
+
+/*
+ * Units. Progress counts by points only when EVERY in-scope item is estimated
+ * (and the points add up to more than 0); otherwise by items. Weighing an
+ * unestimated item as 0 pts made a cycle with one 3-pt item and 34 unestimated
+ * ones read "0% of 3 pts", and dropped the 34 from its status bar.
+ */
+export type ProgressUnit = "pts" | "items";
+
+/** "by points · all estimated" / "by items · 34 of 35 have no estimate" / "by items · none estimated". */
+export function unitNote(unit: ProgressUnit, total: number, unestimated: number): string {
+  if (unit === "pts") return "by points · all estimated";
+  if (!total || unestimated === total) return "by items · none estimated";
+  if (!unestimated) return "by items · all estimated at 0 pts";
+  return `by items · ${unestimated} of ${total} ${total === 1 ? "has" : "have"} no estimate`;
+}
 const isClosed = (s: TaskStatus) => s === "done" || s === "cancelled";
 
 export interface ModuleStats {
   total: number;
   closed: number;
   open: number;
+  /** In-scope items that have an estimate. */
+  estimated: number;
   /** Estimated points in scope, and how many of them are done. */
   points: number;
   pointsDone: number;
@@ -28,13 +46,14 @@ export function moduleStats(items: WorkItem[]): Map<string, ModuleStats> {
   for (const t of items) {
     if (!t.featureRef?.startsWith("features:")) continue;
     const id = t.featureRef.slice(9);
-    const s = m.get(id) ?? { total: 0, closed: 0, open: 0, points: 0, pointsDone: 0, by: emptyBy() };
+    const s = m.get(id) ?? { total: 0, closed: 0, open: 0, estimated: 0, points: 0, pointsDone: 0, by: emptyBy() };
     s.by[t.status]++;
     if (t.status === "cancelled") {
       m.set(id, s);
       continue;
     }
     s.total++;
+    if (t.estimate != null) s.estimated++;
     s.points += t.estimate ?? 0;
     if (t.status === "done") {
       s.closed++;
@@ -45,17 +64,26 @@ export function moduleStats(items: WorkItem[]): Map<string, ModuleStats> {
   return m;
 }
 
-/** % done by points when the module's items are estimated, by item count otherwise. */
+/** Points when every in-scope item is estimated, items otherwise. */
+export function moduleUnit(s?: ModuleStats): ProgressUnit {
+  return s?.total && s.estimated === s.total && s.points > 0 ? "pts" : "items";
+}
+
+/** % done in the module's unit (see moduleUnit). */
 export function modulePct(s?: ModuleStats): number {
   if (!s?.total) return 0;
-  return Math.round(s.points ? (s.pointsDone / s.points) * 100 : (s.closed / s.total) * 100);
+  return Math.round(moduleUnit(s) === "pts" ? (s.pointsDone / s.points) * 100 : (s.closed / s.total) * 100);
 }
 
 export interface CycleMetrics {
-  /** Weighted by points when any item in the cycle is estimated, else by count. */
+  /** In `unit`: points when every item in the cycle is estimated, else item counts. */
   by: { done: number; review: number; doing: number; todo: number };
+  /** Item counts by state, whatever the unit — the status bar's legend. */
+  items: { done: number; review: number; doing: number; todo: number };
   total: number;
-  unit: "pts" | "items";
+  unit: ProgressUnit;
+  /** In-cycle items with no estimate. */
+  unestimated: number;
   pct: number;
   daysLeft: number;
   /** Open items still in the cycle. */
@@ -72,24 +100,30 @@ export interface CycleMetrics {
 /** Everything the cycle views read off one cycle — computed from the data, never a model call. */
 export function cycleMetrics(c: CycleSummary, items: WorkItem[], blockedIds: string[], now: number): CycleMetrics {
   const inCycle = items.filter((t) => t.cycleId === c.id && t.status !== "cancelled");
-  const usePts = inCycle.some((t) => t.estimate != null);
-  const weight = (t: WorkItem) => (usePts ? (t.estimate ?? 0) : 1);
-  const sum = (pred: (t: WorkItem) => boolean) => inCycle.filter(pred).reduce((n, t) => n + weight(t), 0);
-  const total = inCycle.reduce((n, t) => n + weight(t), 0);
-  const by = {
-    done: sum((t) => t.status === "done"),
-    review: sum((t) => t.status === "review"),
-    doing: sum((t) => t.status === "doing"),
-    todo: sum((t) => t.status === "todo" || t.status === "backlog"),
+  const unestimated = inCycle.filter((t) => t.estimate == null).length;
+  const usePts = inCycle.length > 0 && unestimated === 0 && inCycle.some((t) => (t.estimate ?? 0) > 0);
+  const tally = (weight: (t: WorkItem) => number) => {
+    const sum = (pred: (t: WorkItem) => boolean) => inCycle.filter(pred).reduce((n, t) => n + weight(t), 0);
+    return {
+      done: sum((t) => t.status === "done"),
+      review: sum((t) => t.status === "review"),
+      doing: sum((t) => t.status === "doing"),
+      todo: sum((t) => t.status === "todo" || t.status === "backlog"),
+    };
   };
+  const counts = tally(() => 1);
+  const by = usePts ? tally((t) => t.estimate ?? 0) : counts;
+  const total = by.done + by.review + by.doing + by.todo;
   const daysLeft = Math.max(0, Math.ceil((+new Date(c.endsAt) + DAY - now) / DAY));
   const openItems = inCycle.filter((t) => !isClosed(t.status));
   const closedLastWeek = items.filter((t) => t.status === "done" && t.completedAt && now - +new Date(t.completedAt) < 7 * DAY).length;
   const blocked = new Set(blockedIds);
   return {
     by,
+    items: counts,
     total,
     unit: usePts ? "pts" : "items",
+    unestimated,
     pct: total ? Math.round((by.done / total) * 100) : 0,
     daysLeft,
     open: openItems.length,

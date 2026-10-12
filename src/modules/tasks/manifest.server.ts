@@ -20,7 +20,6 @@ import { workJobs } from "./jobs";
 import { TasksPage } from "./pages/TasksPage";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
 import { OpenTasksWidget } from "./widgets/OpenTasksWidget";
-import { UpNextWidget } from "./widgets/UpNextWidget";
 import { TaskLoadStat } from "./widgets/TaskLoadStat";
 
 export const tasksServerManifest: ModuleServerManifest = {
@@ -37,14 +36,6 @@ export const tasksServerManifest: ModuleServerManifest = {
       component: OpenTasksWidget,
       priority: 3,
       stat: TaskLoadStat,
-    },
-    {
-      id: "up-next",
-      title: "In play",
-      size: "md",
-      component: UpNextWidget,
-      priority: 1,
-      span: 4,
     },
   ],
   schema: { tasks, workCounters, taskActivity, taskAttachments, cycles, taskRelations, taskLinks, workViews, milestones, milestoneCapabilities, milestoneContent },

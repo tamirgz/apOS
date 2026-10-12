@@ -2,7 +2,6 @@
 
 import { act } from "@/core/ui/feedback";
 import { useMemo, useRef, useState, useTransition } from "react";
-import Link from "next/link";
 import { motion } from "motion/react";
 import {
   CalendarPlus,
@@ -19,13 +18,12 @@ import { createEvent, deleteEvent, requestIcsSync } from "../actions";
 import type { AgendaItem } from "../agenda";
 import { EventDetail } from "./EventDetail";
 
-const KIND_LABEL = { event: "event", task: "due" } as const;
+const KIND_LABEL = { event: "event" } as const;
 
 /** Category fallback colors — Google events use their own color when set. */
 const LEGEND = [
   { label: "google", color: "var(--color-ion)" },
   { label: "apOS event", color: "var(--color-plasma)" },
-  { label: "task due", color: "var(--color-solar)" },
 ] as const;
 
 const fmtTime = (d: Date) =>
@@ -317,24 +315,14 @@ export function CalendarView({
                   <span className="w-12 shrink-0 text-right font-mono text-[10px] tabular-nums text-ink-faint">
                     {it.allDay ? "all day" : fmtTime(new Date(it.at))}
                   </span>
-                  {it.kind === "task" ? (
-                    <Link
-                      href={it.href}
-                      dir="auto"
-                      className="flex-1 truncate text-left text-sm text-ink-dim transition group-hover:text-ink"
-                    >
-                      {it.title}
-                    </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      dir="auto"
-                      onClick={() => setDetail(it)}
-                      className="flex-1 truncate text-left text-sm text-ink-dim transition group-hover:text-ink"
-                    >
-                      {it.title}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    dir="auto"
+                    onClick={() => setDetail(it)}
+                    className="flex-1 truncate text-left text-sm text-ink-dim transition group-hover:text-ink"
+                  >
+                    {it.title}
+                  </button>
                   {/* One click to the call — no need to open the panel first. */}
                   {it.meetingUrl && (
                     <a
@@ -393,23 +381,14 @@ export function CalendarView({
                   <span className="w-24 shrink-0 font-mono text-[10px] tabular-nums text-ink-faint">
                     {fmtUpNext(it)}
                   </span>
-                  {it.kind === "task" ? (
-                    <span
-                      dir="auto"
-                      className="flex-1 truncate text-left text-sm text-ink-dim"
-                    >
-                      {it.title}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      dir="auto"
-                      onClick={() => setDetail(it)}
-                      className="flex-1 truncate text-left text-sm text-ink-dim transition group-hover:text-ink"
-                    >
-                      {it.title}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    dir="auto"
+                    onClick={() => setDetail(it)}
+                    className="flex-1 truncate text-left text-sm text-ink-dim transition group-hover:text-ink"
+                  >
+                    {it.title}
+                  </button>
                   {it.meetingUrl && (
                     <a
                       href={it.meetingUrl}

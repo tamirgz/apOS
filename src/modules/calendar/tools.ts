@@ -10,7 +10,7 @@ export const calendarTools: AiToolDef[] = [
   {
     name: "calendar.agenda",
     description:
-      "Get the user's unified agenda: calendar events (incl. synced Google Calendar), task due dates, and content publish dates.",
+      "Get the user's personal calendar: events (apOS-local and synced Google Calendar). Work-item dates are not here — use the tasks tools for those.",
     input: z.object({
       days: z
         .number()

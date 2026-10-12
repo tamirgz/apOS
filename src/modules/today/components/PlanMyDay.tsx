@@ -79,7 +79,7 @@ export function PlanMyDay({
         <span className="font-mono text-[10px] text-ink-faint">{today}</span>
       </div>
 
-      {/* Today's timeline: meetings + due tasks. */}
+      {/* Today's timeline: calendar events. */}
       <div className="glass rounded-2xl p-4">
         <div className="mb-2 flex items-center gap-2">
           <CalendarClock className="size-3.5 text-ink-faint" />
@@ -125,7 +125,7 @@ export function PlanMyDay({
                   className="font-mono text-[9px] uppercase tracking-widest"
                   style={{ color: it.accent }}
                 >
-                  {it.kind === "task" ? "due" : "event"}
+                  event
                 </span>
               </div>
             ))}

@@ -28,6 +28,9 @@ const LEGEND = [
   { label: "task due", color: "var(--color-solar)" },
 ] as const;
 
+/** In-flight rows shown for a day before "+N more" (a busy week has dozens). */
+const FLIGHT_CAP = 12;
+
 const fmtTime = (d: Date) =>
   d.toLocaleTimeString(undefined, {
     hour: "2-digit",
@@ -48,6 +51,33 @@ function sameDay(a: Date, b: Date) {
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
   );
+}
+
+const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+const shortDay = (d: Date) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+/**
+ * How an item sits on a day: "dated" — an event, or a task's due date (a dot
+ * and a timed row); "flight" — an open task between its start and due dates
+ * (or from its start through today when it has no due date), so a day with
+ * work in progress doesn't read as empty. Otherwise null.
+ */
+function onDay(it: AgendaItem, day: Date, today: Date): "dated" | "flight" | null {
+  const d = dayStart(day);
+  if (it.kind === "task" && it.span) {
+    const start = dayStart(new Date(it.span.start));
+    // No due date: from its start through today (a future start: that day only).
+    if (!it.span.due) return start <= d && d <= Math.max(dayStart(today), start) ? "flight" : null;
+    if (sameDay(new Date(it.at), day)) return "dated";
+    return start <= d && d < dayStart(new Date(it.span.due)) ? "flight" : null;
+  }
+  return sameDay(new Date(it.at), day) ? "dated" : null;
+}
+
+/** "since Oct 10 · due Tue 14" / "since Oct 10 · no due date". */
+function flightNote(it: AgendaItem) {
+  const since = `since ${shortDay(new Date(it.span!.start))}`;
+  return it.span!.due ? `${since} · due ${shortDay(new Date(it.span!.due))}` : `${since} · no due date`;
 }
 
 function QuickAddEvent() {
@@ -168,7 +198,8 @@ function MonthGrid({
           </div>
         ))}
         {days.map((d, i) => {
-          const dayItems = items.filter((it) => sameDay(new Date(it.at), d));
+          const dayItems = items.filter((it) => onDay(it, d, today) === "dated");
+          const flying = items.filter((it) => onDay(it, d, today) === "flight").length;
           const inMonth = d.getMonth() === month.getMonth();
           const isToday = sameDay(d, today);
           const isSelected = sameDay(d, selected);
@@ -209,6 +240,14 @@ function MonthGrid({
                   </span>
                 )}
               </span>
+              {flying > 0 && (
+                <span
+                  aria-label={`${flying} task${flying === 1 ? "" : "s"} in progress`}
+                  title={`${flying} task${flying === 1 ? "" : "s"} in progress`}
+                  className="h-[2px] w-5 rounded-full bg-solar"
+                  style={{ opacity: Math.min(0.85, 0.3 + flying * 0.05) }}
+                />
+              )}
             </button>
           );
         })}
@@ -235,7 +274,17 @@ export function CalendarView({
   // Ticks each minute so "upcoming" keeps moving on a calendar left open.
   const now = useNow(60_000);
 
-  const dayItems = items.filter((it) => sameDay(new Date(it.at), selected));
+  const today = new Date(now);
+  const dayItems = items.filter((it) => onDay(it, selected, today) === "dated");
+  // Soonest due first; open-ended work after, most recently started first.
+  const inFlight = items
+    .filter((it) => onDay(it, selected, today) === "flight")
+    .sort((a, b) => {
+      const ad = a.span?.due ? +new Date(a.span.due) : Infinity;
+      const bd = b.span?.due ? +new Date(b.span.due) : Infinity;
+      return ad - bd || +new Date(b.span?.start ?? 0) - +new Date(a.span?.start ?? 0);
+    });
+  const [showAllFlight, setShowAllFlight] = useState(false);
   const upcoming = items
     .filter((it) => new Date(it.at) >= new Date(now - 3600_000))
     .slice(0, 8);
@@ -250,7 +299,10 @@ export function CalendarView({
             month={month}
             onMonthChange={setMonth}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={(d) => {
+              setSelected(d);
+              setShowAllFlight(false);
+            }}
           />
           <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1">
             {LEGEND.map((l) => (
@@ -265,6 +317,10 @@ export function CalendarView({
                 {l.label}
               </span>
             ))}
+            <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+              <span className="h-[2px] w-3 rounded-full bg-solar/60" />
+              task in progress
+            </span>
           </div>
           <div className="mt-2 flex items-center justify-between px-1">
             <p className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">
@@ -299,7 +355,7 @@ export function CalendarView({
                     day: "numeric",
                   })}
             </p>
-            {dayItems.length === 0 && (
+            {dayItems.length === 0 && inFlight.length === 0 && (
               <p className="py-4 text-center font-mono text-[10px] uppercase tracking-widest text-ink-faint">
                 clear
               </p>
@@ -372,6 +428,40 @@ export function CalendarView({
                 </motion.div>
               ))}
             </div>
+            {inFlight.length > 0 && (
+              <div className={cn(dayItems.length > 0 && "mt-3 border-t border-white/6 pt-3")}>
+                <p className="mb-1.5 px-2 font-mono text-[9px] uppercase tracking-widest text-ink-faint">
+                  in progress · {inFlight.length}
+                </p>
+                <div className="flex flex-col gap-0.5">
+                  {(showAllFlight ? inFlight : inFlight.slice(0, FLIGHT_CAP)).map((it) => (
+                    <div
+                      key={`flight:${it.id}`}
+                      className="group flex items-center gap-2.5 rounded-lg px-2 py-1 transition hover:bg-white/4"
+                    >
+                      <span className="size-[7px] shrink-0 rounded-full border border-solar/70" />
+                      <Link
+                        href={it.href}
+                        dir="auto"
+                        className="min-w-0 flex-1 truncate text-sm text-ink-dim transition group-hover:text-ink"
+                      >
+                        {it.title}
+                      </Link>
+                      <span className="shrink-0 font-mono text-[9px] tabular-nums text-ink-faint">{flightNote(it)}</span>
+                    </div>
+                  ))}
+                </div>
+                {inFlight.length > FLIGHT_CAP && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllFlight((v) => !v)}
+                    className="mt-1 px-2 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:text-ink"
+                  >
+                    {showAllFlight ? "show fewer" : `+${inFlight.length - FLIGHT_CAP} more`}
+                  </button>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="glass rounded-2xl p-4">
@@ -425,7 +515,7 @@ export function CalendarView({
                     className="font-mono text-[8px] uppercase tracking-widest opacity-60"
                     style={{ color: it.accent }}
                   >
-                    {KIND_LABEL[it.kind]}
+                    {it.span && !it.span.due ? "starts" : KIND_LABEL[it.kind]}
                   </span>
                 </div>
               ))}

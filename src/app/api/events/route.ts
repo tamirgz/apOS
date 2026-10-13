@@ -32,6 +32,7 @@ const CHANNELS = [
   "attention_changed",
   "project_files_changed",
   "projects_changed",
+  "work_changed",
   "workbench_changed",
   "routines_changed",
   "telegram_changed",

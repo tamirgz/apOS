@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LiveRefresh } from "@/core/ui/LiveRefresh";
 import { getProjectCockpit } from "../queries";
 import { HEALTH_META } from "../health";
 
@@ -10,6 +11,7 @@ export async function ActiveProjectsWidget() {
   if (rows.length === 0) {
     return (
       <p className="font-mono text-[11px] uppercase tracking-widest text-ink-faint">
+        <LiveRefresh channels={["work_changed", "projects_changed"]} delayMs={1000} />
         no active projects
       </p>
     );
@@ -17,6 +19,7 @@ export async function ActiveProjectsWidget() {
 
   return (
     <ul className="flex flex-col gap-2">
+      <LiveRefresh channels={["work_changed", "projects_changed"]} delayMs={1000} />
       {rows.map((p) => {
         const { total, done } = p.taskCounts;
         const pct = total > 0 ? Math.round((done / total) * 100) : 0;

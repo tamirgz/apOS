@@ -42,10 +42,13 @@ function releaseStream() {
 /**
  * Subscribe to server NOTIFY channels and refresh server-component data when
  * relevant channels fire (debounced — transcripts can NOTIFY very often).
+ * `delayMs` widens the debounce for channels that fire in bursts (an agent
+ * updating a dozen work items) on pages that are costly to re-render.
  */
 export function useLiveEvents(
   channels: string[],
   onEvent?: (channel: string, payload: string) => void,
+  { delayMs = 350 }: { delayMs?: number } = {},
 ) {
   const router = useRouter();
   const onEventRef = useRef(onEvent);
@@ -72,7 +75,7 @@ export function useLiveEvents(
       // during an active run, fires ~every 1.5s). In a transition React keeps
       // the current content on screen and swaps it only once the new tree is
       // ready, so live updates arrive seamlessly with no fallback flash.
-      refreshTimer = setTimeout(() => startTransition(() => router.refresh()), 350);
+      refreshTimer = setTimeout(() => startTransition(() => router.refresh()), delayMs);
     };
 
     listeners.add(listener);
@@ -83,5 +86,5 @@ export function useLiveEvents(
       listeners.delete(listener);
       releaseStream();
     };
-  }, [channelsKey, router]);
+  }, [channelsKey, router, delayMs]);
 }

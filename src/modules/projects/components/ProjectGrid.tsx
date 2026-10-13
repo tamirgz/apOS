@@ -13,6 +13,7 @@ import type { ProjectCockpit } from "../queries";
 import { HEALTH_META } from "../health";
 import { STATUS_CHIP } from "./statusStyle";
 import { categoryColor } from "./categoryColor";
+import { useLiveEvents } from "@/core/ui/useLiveEvents";
 
 // shared: core/ui/time.ts lastActiveLabel
 
@@ -236,6 +237,8 @@ export function ProjectGrid({
   projects: ProjectCockpit[];
   categoryOrder: string[];
 }) {
+  // Progress, health and counts follow tracker writes live.
+  useLiveEvents(["work_changed", "projects_changed"], undefined, { delayMs: 1000 });
   // Active projects group by category; paused/done/archived stay in the
   // collapse at the bottom. Named category groups are drag-reorderable.
   const { byCat, liveNames, uncategorized, inactive, activeCount, areas } = useMemo(() => {

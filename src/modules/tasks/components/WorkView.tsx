@@ -43,6 +43,7 @@ import { Timeline } from "./Timeline";
 import { WorkItemDetail } from "./WorkItemDetail";
 import { readPref, writePref } from "./prefs";
 import { isClosed } from "./work-ui";
+import { useLiveEvents } from "@/core/ui/useLiveEvents";
 
 const DAY = 86_400_000;
 
@@ -171,6 +172,8 @@ export function WorkView({
   head?: WorkHead;
 }) {
   const router = useRouter();
+  // Any write to the tracker (UI, MCP, agents, jobs) refreshes progress live.
+  useLiveEvents(["work_changed"], undefined, { delayMs: 1000 });
   // Local copy for optimistic moves; re-seeded whenever the server sends new data.
   const [items, setItems] = useState(data.items);
   const [seed, setSeed] = useState(data.items);

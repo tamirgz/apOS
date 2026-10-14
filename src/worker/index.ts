@@ -352,6 +352,28 @@ async function sweepOrphanedWorkbench() {
   log(`workbench orphan sweep: failed ${rows.length} attempt(s)`);
 }
 
+/**
+ * Chat runs execute in the WEB process (/api/chat), capped at ~285s by their
+ * own abort timer, and are marked finished in that request's `finally`. A web
+ * restart mid-run (every deploy restarts it) kills the request, so the row
+ * stayed "running" forever and sat in the run queue (one did for 5 days). Any
+ * chat run in flight well past the cap is dead — fail it. Boot + every 5 min.
+ */
+async function sweepOrphanedChatRuns() {
+  const orphaned = await db.execute(dsql`
+    update chat_runs
+       set status = 'failed',
+           error = coalesce(error, 'orphaned (web restarted or crashed mid-run)'),
+           finished_at = now()
+     where status in ('queued', 'running')
+       and coalesce(heartbeat_at, started_at, created_at) < now() - interval '10 minutes'
+     returning id`);
+  const ids = [...orphaned].map((r) => (r as { id: string }).id);
+  if (ids.length === 0) return;
+  for (const id of ids) await sql.notify("chat_runs", id);
+  log(`chat orphan sweep: failed ${ids.length} run(s)`);
+}
+
 async function main() {
   // Single-runner guarantee via advisory lock on a dedicated connection.
   const lockConn = postgres(url, { max: 1, ssl: PG_SSL });
@@ -368,6 +390,7 @@ async function main() {
   await sweepOrphans();
   await sweepOrphanedFlowRuns().catch((e) => log(`flow orphan sweep failed: ${e}`));
   await sweepOrphanedWorkbench().catch((e) => log(`workbench orphan sweep failed: ${e}`));
+  await sweepOrphanedChatRuns().catch((e) => log(`chat orphan sweep failed: ${e}`));
   await syncSchedules();
   await syncRoutineCrons();
   await syncFlowCrons();
@@ -555,6 +578,7 @@ async function main() {
   // pick-up every 5 minutes.
   new Cron("*/5 * * * *", () => {
     sweepOrphans().catch((e) => log(`safety-net orphan sweep failed: ${e}`));
+    sweepOrphanedChatRuns().catch((e) => log(`chat orphan sweep failed: ${e}`));
     // Reap model-call registry rows orphaned by a crashed process.
     import("@/core/ai/model-track")
       .then((m) => m.sweepStaleModelCalls())

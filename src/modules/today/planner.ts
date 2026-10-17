@@ -51,11 +51,23 @@ export async function planDay(): Promise<{ raised: number; closed: number }> {
     });
   }
 
+  // A task in a paused/done/archived project is shelved with it — never a
+  // "Needs you" card (the ETHOS "Gate runner v4" nag). Project-less tasks count.
+  const inLiveProject = dsql`coalesce((select p.status from projects p
+    where p.id::text = split_part(${tasks.projectRef}, ':', 2)), 'active') = 'active'`;
+
   // 2) Overdue open tasks — the most overdue first.
   const overdue = await db
     .select({ id: tasks.id, title: tasks.title, dueAt: tasks.dueAt, projectRef: tasks.projectRef })
     .from(tasks)
-    .where(and(inArray(tasks.status, [...OPEN_STATUSES]), isNotNull(tasks.dueAt), lt(tasks.dueAt, new Date())))
+    .where(
+      and(
+        inArray(tasks.status, [...OPEN_STATUSES]),
+        isNotNull(tasks.dueAt),
+        lt(tasks.dueAt, new Date()),
+        inLiveProject,
+      ),
+    )
     .orderBy(tasks.dueAt)
     .limit(3);
   for (const t of overdue) {
@@ -83,6 +95,7 @@ export async function planDay(): Promise<{ raised: number; closed: number }> {
         isNotNull(tasks.dueAt),
         dsql`${tasks.dueAt}::date = now()::date`,
         dsql`${tasks.dueAt} >= now()`,
+        inLiveProject,
       ),
     )
     .limit(2);

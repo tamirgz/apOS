@@ -50,7 +50,16 @@ export async function listNeedsYou(): Promise<NeedsYouItem[]> {
           where h.id::text = split_part(${attentionItems.personRef}, ':', 2))`,
       })
       .from(attentionItems)
-      .where(eq(attentionItems.status, "open"))
+      .where(
+        and(
+          eq(attentionItems.status, "open"),
+          // A card anchored to a paused/done/archived project waits out of
+          // sight — the user shelved that project. It stays open, so it comes
+          // back if the project is reactivated. Unanchored cards always show.
+          sql`coalesce((select p.status from projects p
+            where p.id::text = split_part(${attentionItems.projectRef}, ':', 2)), 'active') = 'active'`,
+        ),
+      )
       .orderBy(desc(attentionItems.urgency))
       .limit(100),
     db

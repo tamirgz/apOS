@@ -1,4 +1,3 @@
-import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/core/db/client";
 import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
@@ -11,7 +10,7 @@ import {
   listPeople,
   recentMeetings,
 } from "./queries";
-import { people } from "./schema";
+import { meetingSubstance, quotesMeeting } from "./grounding";
 
 const DAY = 86_400_000;
 const daysAgo = (d: Date | null) =>
@@ -45,7 +44,7 @@ export const peopleTools: AiToolDef[] = [
   {
     name: "people.get",
     description:
-      "Read ONE person in full — their durable notes, email, meeting count, days since you last met, and their open follow-ups. Identify them by their `ref` from people.list (e.g. 'p2'). Read this BEFORE people.setNotes so you can MERGE with the existing note instead of overwriting it.",
+      "Read ONE person in full — their durable notes, email, meeting count, days since you last met, and their open follow-ups. Identify them by their `ref` from people.list (e.g. 'p2'). Notes are written by the user only.",
     input: z.object({
       ref: z.string().describe("Person ref from people.list, e.g. 'p2'"),
     }),
@@ -68,7 +67,7 @@ export const peopleTools: AiToolDef[] = [
   {
     name: "people.recentMeetings",
     description:
-      "List meetings that already happened in the last N days (default 3), with attendees and the meeting's actual notes/agenda. A follow-up MUST be grounded in `notes`: when `hasNotes` is false the meeting has no agenda at all (its title is often just participant names), so there is nothing real to follow up on — SKIP it and never invent a topic.",
+      "List meetings that already happened in the last N days (default 3), with attendees and the meeting's notes/agenda (logistics — parking, directions, call links — already stripped). A follow-up MUST quote `notes`: when `hasNotes` is false the invite says nothing about the meeting's substance (its title is often just participant names), so there is nothing real to follow up on — SKIP it and never invent a topic.",
     input: z.object({ days: z.number().int().min(1).max(30).optional() }),
     async execute(i: { days?: number }) {
       const rows = await recentMeetings(i.days ?? 3, db);
@@ -76,7 +75,7 @@ export const peopleTools: AiToolDef[] = [
         const attendees = (m.attendees ?? [])
           .filter((a) => !a.self)
           .map((a) => ({ name: a.name ?? a.email, email: a.email }));
-        const notes = (m.notes ?? "").trim();
+        const notes = meetingSubstance(m.notes);
         return { title: m.title, at: m.startAt, notes: notes || null, hasNotes: notes.length > 0, attendees };
       });
     },
@@ -84,11 +83,14 @@ export const peopleTools: AiToolDef[] = [
   {
     name: "followup.raise",
     description:
-      "Raise a follow-up as a card in the 'Needs you' queue, anchored to a person. Use type 'do' for a concrete step you should take, 'approve' only when a real side-effect (e.g. sending a message) needs sign-off, 'notify' for an FYI. Deduplication is automatic — at most one open card per (person + title), so re-running never duplicates; you don't need to manage a key.",
+      "Raise a follow-up as a card in the 'Needs you' queue, anchored to a person. `quote` is REQUIRED: copy, word for word, the sentence from the `notes` of a meeting this person attended (people.recentMeetings) that the follow-up comes from — a card with no quote from that person's own meeting is refused. Use type 'do' for a concrete step you should take, 'approve' only when a real side-effect (e.g. sending a message) needs sign-off, 'notify' for an FYI. Deduplication is automatic — at most one open card per (person + title), so re-running never duplicates; you don't need to manage a key.",
     input: z.object({
       ref: z.string().describe("Person ref from people.list, e.g. 'p2' — never a raw id"),
       type: z.enum(ATTENTION_TYPES).default("do"),
       title: z.string().min(3),
+      quote: z
+        .string()
+        .describe("The exact sentence from this person's meeting notes the follow-up comes from"),
       body: z.string().optional(),
       urgency: z.number().int().min(0).max(100).optional(),
       dedupeKey: z.string().optional(),
@@ -98,6 +100,7 @@ export const peopleTools: AiToolDef[] = [
         ref: string;
         type: (typeof ATTENTION_TYPES)[number];
         title: string;
+        quote: string;
         body?: string;
         urgency?: number;
         dedupeKey?: string;
@@ -106,10 +109,27 @@ export const peopleTools: AiToolDef[] = [
     ) {
       const p = resolveRef(ctx, "person", i.ref);
       if ("error" in p) return p;
+      // Grounding is enforced here, not trusted to the prompt: the quote must be
+      // in the substance of a recent meeting THIS person attended. Stops
+      // follow-ups spun from logistics, from another meeting, or from nothing.
+      const person = await getPerson(p.id, db);
+      const email = person?.email.toLowerCase();
+      const meetings = email ? await recentMeetings(7, db) : [];
+      const grounded = meetings.some(
+        (m) =>
+          (m.attendees ?? []).some((a) => a.email?.toLowerCase() === email) &&
+          quotesMeeting(i.quote, m.notes),
+      );
+      if (!grounded)
+        return {
+          error:
+            "not raised — that quote isn't in the notes of a meeting this person attended in the last 7 days. A follow-up needs the meeting's own words; without them, there is no follow-up for this person.",
+        };
+      const body = [i.body?.trim(), `From the meeting: “${i.quote.trim()}”`].filter(Boolean).join("\n\n");
       const row = await insertAttentionItem({
         type: i.type,
         title: i.title,
-        body: i.body,
+        body,
         personRef: `people:${p.id}`,
         href: `/m/people/${p.id}`,
         urgency: i.urgency ?? 15,
@@ -117,24 +137,6 @@ export const peopleTools: AiToolDef[] = [
         source: "agent",
       });
       return { id: row.id, raised: true };
-    },
-  },
-  {
-    name: "people.setNotes",
-    description:
-      "Record a short durable note about a person (context, what they care about, open threads). Overwrites the existing note. Identify the person by their `ref` from people.list (e.g. 'p2') — never a raw id.",
-    input: z.object({
-      ref: z.string().describe("Person ref from people.list, e.g. 'p2'"),
-      notes: z.string().max(1000),
-    }),
-    async execute(i: { ref: string; notes: string }, ctx: AiToolContext) {
-      const p = resolveRef(ctx, "person", i.ref);
-      if ("error" in p) return p;
-      await db
-        .update(people)
-        .set({ notes: i.notes.trim() || null, updatedAt: new Date() })
-        .where(eq(people.id, p.id));
-      return { updated: true };
     },
   },
 ];

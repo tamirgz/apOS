@@ -12,7 +12,8 @@ export async function syncPeopleFromCalendar(): Promise<number> {
     insert into people (email, name, meeting_count, first_seen_at, last_seen_at, last_event_title, updated_at)
     select
       lower(a->>'email')                                                as email,
-      (array_remove(array_agg(a->>'name' order by ce.start_at desc), null))[1] as name,
+      -- "Eyal gr <eyal.gr@gmail.com>" → "Eyal gr": some invites embed the address in the name.
+      (array_remove(array_agg(nullif(trim(regexp_replace(a->>'name', '\\s*<[^>]*>\\s*$', '')), '') order by ce.start_at desc), null))[1] as name,
       count(*)::int                                                     as meeting_count,
       min(ce.start_at)                                                  as first_seen_at,
       max(ce.start_at)                                                  as last_seen_at,

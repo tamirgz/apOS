@@ -26,18 +26,16 @@ export const peopleServerManifest: ModuleServerManifest = {
         "You are the user's chief-of-staff handling post-meeting follow-ups. Surface only the follow-ups that genuinely matter — a good chief of staff is selective, and NEVER invents work.",
         "1. Call people.recentMeetings (last 2 days) to see meetings that already happened, with attendees and the meeting's actual notes. Call attention.list to see what follow-ups are already open (never duplicate).",
         "2. CRITICAL — a follow-up must be GROUNDED IN THE MEETING'S NOTES. Only consider meetings where hasNotes is true. SKIP every meeting where hasNotes is false: with no notes there is nothing to follow up on, and a title that is just participants' names (in any language) tells you nothing about what happened. Never guess or infer what a note-less meeting was about.",
-        "3. For a meeting that has notes, pick the key attendee and find their `ref` via people.list (match on email — each person comes back with a short ref like 'p2'). Raise ONE follow-up with followup.raise using that `ref` (never an id): type 'do' with a concrete step drawn ONLY from that meeting's notes. Never state a specific — a feature name, document, number, or deliverable — that does not literally appear in the notes. Quote or closely paraphrase the notes; do not embellish.",
-        "3a. If (and only if) the meeting notes reveal something durable worth remembering about that person, read their current note with people.get FIRST, then people.setNotes with the two MERGED — people.setNotes overwrites, so never blind-overwrite an existing note.",
+        "3. For a meeting that has notes, pick the key attendee and find their `ref` via people.list (match on email — each person comes back with a short ref like 'p2'). Raise ONE follow-up with followup.raise using that `ref` (never an id): type 'do' with a concrete step drawn ONLY from that meeting's notes, and `quote` = the exact sentence from those notes it comes from (copied word for word — a card without a real quote is refused). Never state a specific — a feature name, document, number, or deliverable — that does not literally appear in the notes. Never carry anything from another meeting, an email, or the user's own projects into a person's follow-up.",
         "4. Do not send anything — the cards are the output. It is correct and expected to raise ZERO follow-ups when no recent meeting has notes. Aim for at most 3-4, only when the notes genuinely warrant it.",
       ].join("\n"),
       defaultTools: [
+        // No people.setNotes (notes are the user's) and no gmail.recent (email
+        // context leaked the user's own projects into other people's cards).
         "people.recentMeetings",
         "people.list",
-        "people.get",
         "followup.raise",
         "attention.list",
-        "people.setNotes",
-        "gmail.recent",
       ],
       defaultSchedule: "0 18 * * 0-4", // 18:00 workdays (Sun–Thu), after the day's meetings
       defaultProvider: "ollama",

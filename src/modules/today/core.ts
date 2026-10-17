@@ -115,11 +115,13 @@ export async function insertAttentionItem(input: RaiseInput) {
   // For those, use the ref as given (null stays null).
   const normalizedProjectRef = normalizeRef(input.projectRef, "projects");
   const isAgentRaised = source.startsWith("agent");
+  const personRef = normalizeRef(input.personRef, "people");
+  // A person-anchored card the agent gave NO project stays project-less: text
+  // similarity pinned "Follow up on Team8 VC" onto a paused project.
   const projectRef =
-    input.trustProjectRef || !isAgentRaised
+    input.trustProjectRef || !isAgentRaised || (personRef && !normalizedProjectRef)
       ? normalizedProjectRef
       : await groundProjectRef(normalizedProjectRef, input.title);
-  const personRef = normalizeRef(input.personRef, "people");
   // Content key off the NORMALIZED refs — so "projects:<id>" and a bare "<id>"
   // from an inconsistent agent collapse to one key.
   const dedupeKey =

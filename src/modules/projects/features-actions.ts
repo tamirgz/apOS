@@ -1,6 +1,6 @@
 "use server";
 
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/core/db/client";
 import { createWorkItem, updateWorkItem } from "@/modules/tasks/core";
@@ -72,7 +72,7 @@ export async function updateFeature(
 export async function deleteFeature(id: string, projectId: string) {
   await db
     .update(tasks)
-    .set({ featureRef: null })
+    .set({ featureRef: null, version: sql`${tasks.version} + 1` })
     .where(eq(tasks.featureRef, featureRefOf(id)));
   await db.delete(features).where(eq(features.id, id));
   revalidateProject(projectId);

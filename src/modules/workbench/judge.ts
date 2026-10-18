@@ -27,6 +27,15 @@ export interface JudgeVerdict {
   attemptSeq?: number;
   /** True when the judge could not RUN at all (infra), not a content verdict. */
   errored?: boolean;
+  /** One ruling per acceptance criterion, when the task carried any. */
+  criteria?: CriterionVerdict[];
+}
+
+export interface CriterionVerdict {
+  id: string;
+  text: string;
+  pass: boolean;
+  evidence: string;
 }
 
 export interface JudgeInput {
@@ -35,6 +44,8 @@ export interface JudgeInput {
   changedFiles: string[]; // paths the attempt actually touched
   patch?: string | null; // truncated unified diff, when there is one
   taskType: string;
+  /** Acceptance criteria to rule on one by one (from the delegated work item). */
+  criteria?: { id: string; text: string }[];
 }
 
 const CODE_SYSTEM =
@@ -52,18 +63,34 @@ function isWritten(taskType: string): boolean {
   return taskType === "research" || taskType === "docs" || taskType === "custom";
 }
 
+/** The criteria block and the JSON shape the reply must take. */
+function criteriaAsk(criteria: { text: string }[]): { block: string; shape: string } {
+  if (!criteria.length)
+    return { block: "", shape: `{"pass": boolean, "score": 0-100, "gaps": string[], "rationale": string}` };
+  return {
+    block:
+      `\n\nACCEPTANCE CRITERIA — rule on EACH one separately. A criterion passes only if the result or the changed files show it is met; ` +
+      `quote or point to the evidence. If nothing shows it, it FAILS. Number them as given:\n` +
+      criteria.map((c, i) => `${i + 1}. ${c.text}`).join("\n"),
+    shape:
+      `{"pass": boolean, "score": 0-100, "gaps": string[], "rationale": string, ` +
+      `"criteria": [{"n": number, "pass": boolean, "evidence": string}]} — one "criteria" entry per numbered criterion`,
+  };
+}
+
 function buildPrompt(input: JudgeInput): { system: string; user: string } {
   const written = isWritten(input.taskType);
   const system = written ? WRITTEN_SYSTEM : CODE_SYSTEM;
+  const { block, shape } = criteriaAsk(input.criteria ?? []);
 
   const producedText = (input.result ?? "(the agent returned no text)").slice(0, 16000);
 
   if (written) {
     const user =
-      `THE ASK (${input.taskType}):\n${input.ask}\n\n` +
+      `THE ASK (${input.taskType}):\n${input.ask}${block}\n\n` +
       `WHAT THE AGENT PRODUCED:\n${producedText}\n\n` +
       "Rule on whether this fully and accurately answers the ask. Respond with ONLY a JSON object: " +
-      `{"pass": boolean, "score": 0-100, "gaps": string[], "rationale": string}. ` +
+      `${shape}. ` +
       "gaps must be concrete and actionable — what is missing or wrong — and empty only on a clean pass.";
     return { system, user };
   }
@@ -79,27 +106,51 @@ function buildPrompt(input: JudgeInput): { system: string; user: string } {
       ? "\n\nTHIS RUN CHANGED NO FILES. If the ask is CONDITIONAL (e.g. \"update X IF the change affects it\", \"keep docs in sync\"), a deliberate NO-CHANGE is a valid PASS — but ONLY if the result shows the agent genuinely did the work: it names what it actually inspected (the specific commit/diff, the specific target files or sections) and gives a concrete, verifiable reason nothing needs updating. If the result is vague, generic, empty, or shows no real inspection, it FAILED (the agent fizzled) — do NOT pass it. If the ask UNCONDITIONALLY required a change and none was made, FAIL."
       : "";
   const user =
-    `THE ASK (${input.taskType}):\n${input.ask}\n\n` +
+    `THE ASK (${input.taskType}):\n${input.ask}${block}\n\n` +
     `WHAT THE AGENT PRODUCED (its final result text):\n${producedText}\n\n` +
     `FILES THE AGENT ACTUALLY CHANGED:\n${changed}${patch}${noChangeGuidance}\n\n` +
     "Rule on whether the produced result satisfies the ask. Respond with ONLY a JSON object: " +
-    `{"pass": boolean, "score": 0-100, "gaps": string[], "rationale": string}. ` +
+    `${shape}. ` +
     "gaps must be concrete and actionable — what is missing or wrong — and empty only on a clean pass.";
   return { system, user };
 }
 
-/** Pull the JSON verdict out of the model's reply, tolerant of prose/fences. */
-function parseVerdict(text: string): JudgeVerdict {
+/**
+ * Pull the JSON verdict out of the model's reply, tolerant of prose/fences.
+ * With criteria, each gets its own ruling — one the judge skipped counts as a
+ * fail — and any failed criterion fails the whole verdict, named in the gaps.
+ */
+export function parseVerdict(text: string, criteria: { id: string; text: string }[] = []): JudgeVerdict {
   const match = text.match(/\{[\s\S]*\}/);
   if (match) {
     try {
-      const o = JSON.parse(match[0]) as Partial<JudgeVerdict>;
-      return {
+      const o = JSON.parse(match[0]) as Omit<Partial<JudgeVerdict>, "criteria"> & {
+        criteria?: { n?: number; pass?: boolean; evidence?: string }[];
+      };
+      const v: JudgeVerdict = {
         pass: !!o.pass,
         score: typeof o.score === "number" ? o.score : o.pass ? 100 : 0,
         gaps: Array.isArray(o.gaps) ? o.gaps.map(String).slice(0, 12) : [],
         rationale: String(o.rationale ?? "").slice(0, 1500),
       };
+      if (criteria.length) {
+        const rulings = Array.isArray(o.criteria) ? o.criteria : [];
+        v.criteria = criteria.map((c, i) => {
+          const r = rulings.find((x) => x?.n === i + 1) ?? (rulings.length === criteria.length ? rulings[i] : undefined);
+          return {
+            id: c.id,
+            text: c.text,
+            pass: r?.pass === true,
+            evidence: r ? String(r.evidence ?? "").slice(0, 600) : "The judge gave no ruling on this criterion.",
+          };
+        });
+        const failed = v.criteria.filter((c) => !c.pass);
+        if (failed.length) {
+          v.pass = false;
+          v.gaps = [...failed.map((c) => `Acceptance criterion not met: "${c.text}" — ${c.evidence}`), ...v.gaps].slice(0, 12);
+        }
+      }
+      return v;
     } catch {
       // fall through to the conservative default
     }
@@ -151,7 +202,7 @@ export async function judgeAttempt(input: JudgeInput): Promise<JudgeVerdict> {
   let primaryErr: unknown;
   try {
     const route = await resolveRoute("workbench.judge");
-    return parseVerdict(await runOnce(route.provider, route.model, system, user));
+    return parseVerdict(await runOnce(route.provider, route.model, system, user), input.criteria);
   } catch (e) {
     primaryErr = e;
   }
@@ -160,7 +211,7 @@ export async function judgeAttempt(input: JudgeInput): Promise<JudgeVerdict> {
   //    model, used only when the local one couldn't run (e.g. Ollama down).
   try {
     const route = await resolveRoute("workbench.judge.fallback");
-    const v = parseVerdict(await runOnce(route.provider, route.model, system, user));
+    const v = parseVerdict(await runOnce(route.provider, route.model, system, user), input.criteria);
     const why = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
     v.rationale = `[Primary judge unavailable (${why}); verified by the ${route.model} fallback instead.]\n${v.rationale}`;
     return v;

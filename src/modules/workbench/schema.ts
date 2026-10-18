@@ -60,6 +60,9 @@ export const workbenchTasks = pgTable(
     repoPath: text("repo_path"),
     status: text("status", { enum: TASK_STATUSES }).notNull().default("queued"),
     /** Entity-ref of whatever spawned this ("ideas:<uuid>", "chat"…). */
+    /** Acceptance criteria copied from the delegated work item(s); the judge
+     *  rules on each one (judge.ts). Empty = judge against the ask alone. */
+    acceptance: jsonb("acceptance").$type<{ id: string; text: string }[]>().notNull().default([]),
     createdFrom: text("created_from"),
     /** Filed under any number of projects/areas (["projects:<uuid>", …]). */
     projectRefs: jsonb("project_refs").$type<string[]>().notNull().default([]),

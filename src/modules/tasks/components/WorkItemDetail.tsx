@@ -10,6 +10,7 @@ import {
   CalendarClock,
   CalendarPlus,
   Check,
+  Circle,
   CircleDot,
   Copy,
   CornerDownRight,
@@ -19,6 +20,7 @@ import {
   GitCommitHorizontal,
   Hash,
   Layers,
+  Lock,
   Pencil,
   Plus,
   Repeat,
@@ -40,15 +42,16 @@ import {
   deleteTaskAttachment,
   loadWorkItem,
   relateTask,
+  releaseTaskClaim,
   unrelateTask,
   updateTask,
 } from "../actions";
-import type { WorkItemPatch } from "../core";
+import type { AcceptanceInput, WorkItemPatch } from "../core";
 import { AttachButton, AttachmentList, Lightbox } from "./Attachments";
 import { TASK_PRIORITIES, TASK_STATUSES, type TaskAttachment, type TaskPriority, type TaskStatus } from "../schema";
 import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, displayTitle, plainTitle, type RelationSide } from "../states";
 import type { WorkProject } from "../queries";
-import { LabelPill, PriorityGlyph, StateGlyph, Who, branchName, dueTone, isClosed, splitTitle } from "./work-ui";
+import { LabelPill, PriorityGlyph, StateGlyph, Who, branchName, claimantName, dueTone, isClosed, liveClaim, splitTitle } from "./work-ui";
 
 type Loaded = NonNullable<Awaited<ReturnType<typeof loadWorkItem>>>;
 
@@ -149,6 +152,7 @@ export function WorkItemDetail({
   const [labelDraft, setLabelDraft] = useState("");
   const [comment, setComment] = useState("");
   const [subTitle, setSubTitle] = useState("");
+  const [criterionDraft, setCriterionDraft] = useState("");
   const [armedDelete, setArmedDelete] = useState(false);
   const [relSide, setRelSide] = useState<RelationSide>("blocked_by");
   const [relTarget, setRelTarget] = useState("");
@@ -349,6 +353,7 @@ export function WorkItemDetail({
     </>
   );
   const ic = "size-3.5 shrink-0";
+  const claim = liveClaim(item, now);
 
   const propertiesEl = (
     <dl className={cn("wk-props", !full && "border-b wk-line px-[18px] py-3.5")}>
@@ -366,6 +371,26 @@ export function WorkItemDetail({
           </select>
         </>,
       )}
+      {claim &&
+        propRow(
+          <Lock className={ic} />,
+          "Claimed",
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+            <span className="max-w-full truncate font-mono text-[12px] text-plasma" title={claim.by}>
+              {claimantName(claim.by)}
+            </span>
+            <span className="shrink-0 text-[12px] text-ink-faint">
+              until {claim.until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+            <button
+              type="button"
+              onClick={() => act(() => releaseTaskClaim(id), "Claim released")}
+              className="ml-auto shrink-0 text-[12px] text-ink-dim hover:text-ink"
+            >
+              Release
+            </button>
+          </span>,
+        )}
       {propRow(
         <Signal className={ic} />,
         "Priority",
@@ -555,6 +580,55 @@ export function WorkItemDetail({
           Add a description…
         </button>
       )}
+    </Sec>
+  );
+
+  const acceptance = item.acceptance;
+  const saveAcceptance = (next: AcceptanceInput[]) => save({ acceptance: next });
+  const acceptanceEl = (
+    <Sec title="Acceptance criteria" count={acceptance.length ? `${acceptance.filter((c) => c.done).length}/${acceptance.length}` : undefined}>
+      <ul className="flex flex-col gap-1">
+        {acceptance.map((c) => (
+          <li key={c.id} className="group flex items-start gap-2 text-[13px]">
+            <button
+              type="button"
+              onClick={() => saveAcceptance(acceptance.map((x) => (x.id === c.id ? { ...x, done: !x.done } : x)))}
+              aria-label={c.done ? `Mark "${c.text}" as not met` : `Mark "${c.text}" as met`}
+              className="mt-0.5 shrink-0 rounded transition hover:scale-110"
+            >
+              {c.done ? <Check className="size-3.5 text-plasma" /> : <Circle className="size-3.5 text-ink-faint" />}
+            </button>
+            <span dir="auto" className={cn("min-w-0 flex-1", c.done ? "text-ink-dim" : "text-ink")}>
+              {c.text}
+            </span>
+            <button
+              type="button"
+              onClick={() => saveAcceptance(acceptance.filter((x) => x.id !== c.id))}
+              aria-label={`Remove "${c.text}"`}
+              className="shrink-0 rounded p-0.5 text-ink-faint opacity-0 transition group-hover:opacity-100 hover:text-flare focus-visible:opacity-100"
+            >
+              <X className="size-3" />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!criterionDraft.trim()) return;
+          saveAcceptance([...acceptance, { text: criterionDraft, done: false }]);
+          setCriterionDraft("");
+        }}
+      >
+        <input
+          dir="auto"
+          value={criterionDraft}
+          onChange={(e) => setCriterionDraft(e.target.value)}
+          placeholder="+ Add a criterion — the Workbench judge checks each one when delegated"
+          aria-label="New acceptance criterion"
+          className="wk-inline mt-1 w-full !px-1 text-[12.5px]"
+        />
+      </form>
     </Sec>
   );
 
@@ -925,6 +999,7 @@ export function WorkItemDetail({
           </aside>
           <div className="glass min-w-0 overflow-hidden rounded-2xl lg:order-1 [&>section:last-child]:border-b-0">
             {descriptionEl}
+            {acceptanceEl}
             {attachmentsEl}
             {subitemsEl}
             {relationsEl}
@@ -943,6 +1018,7 @@ export function WorkItemDetail({
       {errorEl}
       {handoffEl}
       {descriptionEl}
+      {acceptanceEl}
       {attachmentsEl}
       {subitemsEl}
       {relationsEl}

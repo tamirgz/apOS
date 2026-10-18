@@ -5,17 +5,21 @@ import { isUuid, registerRefs, resolveRef } from "@/core/ai/refs";
 import { resolveProjectByName } from "@/modules/projects/subject";
 import { features, projects } from "@/modules/projects/schema";
 import {
+  activeClaim,
   addComment,
   addRelation,
   blockingRelations,
+  claimWorkItem,
   createWorkItem,
   deleteWorkItem,
   findByIdentifier,
   getWorkItem,
   listRelations,
+  releaseWorkItem,
   removeRelation,
   updateWorkItem,
   withIdentifiers,
+  type AcceptanceInput,
   type WorkItemPatch,
 } from "./core";
 import { ACCEPTED_EXTENSIONS, addAttachment, attachmentMeta, decodeBase64, readLocalFile, typeOf } from "./attachments";
@@ -30,6 +34,7 @@ import {
   TASK_PRIORITIES,
   TASK_STATUSES,
   ATTACHMENT_KINDS,
+  type MilestoneCriterion,
   type Task,
 } from "./schema";
 
@@ -134,6 +139,44 @@ const summary = (t: Task & { identifier: string | null }) => ({
   dueAt: t.dueAt,
   completedAt: t.completedAt,
   hasParent: !!t.parentId,
+  version: t.version,
+  ...(t.acceptance.length ? { acceptance: t.acceptance.map((c) => ({ text: c.text, done: c.done })) } : {}),
+  ...(activeClaim(t) ? { claimedBy: t.claimedBy, claimedUntil: t.claimExpiresAt } : {}),
+});
+
+const ACCEPTANCE = z
+  .array(z.union([z.string().min(1), z.object({ text: z.string().min(1), done: z.boolean().optional() })]))
+  .max(30)
+  .optional()
+  .describe(
+    "Optional acceptance criteria — what must be true for the item to count as done, one checkable statement each. When the item is delegated, the Workbench judge rules on every one.",
+  );
+
+/** Tool input → criteria; on an update an unchanged text keeps its id and tick. */
+const toAcceptance = (
+  input: z.infer<typeof ACCEPTANCE>,
+  current: MilestoneCriterion[] = [],
+): AcceptanceInput[] | undefined =>
+  input?.map((c) => {
+    const text = typeof c === "string" ? c : c.text;
+    const was = current.find((x) => x.text === text.trim());
+    const done = typeof c === "string" ? was?.done : c.done;
+    return { id: was?.id, text, done: done ?? false };
+  });
+
+const IF_VERSION = z
+  .number()
+  .int()
+  .optional()
+  .describe(
+    "Optional: the item's `version` from tasks.get/list. The change applies only if nobody changed the item since; otherwise you get {error:'conflict', current} — re-read and decide again.",
+  );
+
+/** A write that lost to a newer change: say so, with the item as it is now. */
+const conflictResult = (ctx: AiToolContext, current: Task & { identifier: string | null }) => ({
+  error: "conflict",
+  message: `${current.identifier ?? "This item"} changed since that version (now v${current.version}) — nothing was written.`,
+  current: registerRefs(ctx, "task", "t", [summary(current)])[0],
 });
 
 const isoOrNull = (s: string | undefined) => (s === undefined ? undefined : s ? new Date(s) : null);
@@ -159,6 +202,13 @@ export const taskTools: AiToolDef[] = [
       feature: z.string().optional().describe("Module (feature) NAME within that project, or its ref from modules.list ('m2')"),
       cycle: z.string().optional().describe("Cycle NAME, its ref from cycles.list ('c1'), or 'current'"),
       parent: z.string().optional().describe("Parent item (ref like 't3' or identifier like 'ETHOS-4') to make this a sub-item"),
+      idempotencyKey: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Optional retry key. A repeat create with the same key in the same project returns the first item instead of a duplicate."),
+      acceptance: ACCEPTANCE,
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
@@ -196,10 +246,15 @@ export const taskTools: AiToolDef[] = [
           featureRef,
           cycleId,
           parentId,
+          idempotencyKey: input.idempotencyKey,
+          acceptance: toAcceptance(input.acceptance),
         },
         actorOf(ctx),
       );
-      return { created: { identifier: item.identifier, title: item.title, status: item.status } };
+      return {
+        created: { identifier: item.identifier, title: item.title, status: item.status, version: item.version },
+        ...(item.deduplicated ? { deduplicated: true } : {}),
+      };
     },
   },
   {
@@ -326,18 +381,54 @@ export const taskTools: AiToolDef[] = [
     },
   },
   {
+    name: "tasks.claim",
+    description:
+      "Claim a work item before working on it, so no other agent picks it up. A todo item moves to doing. Lasts `ttlMinutes` (default 60); claim again to extend it, and tasks.release when done. If someone else holds it you get {error:'claimed', by, until} — pick another item.",
+    input: z.object({
+      ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')"),
+      ttlMinutes: z.number().int().min(1).max(24 * 60).optional().describe("How long the claim lasts (default 60)"),
+    }),
+    async execute(input, ctx) {
+      const t = await resolveTask(ctx, input.ref);
+      if ("error" in t) return t;
+      const row = await claimWorkItem(ctx.db, t.id, actorOf(ctx), input.ttlMinutes ?? 60);
+      if (!row) return { error: "work item not found" };
+      if ("error" in row) return row;
+      return { claimed: { identifier: row.identifier, status: row.status, until: row.claimExpiresAt, version: row.version } };
+    },
+  },
+  {
+    name: "tasks.release",
+    description: "Release your claim on a work item (from tasks.claim), so others can pick it up. The item's state is unchanged.",
+    input: z.object({
+      ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')"),
+    }),
+    async execute(input, ctx) {
+      const t = await resolveTask(ctx, input.ref);
+      if ("error" in t) return t;
+      const row = await releaseWorkItem(ctx.db, t.id, actorOf(ctx));
+      if (!row) return { error: "work item not found" };
+      if ("error" in row) return row;
+      return { released: { identifier: row.identifier, status: row.status, version: row.version } };
+    },
+  },
+  {
     name: "tasks.setStatus",
     description:
       "Move a work item to a state: backlog | todo | doing | review | done | cancelled. Identify it by its `ref` ('t3') or identifier ('ETHOS-12').",
     input: z.object({
       ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')"),
       status: z.enum(TASK_STATUSES),
+      ifVersion: IF_VERSION,
     }),
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
       if ("error" in t) return t;
-      const row = await updateWorkItem(ctx.db, t.id, { status: input.status }, actorOf(ctx));
-      return row ? { updated: { identifier: row.identifier, status: row.status } } : { error: "work item not found" };
+      const row = await updateWorkItem(ctx.db, t.id, { status: input.status }, actorOf(ctx), { ifVersion: input.ifVersion });
+      if (row && "error" in row) return conflictResult(ctx, row.current);
+      return row
+        ? { updated: { identifier: row.identifier, status: row.status, version: row.version } }
+        : { error: "work item not found" };
     },
   },
   {
@@ -352,16 +443,21 @@ export const taskTools: AiToolDef[] = [
       priority: z.enum(TASK_PRIORITIES).optional(),
       estimate: z.number().int().min(0).max(100).nullable().optional(),
       labels: z.array(z.string()).optional().describe("Replaces the label set"),
+      acceptance: ACCEPTANCE.describe("Replaces the acceptance criteria (see tasks.create)"),
       dueAt: z.string().optional().describe("ISO 8601; empty string clears it"),
       startAt: z.string().optional().describe("ISO 8601; empty string clears it"),
       project: z.string().optional().describe("Project NAME or key to move it to; empty string unfiles"),
       feature: z.string().optional().describe("Module (feature) NAME in its project or 'm2'; empty string detaches"),
       cycle: z.string().optional().describe("Cycle NAME, 'c1' or 'current'; empty string takes it out of its cycle"),
       parent: z.string().optional().describe("Parent item ('t3' / 'ETHOS-4') to nest it under; empty string makes it top-level"),
+      ifVersion: IF_VERSION,
     }),
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
       if ("error" in t) return t;
+      const [cur] = input.acceptance
+        ? await ctx.db.select({ acceptance: tasks.acceptance }).from(tasks).where(eq(tasks.id, t.id))
+        : [];
       const patch: WorkItemPatch = {
         title: input.title,
         notes: input.notes,
@@ -369,6 +465,7 @@ export const taskTools: AiToolDef[] = [
         priority: input.priority,
         estimate: input.estimate,
         labels: input.labels,
+        acceptance: toAcceptance(input.acceptance, cur?.acceptance),
         dueAt: isoOrNull(input.dueAt),
         startAt: isoOrNull(input.startAt),
       };
@@ -418,8 +515,11 @@ export const taskTools: AiToolDef[] = [
         }
       }
       if (Object.values(patch).every((v) => v === undefined)) return { error: "nothing to update" };
-      const row = await updateWorkItem(ctx.db, t.id, patch, actorOf(ctx));
-      return row ? { updated: { identifier: row.identifier, title: row.title } } : { error: "work item not found" };
+      const row = await updateWorkItem(ctx.db, t.id, patch, actorOf(ctx), { ifVersion: input.ifVersion });
+      if (row && "error" in row) return conflictResult(ctx, row.current);
+      return row
+        ? { updated: { identifier: row.identifier, title: row.title, version: row.version } }
+        : { error: "work item not found" };
     },
   },
   {

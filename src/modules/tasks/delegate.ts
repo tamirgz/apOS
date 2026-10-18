@@ -39,14 +39,31 @@ function itemBlock(t: Task & { identifier: string | null }) {
     `### ${t.identifier ?? "item"} — ${t.title}`,
     t.labels.length ? `Labels: ${t.labels.join(", ")}` : null,
     t.notes?.trim() || null,
+    t.acceptance.length
+      ? `Acceptance criteria (a judge checks each one against your result):\n${t.acceptance.map((c) => `- ${c.text}`).join("\n")}`
+      : null,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
+/** The items' criteria for the Workbench task; with several items, each is prefixed by its identifier. */
+const acceptanceOf = (items: (Task & { identifier: string | null })[]) =>
+  items.flatMap((t) =>
+    t.acceptance.map((c) => ({ id: c.id, text: items.length > 1 ? `${t.identifier ?? t.title}: ${c.text}` : c.text })),
+  );
+
 async function startRun(
   db: Db,
-  input: { title: string; prompt: string; taskType: TaskType; repoPath: string | null; createdFrom: string; projectRef: string | null },
+  input: {
+    title: string;
+    prompt: string;
+    taskType: TaskType;
+    repoPath: string | null;
+    createdFrom: string;
+    projectRef: string | null;
+    acceptance: { id: string; text: string }[];
+  },
 ) {
   const [wb] = await db
     .insert(workbenchTasks)
@@ -57,6 +74,7 @@ async function startRun(
       repoPath: input.repoPath,
       createdFrom: input.createdFrom,
       projectRefs: input.projectRef ? [input.projectRef] : [],
+      acceptance: input.acceptance,
     })
     .returning();
   const pick = await pickExecutor(undefined, input.taskType);
@@ -106,6 +124,7 @@ export async function delegateWorkItem(db: Db, id: string, actor: Actor, extra?:
     repoPath: proj.repoPath,
     createdFrom: `tasks:${id}`,
     projectRef: row.projectRef,
+    acceptance: acceptanceOf([item]),
   });
   await linkAndStart(db, [row], wb, actor);
   return wb;
@@ -147,6 +166,7 @@ export async function delegateFeature(db: Db, featureId: string, actor: Actor, e
     repoPath: proj.repoPath,
     createdFrom: `features:${featureId}`,
     projectRef,
+    acceptance: acceptanceOf(items),
   });
   await linkAndStart(db, open, wb, actor);
   return wb;

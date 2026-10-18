@@ -395,6 +395,7 @@ async function runClaimed(
             label: agent.name,
             parentKind: "agent",
             parentId: runId,
+            agentId: agent.id,
           },
         })) {
           await transcript.push(event);

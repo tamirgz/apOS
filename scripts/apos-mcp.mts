@@ -5,7 +5,12 @@
  * refs/identifiers, same activity history).
  *
  *   scripts/apos-mcp.sh                 (the launcher MCP clients run)
- *   APOS_ACTOR=claude-code              who the activity log credits (agent:<actor>)
+ *   APOS_ACTOR=claude-code              optional prefix for who the activity log credits
+ *
+ * The actor (agent:<actor> in the activity log) is the client's own name and
+ * version from `initialize`, plus a short session id, so two concurrent
+ * sessions are told apart: "claude-code:claude-ai/2.1.3#3f9a1c". APOS_ACTOR is
+ * prepended when set, and stands in for the client name when there is none.
  *
  * Writes land in the live database; the web app shows them on its next refresh.
  */
@@ -28,16 +33,30 @@ type ZodObject = import("zod").ZodObject<import("zod").ZodRawShape>;
 const EXPOSED = (name: string) =>
   /^(tasks|cycles|modules|milestones|attachments)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
 
-const actor = process.env.APOS_ACTOR?.trim() || "mcp";
+const prefix = process.env.APOS_ACTOR?.trim() || "";
 const sessionId = randomUUID();
+const clean = (s: string | undefined) => (s ?? "").trim().replace(/[^\w.@/-]+/g, "-").slice(0, 40);
+
+/** Who this session's writes are credited to; see the header. */
+export function actorFor(prefix: string, client: { name?: string; version?: string } | undefined, sid: string) {
+  const name = clean(client?.name);
+  const who = name ? `${name}${client?.version ? `/${clean(client.version)}` : ""}` : "";
+  const head = [prefix, who].filter(Boolean).join(":") || "mcp";
+  return `${head}#${sid.slice(0, 6)}`;
+}
+
 // One context for the whole session, so list refs (t1, c1, m1) stay valid across calls.
 // No user is assumed present: approval-tier calls are parked and return
-// {pending_approval}; the user approves them in apOS.
-const ctx: AiToolContext = {
-  db,
-  agentName: actor,
-  approvalOrigin: { agentId: sessionId, runId: sessionId, agentName: `MCP ${actor}` },
+// {pending_approval}; the user approves them in apOS. The actor is set once the
+// client has said who it is (initialize), before any tool call.
+let actor = actorFor(prefix, undefined, sessionId);
+const ctx: AiToolContext = { db };
+const setActor = (a: string) => {
+  actor = a;
+  ctx.agentName = a;
+  ctx.approvalOrigin = { agentId: sessionId, runId: sessionId, agentName: `MCP ${a}` };
 };
+setActor(actor);
 
 const server = new McpServer(
   { name: "apos", version: "1.0.0" },
@@ -75,6 +94,11 @@ for (const t of tools) {
     },
   );
 }
+
+server.server.oninitialized = () => {
+  setActor(actorFor(prefix, server.server.getClientVersion(), sessionId));
+  console.error(`[apos-mcp] client → acting as agent:${actor}`);
+};
 
 const transport = new StdioServerTransport();
 // The DB pool would keep the process alive after the client hangs up.

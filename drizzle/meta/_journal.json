@@ -498,6 +498,34 @@
       "when": 1791920289331,
       "tag": "0070_live_work_notify",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1792307956247,
+      "tag": "0071_usage_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1792311044545,
+      "tag": "0072_task_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1792311341232,
+      "tag": "0073_task_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1792311805773,
+      "tag": "0074_acceptance_criteria",
+      "breakpoints": true
     }
   ]
 }

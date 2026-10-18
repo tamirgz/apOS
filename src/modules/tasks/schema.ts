@@ -74,6 +74,20 @@ export const tasks = pgTable(
     externalRef: text("external_ref"),
     /** The cycle (time-boxed iteration) this item is planned into. No FK. */
     cycleId: uuid("cycle_id"),
+    /** Bumped by every write to a tracked field; a writer passing `ifVersion`
+     *  gets a conflict instead of overwriting a change it didn't see. */
+    version: integer("version").notNull().default(1),
+    /** A creator's retry key: a second tasks.create with the same key in the
+     *  same project returns this item instead of making a duplicate. */
+    idempotencyKey: text("idempotency_key"),
+    /** Who is working this item (an actor, e.g. "agent:claude-code/2.1#3f9a1c")
+     *  and until when. A claim past its expiry is free to take; the worker
+     *  clears expired ones (work_backfill). */
+    claimedBy: text("claimed_by"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+    /** What "done" means for this item — checked one by one by the Workbench
+     *  judge when the item is delegated. Same shape as a milestone's exit criteria. */
+    acceptance: jsonb("acceptance").$type<MilestoneCriterion[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -88,6 +102,9 @@ export const tasks = pgTable(
     index("tasks_feature").on(t.featureRef),
     index("tasks_cycle").on(t.cycleId),
     uniqueIndex("tasks_external_ref").on(t.externalRef).where(sql`${t.externalRef} is not null`),
+    uniqueIndex("tasks_idempotency")
+      .on(sql`coalesce(${t.projectRef}, '')`, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} is not null`),
   ],
 );
 

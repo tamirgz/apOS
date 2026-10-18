@@ -311,6 +311,7 @@ export async function POST(req: Request) {
               label: taskKey,
               parentKind: "chat",
               parentId: chatRunId,
+              taskKey,
             },
           })) {
             if (event.type === "tool_call") calls.add(event.name);

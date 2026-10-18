@@ -4,7 +4,7 @@
  *
  * Worker-safe: db passed in.
  */
-import { asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "@/core/db/client";
 import { cycles, isClosed, tasks, type Cycle } from "./schema";
 
@@ -129,7 +129,7 @@ export async function updateCycle(db: Db, id: string, patch: { name?: string; st
 
 /** Deleting a cycle un-plans its items; it never deletes work. */
 export async function deleteCycle(db: Db, id: string) {
-  await db.update(tasks).set({ cycleId: null }).where(eq(tasks.cycleId, id));
+  await db.update(tasks).set({ cycleId: null, version: sql`${tasks.version} + 1` }).where(eq(tasks.cycleId, id));
   await db.delete(cycles).where(eq(cycles.id, id));
 }
 
@@ -139,7 +139,7 @@ export async function rollOverCycle(db: Db, fromId: string, toId: string | null)
   if (open.length) {
     await db
       .update(tasks)
-      .set({ cycleId: toId, updatedAt: new Date() })
+      .set({ cycleId: toId, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(inArray(tasks.id, open.map((t) => t.id)));
   }
   return open.length;

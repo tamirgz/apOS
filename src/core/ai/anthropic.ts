@@ -11,6 +11,7 @@ import type {
 } from "./provider";
 import { fromWireName, toWireName } from "./provider";
 import { enforceSubscriptionAuth } from "./auth";
+import { invokeTool } from "./invoke-tool";
 
 // Runs once, before the SDK can spawn its runtime: a metered key present in
 // the environment would take precedence over the Max subscription.
@@ -41,7 +42,7 @@ export const anthropicProvider: AIProvider = {
         t.description,
         (t.input as ZodObject<ZodRawShape>).shape,
         async (input) => {
-          const result = await t.execute(input, opts.toolCtx);
+          const result = await invokeTool(t, input, opts.toolCtx);
           return {
             content: [
               { type: "text" as const, text: JSON.stringify(result ?? null) },

@@ -558,12 +558,17 @@ function ToolConfig({
           <option value="">— pick a tool —</option>
           {tools.map((t) => (
             <option key={t.name} value={t.name}>
-              {t.name}
+              {t.needsApproval ? `${t.name} · needs approval` : t.name}
             </option>
           ))}
         </select>
         {!selected && <span className="text-[11px] text-flare">Choose a tool to run.</span>}
         {def && <span className="text-[11px] text-ink-faint">{def.description}</span>}
+        {def?.needsApproval && (
+          <span className="text-[11px] text-solar">
+            Needs your approval: each run queues this call in Approvals and it runs only once you approve.
+          </span>
+        )}
       </label>
       <label className="flex flex-col gap-1">
         <span className={labelCls}>args (JSON)</span>

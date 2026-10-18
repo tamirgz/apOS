@@ -16,7 +16,7 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { sql as notify, type Db } from "@/core/db/client";
 import { features, projects } from "@/modules/projects/schema";
 import { usableRepoPath } from "@/modules/projects/repo";
-import { pickExecutor } from "@/modules/workbench/queries";
+import { noteExecutorFallback, pickExecutor } from "@/modules/workbench/queries";
 import { taskAttempts, workbenchTasks, type TaskType } from "@/modules/workbench/schema";
 import { addComment, addLink, updateWorkItem, withIdentifiers, type Actor } from "./core";
 import { isClosed, taskLinks, tasks, type Task } from "./schema";
@@ -59,10 +59,12 @@ async function startRun(
       projectRefs: input.projectRef ? [input.projectRef] : [],
     })
     .returning();
+  const pick = await pickExecutor(undefined, input.taskType);
   const [attempt] = await db
     .insert(taskAttempts)
-    .values({ taskId: wb.id, seq: 1, executorId: await pickExecutor(undefined, input.taskType) })
+    .values({ taskId: wb.id, seq: 1, executorId: pick.executorId })
     .returning();
+  await noteExecutorFallback(attempt.id, pick.fallback);
   await notify.notify("workbench_run", attempt.id);
   return wb;
 }

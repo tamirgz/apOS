@@ -297,7 +297,8 @@ export async function POST(req: Request) {
             system: directive ? `${baseSystem}\n\n${directive}` : baseSystem,
             messages,
             tools: activeTools,
-            toolCtx: { db },
+            // The user is in the conversation: approval-tier tools run directly.
+            toolCtx: { db, userPresent: true },
             model: route.model,
             reasoning,
             signal: runAbort.signal,

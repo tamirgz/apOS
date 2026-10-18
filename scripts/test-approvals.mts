@@ -12,6 +12,8 @@ import { openPRInput } from "@/modules/workbench/tools";
 import { stabilizeRefs } from "@/core/ai/refs";
 import { db } from "@/core/db/client";
 import { resolveCycle, resolveTask } from "@/modules/tasks/tools";
+import { invokeTool } from "@/core/ai/invoke-tool";
+import { z } from "zod";
 
 const R: { n: string; pass: boolean; d: string }[] = [];
 const rec = (n: string, pass: boolean, d = "") => R.push({ n, pass, d });
@@ -62,7 +64,28 @@ if (cyc) {
   rec("resolveCycle accepts a uuid without refs", "id" in rc && rc.id === cyc.id, JSON.stringify(rc));
 }
 
-// 4. Every parked row still awaiting execution parses against its tool today.
+// 4. invokeTool is the gate: an approval-tier call runs only with a user present
+//    or an approval in hand; anywhere else it is parked (fail closed).
+let ran = 0;
+const probe: any = { name: "zz.probe", description: "", risk: "approval", input: z.object({ ref: z.string() }), execute: async () => ++ran };
+const parkedOut: any = await invokeTool(probe, { ref: "t3" }, { db, refs: runCtx.refs } as any);
+rec("unattended approval-tier call is parked", ran === 0 && typeof parkedOut?.pending_approval === "string", JSON.stringify(parkedOut));
+if (parkedOut?.pending_approval) {
+  const [row] = await sql`select input, agent_name from approvals where id = ${parkedOut.pending_approval}`;
+  rec("parked row carries stable ids", row?.input?.ref === tid, JSON.stringify(row));
+  await sql`delete from approvals where id = ${parkedOut.pending_approval}`;
+  await sql`delete from notifications where title = 'Approval needed: zz.probe'`;
+}
+await invokeTool(probe, { ref: "x" }, { db, userPresent: true } as any);
+rec("user-present call executes", ran === 1);
+await invokeTool(probe, { ref: "x" }, { db, approved: true } as any);
+rec("approved call executes", ran === 2);
+await invokeTool({ ...probe, risk: "safe" }, { ref: "x" }, { db } as any);
+rec("safe call executes", ran === 3);
+const delegateTool = getToolsByNames(["workbench.delegate"])[0];
+rec("workbench.delegate is approval-tier", delegateTool?.risk === "approval");
+
+// 5. Every parked row still awaiting execution parses against its tool today.
 const rows = await sql`select id, tool_name, input from approvals where status in ('pending','approved')`;
 for (const r of rows) {
   const err = parses(r.tool_name, r.input);

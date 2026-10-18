@@ -377,7 +377,7 @@ async function runNode(
     } else if (node.kind === "source") {
       output = await runSourceNode(node);
     } else if (node.kind === "tool") {
-      output = await runToolNode(node, input);
+      output = await runToolNode(node, input, flowRunId, nr.id);
     } else if (node.kind === "output") {
       output = await runOutputNode(node, input);
     } else if (node.kind === "branch") {
@@ -654,7 +654,12 @@ async function runSourceNode(node: FlowNode): Promise<FlowPayload> {
  * node's `args` JSON (with {{report}} / {{signal.x}} interpolation from the
  * upstream payload). The tool's result flows downstream as report + signal.
  */
-async function runToolNode(node: FlowNode, input: FlowPayload | null): Promise<FlowPayload> {
+async function runToolNode(
+  node: FlowNode,
+  input: FlowPayload | null,
+  flowRunId: string,
+  nodeRunId: string,
+): Promise<FlowPayload> {
   const toolName = String(node.config?.tool ?? "").trim();
   if (!toolName) throw new Error("tool node has no tool selected");
   const { getToolsByNames } = await import("@/core/ai/tool-registry");
@@ -675,7 +680,12 @@ async function runToolNode(node: FlowNode, input: FlowPayload | null): Promise<F
   } catch (e) {
     throw new Error(`tool "${toolName}" args invalid: ${String(e).slice(0, 160)}`);
   }
-  const result = await def.execute(args, { db } as never);
+  // A flow runs unattended: an approval-tier tool is parked, not run.
+  const { invokeTool } = await import("@/core/ai/invoke-tool");
+  const result = await invokeTool(def, args, {
+    db,
+    approvalOrigin: { agentId: nodeRunId, runId: flowRunId, agentName: `Flow node "${node.name ?? toolName}"` },
+  });
   return {
     // A readable rendering for delivery / an agent's eyes; the FULL structured
     // result stays on `signal` for a downstream branch/tool to compute on.

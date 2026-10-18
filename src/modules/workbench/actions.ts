@@ -7,7 +7,7 @@ import { db, sql } from "@/core/db/client";
 import { recordUsage } from "@/core/usage";
 import { clipToObsidianRaw } from "@/core/obsidian-clip";
 import { deleteBranchIfMerged, removeIsolation } from "./git";
-import { pickExecutor } from "./queries";
+import { noteExecutorFallback, pickExecutor } from "./queries";
 import { assertFreeModel } from "./models";
 import {
   attemptEvents,
@@ -127,15 +127,17 @@ export async function createTask(input: {
     })
     .returning();
 
+  const pick = await pickExecutor(input.executorId, input.taskType);
   const [attempt] = await db
     .insert(taskAttempts)
     .values({
       taskId: task.id,
       seq: 1,
-      executorId: await pickExecutor(input.executorId, input.taskType),
+      executorId: pick.executorId,
       model: input.model ?? null,
     })
     .returning();
+  await noteExecutorFallback(attempt.id, pick.fallback);
 
   // The worker owns execution; the web app never spawns anything itself.
   await sql.notify("workbench_run", attempt.id);
@@ -165,20 +167,22 @@ export async function retryTask(
     .orderBy(desc(taskAttempts.seq))
     .limit(1);
 
+  const pick = await pickExecutor(
+    executorId ?? last?.executorId ?? undefined,
+    task.taskType,
+  );
   const [attempt] = await db
     .insert(taskAttempts)
     .values({
       taskId,
       seq: (last?.seq ?? 0) + 1,
-      executorId: await pickExecutor(
-        executorId ?? last?.executorId ?? undefined,
-        task.taskType,
-      ),
+      executorId: pick.executorId,
       // An explicit model pins this attempt (e.g. a free-model comparison run);
       // otherwise inherit the previous attempt's model.
       model: model !== undefined ? model : (last?.model ?? null),
     })
     .returning();
+  await noteExecutorFallback(attempt.id, pick.fallback);
 
   await db
     .update(workbenchTasks)

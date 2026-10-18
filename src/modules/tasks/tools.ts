@@ -134,6 +134,22 @@ const summary = (t: Task & { identifier: string | null }) => ({
   dueAt: t.dueAt,
   completedAt: t.completedAt,
   hasParent: !!t.parentId,
+  version: t.version,
+});
+
+const IF_VERSION = z
+  .number()
+  .int()
+  .optional()
+  .describe(
+    "Optional: the item's `version` from tasks.get/list. The change applies only if nobody changed the item since; otherwise you get {error:'conflict', current} — re-read and decide again.",
+  );
+
+/** A write that lost to a newer change: say so, with the item as it is now. */
+const conflictResult = (ctx: AiToolContext, current: Task & { identifier: string | null }) => ({
+  error: "conflict",
+  message: `${current.identifier ?? "This item"} changed since that version (now v${current.version}) — nothing was written.`,
+  current: registerRefs(ctx, "task", "t", [summary(current)])[0],
 });
 
 const isoOrNull = (s: string | undefined) => (s === undefined ? undefined : s ? new Date(s) : null);
@@ -159,6 +175,12 @@ export const taskTools: AiToolDef[] = [
       feature: z.string().optional().describe("Module (feature) NAME within that project, or its ref from modules.list ('m2')"),
       cycle: z.string().optional().describe("Cycle NAME, its ref from cycles.list ('c1'), or 'current'"),
       parent: z.string().optional().describe("Parent item (ref like 't3' or identifier like 'ETHOS-4') to make this a sub-item"),
+      idempotencyKey: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Optional retry key. A repeat create with the same key in the same project returns the first item instead of a duplicate."),
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
@@ -196,10 +218,14 @@ export const taskTools: AiToolDef[] = [
           featureRef,
           cycleId,
           parentId,
+          idempotencyKey: input.idempotencyKey,
         },
         actorOf(ctx),
       );
-      return { created: { identifier: item.identifier, title: item.title, status: item.status } };
+      return {
+        created: { identifier: item.identifier, title: item.title, status: item.status, version: item.version },
+        ...(item.deduplicated ? { deduplicated: true } : {}),
+      };
     },
   },
   {
@@ -332,12 +358,16 @@ export const taskTools: AiToolDef[] = [
     input: z.object({
       ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')"),
       status: z.enum(TASK_STATUSES),
+      ifVersion: IF_VERSION,
     }),
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
       if ("error" in t) return t;
-      const row = await updateWorkItem(ctx.db, t.id, { status: input.status }, actorOf(ctx));
-      return row ? { updated: { identifier: row.identifier, status: row.status } } : { error: "work item not found" };
+      const row = await updateWorkItem(ctx.db, t.id, { status: input.status }, actorOf(ctx), { ifVersion: input.ifVersion });
+      if (row && "error" in row) return conflictResult(ctx, row.current);
+      return row
+        ? { updated: { identifier: row.identifier, status: row.status, version: row.version } }
+        : { error: "work item not found" };
     },
   },
   {
@@ -358,6 +388,7 @@ export const taskTools: AiToolDef[] = [
       feature: z.string().optional().describe("Module (feature) NAME in its project or 'm2'; empty string detaches"),
       cycle: z.string().optional().describe("Cycle NAME, 'c1' or 'current'; empty string takes it out of its cycle"),
       parent: z.string().optional().describe("Parent item ('t3' / 'ETHOS-4') to nest it under; empty string makes it top-level"),
+      ifVersion: IF_VERSION,
     }),
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
@@ -418,8 +449,11 @@ export const taskTools: AiToolDef[] = [
         }
       }
       if (Object.values(patch).every((v) => v === undefined)) return { error: "nothing to update" };
-      const row = await updateWorkItem(ctx.db, t.id, patch, actorOf(ctx));
-      return row ? { updated: { identifier: row.identifier, title: row.title } } : { error: "work item not found" };
+      const row = await updateWorkItem(ctx.db, t.id, patch, actorOf(ctx), { ifVersion: input.ifVersion });
+      if (row && "error" in row) return conflictResult(ctx, row.current);
+      return row
+        ? { updated: { identifier: row.identifier, title: row.title, version: row.version } }
+        : { error: "work item not found" };
     },
   },
   {

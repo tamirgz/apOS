@@ -74,6 +74,12 @@ export const tasks = pgTable(
     externalRef: text("external_ref"),
     /** The cycle (time-boxed iteration) this item is planned into. No FK. */
     cycleId: uuid("cycle_id"),
+    /** Bumped by every write to a tracked field; a writer passing `ifVersion`
+     *  gets a conflict instead of overwriting a change it didn't see. */
+    version: integer("version").notNull().default(1),
+    /** A creator's retry key: a second tasks.create with the same key in the
+     *  same project returns this item instead of making a duplicate. */
+    idempotencyKey: text("idempotency_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -88,6 +94,9 @@ export const tasks = pgTable(
     index("tasks_feature").on(t.featureRef),
     index("tasks_cycle").on(t.cycleId),
     uniqueIndex("tasks_external_ref").on(t.externalRef).where(sql`${t.externalRef} is not null`),
+    uniqueIndex("tasks_idempotency")
+      .on(sql`coalesce(${t.projectRef}, '')`, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} is not null`),
   ],
 );
 

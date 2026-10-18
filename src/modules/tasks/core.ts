@@ -51,9 +51,17 @@ export interface WorkItemInput {
   /** For imports that carry their own history. */
   createdAt?: Date;
   completedAt?: Date | null;
+  /** A creator's retry key — the same key in the same project returns the existing item. */
+  idempotencyKey?: string | null;
 }
 
-export type WorkItemPatch = Partial<Omit<WorkItemInput, "externalRef" | "createdAt">>;
+export type WorkItemPatch = Partial<Omit<WorkItemInput, "externalRef" | "createdAt" | "idempotencyKey">>;
+
+/** An `ifVersion` write that lost the race: the item as it is now. */
+export interface WorkItemConflict {
+  error: "conflict";
+  current: WorkItem;
+}
 
 const projectIdOf = (ref: string | null | undefined) =>
   ref?.startsWith("projects:") ? ref.slice("projects:".length) : null;
@@ -261,7 +269,11 @@ async function assertParent(db: Db, id: string | null, parentId: string | null |
   }
 }
 
-export async function createWorkItem(db: Db, input: WorkItemInput, actor: Actor): Promise<WorkItem> {
+export async function createWorkItem(
+  db: Db,
+  input: WorkItemInput,
+  actor: Actor,
+): Promise<WorkItem & { deduplicated?: true }> {
   const title = input.title.trim();
   if (!title) throw new Error("Title is required");
   let projectRef = input.projectRef ?? null;
@@ -276,9 +288,21 @@ export async function createWorkItem(db: Db, input: WorkItemInput, actor: Actor)
     const [f] = await db.select({ projectId: features.projectId }).from(features).where(eq(features.id, featureIdOf(featureRef)!));
     if (f) projectRef = `projects:${f.projectId}`;
   }
+  const key = input.idempotencyKey?.trim() || null;
+  const byKey = async () => {
+    const [hit] = await db
+      .select()
+      .from(tasks)
+      .where(and(sql`coalesce(${tasks.projectRef}, '') = ${projectRef ?? ""}`, eq(tasks.idempotencyKey, key!)));
+    return hit ? { ...(await withIdentifiers(db, [hit]))[0], deduplicated: true as const } : null;
+  };
+  if (key) {
+    const hit = await byKey();
+    if (hit) return hit;
+  }
   const status = input.status ?? "todo";
   const number = await allocateNumber(db, projectRef);
-  const [row] = await db
+  const insert = db
     .insert(tasks)
     .values({
       title,
@@ -296,25 +320,55 @@ export async function createWorkItem(db: Db, input: WorkItemInput, actor: Actor)
       cycleId: input.cycleId ?? null,
       sortOrder: input.sortOrder ?? Date.now() / 1000,
       number,
+      idempotencyKey: key,
       createdAt: input.createdAt ?? new Date(),
       updatedAt: new Date(),
       completedAt: isClosed(status) ? (input.completedAt ?? new Date()) : null,
     })
     .returning();
+  let row: Task;
+  try {
+    [row] = await insert;
+  } catch (e) {
+    // Two creates with one key raced past the lookup; the index let one in.
+    const hit = key && (e as { code?: string }).code === "23505" ? await byKey() : null;
+    if (hit) return hit;
+    throw e;
+  }
   await db.insert(taskActivity).values({ taskId: row.id, actor, kind: "created" });
   await syncFeatureStatus(db, featureRef);
   const [item] = await withIdentifiers(db, [row]);
   return item;
 }
 
+/**
+ * Apply a patch. Every change bumps `version`. With `ifVersion`, the write
+ * lands only if the item is still at that version — otherwise nothing changes
+ * and the caller gets `{ error: "conflict", current }`.
+ */
+export async function updateWorkItem(db: Db, id: string, patch: WorkItemPatch, actor: Actor): Promise<WorkItem | null>;
 export async function updateWorkItem(
   db: Db,
   id: string,
   patch: WorkItemPatch,
   actor: Actor,
-): Promise<WorkItem | null> {
+  opts: { ifVersion?: number },
+): Promise<WorkItem | WorkItemConflict | null>;
+export async function updateWorkItem(
+  db: Db,
+  id: string,
+  patch: WorkItemPatch,
+  actor: Actor,
+  opts: { ifVersion?: number } = {},
+): Promise<WorkItem | WorkItemConflict | null> {
   const [cur] = await db.select().from(tasks).where(eq(tasks.id, id));
   if (!cur) return null;
+  const { ifVersion } = opts;
+  const conflict = async (row: Task): Promise<WorkItemConflict> => ({
+    error: "conflict",
+    current: (await withIdentifiers(db, [row]))[0],
+  });
+  if (ifVersion !== undefined && cur.version !== ifVersion) return conflict(cur);
 
   const next: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
@@ -345,11 +399,17 @@ export async function updateWorkItem(
   const moved = "sortOrder" in next && next.sortOrder !== cur.sortOrder;
   if (!changed.length && !moved) return (await withIdentifiers(db, [cur]))[0];
 
+  // The version check is in the UPDATE itself, so two writers holding the
+  // same version can't both pass it.
   const [row] = await db
     .update(tasks)
-    .set({ ...next, updatedAt: new Date() })
-    .where(eq(tasks.id, id))
+    .set({ ...next, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+    .where(and(eq(tasks.id, id), ifVersion !== undefined ? eq(tasks.version, ifVersion) : undefined))
     .returning();
+  if (!row) {
+    const [now] = await db.select().from(tasks).where(eq(tasks.id, id));
+    return now && ifVersion !== undefined ? conflict(now) : null;
+  }
 
   if (changed.length) {
     const rows = await Promise.all(
@@ -384,7 +444,7 @@ export async function deleteWorkItem(db: Db, id: string): Promise<boolean> {
   const [row] = await db.delete(tasks).where(eq(tasks.id, id)).returning();
   if (!row) return false;
   // Children survive as top-level items; history goes with the item.
-  await db.update(tasks).set({ parentId: null }).where(eq(tasks.parentId, id));
+  await db.update(tasks).set({ parentId: null, version: sql`${tasks.version} + 1` }).where(eq(tasks.parentId, id));
   await db.delete(taskActivity).where(eq(taskActivity.taskId, id));
   // Attachments outlive the item, hidden (their bytes are evidence; never hard-deleted).
   await db

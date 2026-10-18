@@ -9,7 +9,7 @@
  * endpoint: outbound conversations.history needs no inbound webhook. Idempotent
  * via a per-channel cursor plus a per-message `source` dedupe in the inbox.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { getSetting, setSetting } from "@/core/app-settings";
 import { matchProjectByText } from "@/core/embeddings";
@@ -43,7 +43,7 @@ async function linkToProject(
   const ref = `projects:${projectId}`;
   if (kind === "task") {
     const { tasks } = await import("@/modules/tasks/schema");
-    await db.update(tasks).set({ projectRef: ref }).where(eq(tasks.id, itemId));
+    await db.update(tasks).set({ projectRef: ref, version: sql`${tasks.version} + 1` }).where(eq(tasks.id, itemId));
   } else if (kind === "note") {
     const { notes } = await import("@/modules/notes/schema");
     // Notes are multi-filed — set the array to this single matched project.

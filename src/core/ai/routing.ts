@@ -128,7 +128,7 @@ const DEFAULTS: { taskKey: string; provider: AIProviderId; model: string }[] = [
 
 /** Insert default rows once so the Settings UI always has something to edit.
  *  Read-first: the common case stays a single SELECT. */
-export async function ensureDefaultRoutes() {
+export async function ensureDefaultRoutes(): Promise<number> {
   const existing = await db
     .select({ taskKey: aiRoutes.taskKey })
     .from(aiRoutes);
@@ -137,9 +137,10 @@ export async function ensureDefaultRoutes() {
   if (missing.length) {
     await db.insert(aiRoutes).values(missing).onConflictDoNothing();
   }
+  return missing.length;
 }
 
-/** Exact key → "agent.default" → "chat" → hard default. One query. */
+/** Exact key → "agent.default" → "chat" → local-first hard default. One query. */
 export async function resolveRoute(taskKey: string): Promise<ResolvedRoute> {
   const keys =
     taskKey === "chat" ? ["chat"] : [taskKey, "agent.default", "chat"];
@@ -159,11 +160,13 @@ export async function resolveRoute(taskKey: string): Promise<ResolvedRoute> {
       };
     }
   }
+  // No row at all (routes not seeded yet): the same local-first tier the seeds
+  // use — never a metered model by default.
   return {
     taskKey,
-    provider: providers.anthropic,
-    providerId: "anthropic",
-    model: "claude-sonnet-5",
+    provider: providers[CAPABLE.provider],
+    providerId: CAPABLE.provider,
+    model: CAPABLE.model,
   };
 }
 

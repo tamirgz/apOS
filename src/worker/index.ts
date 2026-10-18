@@ -387,6 +387,13 @@ async function main() {
   }
   log("advisory lock acquired — single runner confirmed");
 
+  // Seed the local-first routes before anything resolves one: on a fresh
+  // install nothing else has (chat / Settings › Models seed them lazily).
+  const { ensureDefaultRoutes } = await import("@/core/ai/routing");
+  await ensureDefaultRoutes()
+    .then((n) => log(n ? `seeded ${n} default AI route(s)` : "default AI routes present"))
+    .catch((e) => log(`default route seed failed: ${e}`));
+
   await sweepOrphans();
   await sweepOrphanedFlowRuns().catch((e) => log(`flow orphan sweep failed: ${e}`));
   await sweepOrphanedWorkbench().catch((e) => log(`workbench orphan sweep failed: ${e}`));

@@ -11,7 +11,7 @@ x-app: &app
     context: ..
     dockerfile: deploy/Dockerfile
   environment:
-    DATABASE_URL: postgres://aios:aios@postgres:5432/aios
+    DATABASE_URL: postgres://aios:aios@postgres:5432/aios?sslmode=disable
     OLLAMA_BASE_URL: http://host.docker.internal:11434
     # MLX is a host opt-in; point at the host if you enable it.
     MLX_BASE_URL: http://host.docker.internal:1234/v1
@@ -63,7 +63,7 @@ services:
       dockerfile: deploy/Dockerfile
     command: ["pnpm", "db:migrate"]
     environment:
-      DATABASE_URL: postgres://aios:aios@postgres:5432/aios
+      DATABASE_URL: postgres://aios:aios@postgres:5432/aios?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy

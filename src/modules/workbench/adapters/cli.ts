@@ -22,7 +22,7 @@ import {
   childPath,
   resolveBin,
 } from "./opencode-env";
-import { harnessEnv, harnessHome, maybeSeatbelt } from "./sandbox";
+import { AUTO_APPROVE_FLAGS, harnessEnv, harnessHome, maybeSeatbelt } from "./sandbox";
 import {
   classifyModelFailure,
   recordModelHealth,
@@ -172,12 +172,19 @@ export const cliAdapter: Adapter = {
       CI: "1",
     });
     // Tier 2: for these auto-approve local CLIs, the OS enforces that writes
-    // stay inside the workdir + sandbox home + tmp (no-op if seatbelt is off
-    // or unavailable).
+    // stay inside the workdir + sandbox home + tmp. An auto-approve CLI that
+    // can't be confined (seatbelt off or unavailable) is refused, not run bare.
     const launch = maybeSeatbelt(bin, args, {
       workdir: ctx.workdir,
       home: harnessHome("cli"),
     });
+    const autoApprove = args.find((a) => AUTO_APPROVE_FLAGS.includes(a));
+    if (autoApprove && !launch.confined) {
+      return {
+        ok: false,
+        error: `refusing to start "${cmd}" with ${autoApprove} outside the seatbelt (${launch.reason}) — it would approve its own writes anywhere on this machine. Re-enable the seatbelt (unset WORKBENCH_SEATBELT) or use another executor.`,
+      };
+    }
     const child = spawn(launch.bin, launch.args, {
       cwd: ctx.workdir,
       detached: true, // own process group, so a timeout kills its children too

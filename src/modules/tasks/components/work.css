@@ -269,6 +269,20 @@
   white-space: nowrap;
 }
 
+.wk-claim {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-plasma);
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── list ────────────────────────────────────────────────────────────────── */
 .wk-row {
   display: grid;

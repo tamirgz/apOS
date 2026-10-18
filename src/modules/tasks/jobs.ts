@@ -1,5 +1,5 @@
 import type { ModuleJob } from "@/core/modules/types.server";
-import { backfillWork } from "./core";
+import { backfillWork, expireClaims } from "./core";
 import { linkCommits } from "./commits";
 import { syncFromWorkbench, syncPendingWorkbenchLinks } from "./delegate";
 
@@ -17,16 +17,19 @@ export const workJobs: ModuleJob[] = [
   },
   {
     // Identifiers stay complete (every project a key, every item a number) and
-    // Workbench outcomes missed while the worker was down get written back.
-    // Idempotent — a no-op when nothing is missing.
+    // Workbench outcomes missed while the worker was down get written back,
+    // and expired claims are cleared. Idempotent — a no-op when nothing is missing.
     channel: "work_backfill",
     schedule: "*/15 * * * *",
     runOnBoot: true,
     handle: async (_payload, ctx) => {
       const r = await backfillWork(ctx.db);
       const wb = await syncPendingWorkbenchLinks(ctx.db);
-      if (r.keys || r.numbers || wb) {
-        console.log(`[work] backfill: ${r.keys} key(s), ${r.numbers} number(s), ${wb} workbench write-back(s)`);
+      const claims = await expireClaims(ctx.db);
+      if (r.keys || r.numbers || wb || claims) {
+        console.log(
+          `[work] backfill: ${r.keys} key(s), ${r.numbers} number(s), ${wb} workbench write-back(s), ${claims} expired claim(s)`,
+        );
       }
     },
   },

@@ -50,6 +50,9 @@ export interface ModelTrack {
   label?: string;
   parentKind?: string | null;
   parentId?: string | null;
+  /** For the usage ledger: the AI route the call runs under, and the agent. */
+  taskKey?: string;
+  agentId?: string;
 }
 
 export interface AIProvider {

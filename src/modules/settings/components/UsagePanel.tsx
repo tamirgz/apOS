@@ -15,7 +15,7 @@ type UsageRow = {
 } & Record<string, unknown>;
 
 /** Why this provider costs $0 in THIS app specifically (not in general). */
-const COST_REASON: Record<AIProviderId, string> = {
+export const COST_REASON: Record<AIProviderId, string> = {
   ollama: "local — runs on this machine, no billing at all",
   mlx: "local — Apple MLX runtime (mlx_lm.server) on this machine, no billing at all",
   nvidia: "NVIDIA free tier — the agent layer refuses any model that isn't confirmed $0 (fail-closed)",
@@ -81,7 +81,6 @@ export async function UsagePanel() {
                 <th className="pb-2 text-right font-normal">fails</th>
                 <th className="pb-2 text-right font-normal">tok in</th>
                 <th className="pb-2 text-right font-normal">tok out</th>
-                <th className="pb-2 text-right font-normal">cost</th>
               </tr>
             </thead>
             <tbody>
@@ -119,16 +118,6 @@ export async function UsagePanel() {
                     <td className="py-1.5 text-right font-mono text-xs tabular-nums text-ink-dim">
                       {fmt(r.tokens_out)}
                     </td>
-                    <td className="py-1.5 text-right">
-                      <span
-                        title={COST_REASON[effProvider]}
-                        className="font-mono text-xs tabular-nums text-ink-faint"
-                      >
-                        {effProvider === "gemini" || effProvider === "openrouter" || effProvider === "tokenharbor"
-                          ? "meter"
-                          : "$0"}
-                      </span>
-                    </td>
                   </tr>
                 );
               })}
@@ -137,10 +126,8 @@ export async function UsagePanel() {
         )}
       </div>
       <p className="px-1 font-mono text-[9px] leading-relaxed text-ink-faint">
-        C = cloud · L = local (Ollama, on this machine). Local models, the
-        fail-closed-free NVIDIA tier, and your flat-rate Claude Max plan are $0;
-        Gemini and non-‘:free’ OpenRouter models are metered by the provider.
-        Hover a cost cell for why.
+        C = cloud · L = local (Ollama, on this machine). Cost is in the table
+        above.
       </p>
     </div>
   );

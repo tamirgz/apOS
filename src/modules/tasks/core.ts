@@ -5,7 +5,8 @@
  *
  * Worker-safe: no "use server", no revalidatePath, db passed in.
  */
-import { and, asc, desc, eq, getTableColumns, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import type { Db } from "@/core/db/client";
 import { features, projects } from "@/modules/projects/schema";
 import {
@@ -18,6 +19,7 @@ import {
   tasks,
   workCounters,
   type LinkKind,
+  type MilestoneCriterion,
   type RelationKind,
   type Task,
   type TaskPriority,
@@ -51,9 +53,28 @@ export interface WorkItemInput {
   /** For imports that carry their own history. */
   createdAt?: Date;
   completedAt?: Date | null;
+  /** A creator's retry key — the same key in the same project returns the existing item. */
+  idempotencyKey?: string | null;
+  /** Acceptance criteria; an entry without an id is new. Replaces the whole list on update. */
+  acceptance?: AcceptanceInput[];
 }
 
-export type WorkItemPatch = Partial<Omit<WorkItemInput, "externalRef" | "createdAt">>;
+export type AcceptanceInput = { id?: string; text: string; done?: boolean };
+
+/** Trim, drop empties, give new criteria an id. */
+export const cleanAcceptance = (list: AcceptanceInput[] | undefined): MilestoneCriterion[] =>
+  (list ?? [])
+    .filter((c) => c.text?.trim())
+    .slice(0, 30)
+    .map((c) => ({ id: c.id ?? randomUUID(), text: c.text.trim().slice(0, 500), done: !!c.done }));
+
+export type WorkItemPatch = Partial<Omit<WorkItemInput, "externalRef" | "createdAt" | "idempotencyKey">>;
+
+/** An `ifVersion` write that lost the race: the item as it is now. */
+export interface WorkItemConflict {
+  error: "conflict";
+  current: WorkItem;
+}
 
 const projectIdOf = (ref: string | null | undefined) =>
   ref?.startsWith("projects:") ? ref.slice("projects:".length) : null;
@@ -192,6 +213,10 @@ async function displayValue(db: Db, field: string, v: unknown): Promise<string |
       return day(v as Date);
     case "labels":
       return (v as string[]).length ? (v as string[]).join(", ") : null;
+    case "acceptance":
+      return (v as MilestoneCriterion[]).length
+        ? (v as MilestoneCriterion[]).map((c) => `${c.done ? "✓" : "○"} ${c.text}`).join("; ").slice(0, 500)
+        : null;
     case "projectRef": {
       const pid = projectIdOf(v as string);
       if (!pid) return null;
@@ -231,6 +256,7 @@ const TRACKED: (keyof WorkItemPatch)[] = [
   "estimate",
   "labels",
   "notes",
+  "acceptance",
 ];
 
 function same(a: unknown, b: unknown): boolean {
@@ -261,7 +287,11 @@ async function assertParent(db: Db, id: string | null, parentId: string | null |
   }
 }
 
-export async function createWorkItem(db: Db, input: WorkItemInput, actor: Actor): Promise<WorkItem> {
+export async function createWorkItem(
+  db: Db,
+  input: WorkItemInput,
+  actor: Actor,
+): Promise<WorkItem & { deduplicated?: true }> {
   const title = input.title.trim();
   if (!title) throw new Error("Title is required");
   let projectRef = input.projectRef ?? null;
@@ -276,9 +306,21 @@ export async function createWorkItem(db: Db, input: WorkItemInput, actor: Actor)
     const [f] = await db.select({ projectId: features.projectId }).from(features).where(eq(features.id, featureIdOf(featureRef)!));
     if (f) projectRef = `projects:${f.projectId}`;
   }
+  const key = input.idempotencyKey?.trim() || null;
+  const byKey = async () => {
+    const [hit] = await db
+      .select()
+      .from(tasks)
+      .where(and(sql`coalesce(${tasks.projectRef}, '') = ${projectRef ?? ""}`, eq(tasks.idempotencyKey, key!)));
+    return hit ? { ...(await withIdentifiers(db, [hit]))[0], deduplicated: true as const } : null;
+  };
+  if (key) {
+    const hit = await byKey();
+    if (hit) return hit;
+  }
   const status = input.status ?? "todo";
   const number = await allocateNumber(db, projectRef);
-  const [row] = await db
+  const insert = db
     .insert(tasks)
     .values({
       title,
@@ -292,29 +334,60 @@ export async function createWorkItem(db: Db, input: WorkItemInput, actor: Actor)
       parentId: input.parentId ?? null,
       estimate: input.estimate ?? null,
       labels: cleanLabels(input.labels),
+      acceptance: cleanAcceptance(input.acceptance),
       externalRef: input.externalRef ?? null,
       cycleId: input.cycleId ?? null,
       sortOrder: input.sortOrder ?? Date.now() / 1000,
       number,
+      idempotencyKey: key,
       createdAt: input.createdAt ?? new Date(),
       updatedAt: new Date(),
       completedAt: isClosed(status) ? (input.completedAt ?? new Date()) : null,
     })
     .returning();
+  let row: Task;
+  try {
+    [row] = await insert;
+  } catch (e) {
+    // Two creates with one key raced past the lookup; the index let one in.
+    const hit = key && (e as { code?: string }).code === "23505" ? await byKey() : null;
+    if (hit) return hit;
+    throw e;
+  }
   await db.insert(taskActivity).values({ taskId: row.id, actor, kind: "created" });
   await syncFeatureStatus(db, featureRef);
   const [item] = await withIdentifiers(db, [row]);
   return item;
 }
 
+/**
+ * Apply a patch. Every change bumps `version`. With `ifVersion`, the write
+ * lands only if the item is still at that version — otherwise nothing changes
+ * and the caller gets `{ error: "conflict", current }`.
+ */
+export async function updateWorkItem(db: Db, id: string, patch: WorkItemPatch, actor: Actor): Promise<WorkItem | null>;
 export async function updateWorkItem(
   db: Db,
   id: string,
   patch: WorkItemPatch,
   actor: Actor,
-): Promise<WorkItem | null> {
+  opts: { ifVersion?: number },
+): Promise<WorkItem | WorkItemConflict | null>;
+export async function updateWorkItem(
+  db: Db,
+  id: string,
+  patch: WorkItemPatch,
+  actor: Actor,
+  opts: { ifVersion?: number } = {},
+): Promise<WorkItem | WorkItemConflict | null> {
   const [cur] = await db.select().from(tasks).where(eq(tasks.id, id));
   if (!cur) return null;
+  const { ifVersion } = opts;
+  const conflict = async (row: Task): Promise<WorkItemConflict> => ({
+    error: "conflict",
+    current: (await withIdentifiers(db, [row]))[0],
+  });
+  if (ifVersion !== undefined && cur.version !== ifVersion) return conflict(cur);
 
   const next: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
@@ -325,6 +398,7 @@ export async function updateWorkItem(
       next.title = t;
     } else if (k === "notes") next.notes = (v as string | null)?.trim() || null;
     else if (k === "labels") next.labels = cleanLabels(v as string[]);
+    else if (k === "acceptance") next.acceptance = cleanAcceptance(v as AcceptanceInput[]);
     else next[k] = v;
   }
   if ("parentId" in next) await assertParent(db, id, next.parentId as string | null);
@@ -345,11 +419,17 @@ export async function updateWorkItem(
   const moved = "sortOrder" in next && next.sortOrder !== cur.sortOrder;
   if (!changed.length && !moved) return (await withIdentifiers(db, [cur]))[0];
 
+  // The version check is in the UPDATE itself, so two writers holding the
+  // same version can't both pass it.
   const [row] = await db
     .update(tasks)
-    .set({ ...next, updatedAt: new Date() })
-    .where(eq(tasks.id, id))
+    .set({ ...next, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+    .where(and(eq(tasks.id, id), ifVersion !== undefined ? eq(tasks.version, ifVersion) : undefined))
     .returning();
+  if (!row) {
+    const [now] = await db.select().from(tasks).where(eq(tasks.id, id));
+    return now && ifVersion !== undefined ? conflict(now) : null;
+  }
 
   if (changed.length) {
     const rows = await Promise.all(
@@ -372,6 +452,127 @@ export async function updateWorkItem(
   return (await withIdentifiers(db, [row]))[0];
 }
 
+/** A claim attempt that lost: someone else holds the item until `until`. */
+export interface WorkItemClaimed {
+  error: "claimed";
+  by: string;
+  until: Date;
+}
+
+/** Does the item carry a live (unexpired) claim? */
+export const activeClaim = (t: Pick<Task, "claimedBy" | "claimExpiresAt">, now = new Date()) =>
+  t.claimedBy && t.claimExpiresAt && t.claimExpiresAt > now ? { by: t.claimedBy, until: t.claimExpiresAt } : null;
+
+/**
+ * Claim an item for `ttlMinutes`: one worker at a time. Taking it moves a todo
+ * item to doing. The holder re-claiming extends the claim; anyone else gets
+ * `{ error: "claimed", by, until }` until it's released or expires. The check
+ * is in the UPDATE, so two claimers racing can't both win.
+ */
+export async function claimWorkItem(
+  db: Db,
+  id: string,
+  actor: Actor,
+  ttlMinutes = 60,
+): Promise<WorkItem | WorkItemClaimed | null> {
+  const [cur] = await db.select().from(tasks).where(eq(tasks.id, id));
+  if (!cur) return null;
+  const now = new Date();
+  const until = new Date(now.getTime() + ttlMinutes * 60_000);
+  const [row] = await db
+    .update(tasks)
+    .set({
+      claimedBy: actor,
+      claimExpiresAt: until,
+      status: sql`case when ${tasks.status} = 'todo' then 'doing' else ${tasks.status} end`,
+      version: sql`${tasks.version} + 1`,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(tasks.id, id),
+        or(isNull(tasks.claimedBy), eq(tasks.claimedBy, actor), lt(tasks.claimExpiresAt, now)),
+      ),
+    )
+    .returning();
+  if (!row) {
+    const [held] = await db.select().from(tasks).where(eq(tasks.id, id));
+    const c = held && activeClaim(held, now);
+    // Released or expired between the two reads: try once more.
+    return c ? { error: "claimed", ...c } : claimWorkItem(db, id, actor, ttlMinutes);
+  }
+
+  const log: (typeof taskActivity.$inferInsert)[] = [];
+  if (!activeClaim(cur, now) || cur.claimedBy !== actor)
+    log.push({ taskId: id, actor, kind: "changed", field: "claim", fromValue: activeClaim(cur, now)?.by ?? null, toValue: actor });
+  if (row.status !== cur.status) {
+    log.push({
+      taskId: id,
+      actor,
+      kind: "changed",
+      field: "status",
+      fromValue: await displayValue(db, "status", cur.status),
+      toValue: await displayValue(db, "status", row.status),
+    });
+    await syncFeatureStatus(db, row.featureRef);
+  }
+  if (log.length) await db.insert(taskActivity).values(log);
+  return (await withIdentifiers(db, [row]))[0];
+}
+
+/**
+ * Drop a claim. Only its holder may — or anyone once it has expired; `force`
+ * (the user, in the UI) releases whoever holds it. Status is left as is.
+ */
+export async function releaseWorkItem(
+  db: Db,
+  id: string,
+  actor: Actor,
+  opts: { force?: boolean } = {},
+): Promise<WorkItem | WorkItemClaimed | null> {
+  const [cur] = await db.select().from(tasks).where(eq(tasks.id, id));
+  if (!cur) return null;
+  const held = activeClaim(cur);
+  if (held && held.by !== actor && !opts.force) return { error: "claimed", ...held };
+  if (!cur.claimedBy) return (await withIdentifiers(db, [cur]))[0];
+  const [row] = await db
+    .update(tasks)
+    .set({ claimedBy: null, claimExpiresAt: null, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+    .where(eq(tasks.id, id))
+    .returning();
+  if (held) await db.insert(taskActivity).values({ taskId: id, actor, kind: "changed", field: "claim", fromValue: held.by, toValue: null });
+  return (await withIdentifiers(db, [row]))[0];
+}
+
+/** Clear claims past their expiry, noting each in the item's history. */
+export async function expireClaims(db: Db): Promise<number> {
+  const now = new Date();
+  const stale = await db
+    .select({ id: tasks.id, by: tasks.claimedBy })
+    .from(tasks)
+    .where(lt(tasks.claimExpiresAt, now));
+  if (!stale.length) return 0;
+  // Re-checked in the UPDATE: a claim renewed since the read is kept.
+  const gone = await db
+    .update(tasks)
+    .set({ claimedBy: null, claimExpiresAt: null, version: sql`${tasks.version} + 1` })
+    .where(and(inArray(tasks.id, stale.map((t) => t.id)), lt(tasks.claimExpiresAt, now)))
+    .returning({ id: tasks.id });
+  const by = new Map(stale.map((t) => [t.id, t.by]));
+  if (gone.length)
+    await db.insert(taskActivity).values(
+      gone.map((g) => ({
+        taskId: g.id,
+        actor: "system:claims",
+        kind: "changed" as const,
+        field: "claim",
+        fromValue: `${by.get(g.id) ?? "?"} (expired)`,
+        toValue: null,
+      })),
+    );
+  return gone.length;
+}
+
 export async function addComment(db: Db, taskId: string, body: string, actor: Actor) {
   const text = body.trim();
   if (!text) throw new Error("Comment is empty");
@@ -384,7 +585,7 @@ export async function deleteWorkItem(db: Db, id: string): Promise<boolean> {
   const [row] = await db.delete(tasks).where(eq(tasks.id, id)).returning();
   if (!row) return false;
   // Children survive as top-level items; history goes with the item.
-  await db.update(tasks).set({ parentId: null }).where(eq(tasks.parentId, id));
+  await db.update(tasks).set({ parentId: null, version: sql`${tasks.version} + 1` }).where(eq(tasks.parentId, id));
   await db.delete(taskActivity).where(eq(taskActivity.taskId, id));
   // Attachments outlive the item, hidden (their bytes are evidence; never hard-deleted).
   await db

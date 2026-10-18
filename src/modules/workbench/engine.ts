@@ -719,6 +719,7 @@ export async function runAttempt(attemptId: string): Promise<void> {
         changedFiles: diffFiles.map((f) => f.path),
         patch: diffPatch,
         taskType: task.taskType,
+        criteria: task.acceptance,
       });
       verdict.attemptSeq = attempt.seq;
       await db

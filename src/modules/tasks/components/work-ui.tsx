@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, User } from "lucide-react";
+import { Bot, Lock, User } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { shortDate } from "@/core/ui/time";
 import type { WorkItem } from "../core";
@@ -161,6 +161,26 @@ export function Who({ bot, title }: { bot?: boolean; title?: string }) {
   return (
     <span className={cn("wk-who", bot ? "bot" : "me")} title={title ?? (bot ? "Handed to a Workbench run" : "You")}>
       {bot ? <Bot className="size-3" /> : <User className="size-3" />}
+    </span>
+  );
+}
+
+/** The item's claim (tasks.claim) while it hasn't expired. */
+export function liveClaim(item: Pick<WorkItem, "claimedBy" | "claimExpiresAt">, now: number) {
+  const until = item.claimExpiresAt ? new Date(item.claimExpiresAt) : null;
+  return item.claimedBy && until && until.getTime() > now ? { by: item.claimedBy, until } : null;
+}
+
+/** "agent:claude-code/2.1.3#3f9a1c" → "claude-code/2.1.3" — the full actor is in the tooltip. */
+export const claimantName = (by: string) => by.replace(/^agent:/, "").replace(/#[0-9a-f]+$/i, "") || by;
+
+/** "Claimed by …" marker for a board card or list row. */
+export function ClaimChip({ claim }: { claim: { by: string; until: Date } }) {
+  const until = claim.until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return (
+    <span className="wk-claim" title={`Claimed by ${claim.by} until ${until}`}>
+      <Lock className="size-3" />
+      {claimantName(claim.by)}
     </span>
   );
 }

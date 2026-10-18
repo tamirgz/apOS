@@ -9,7 +9,7 @@ import type { WorkCommit } from "../queries";
 import type { TaskStatus } from "../schema";
 import { BOARD_STATUSES, STATUS_META, displayTitle, plainTitle } from "../states";
 import { readPref, writePref } from "./prefs";
-import { Due, Est, LabelPills, PriorityGlyph, StateGlyph, TitleTag, Who, botOwned, isClosed, splitTitle } from "./work-ui";
+import { ClaimChip, Due, Est, LabelPills, PriorityGlyph, StateGlyph, TitleTag, Who, botOwned, isClosed, liveClaim, splitTitle } from "./work-ui";
 
 const DONE_WINDOW_DAYS = 14;
 const BOARD_CAP = 25;
@@ -81,6 +81,7 @@ function Card({
   const blocker = flags.blocked.has(item.id) ? (flags.blockerOf.get(item.id) ?? "blocked") : null;
   const bot = botOwned(flags.delegated[item.id]);
   const closed = isClosed(item.status);
+  const claim = liveClaim(item, now);
 
   return (
     <div
@@ -124,6 +125,7 @@ function Card({
             ⛓ {blocker}
           </span>
         )}
+        {claim && <ClaimChip claim={claim} />}
         {compact && (
           <span dir="auto" className={cn("min-w-0 flex-1 truncate text-[13px]", closed ? "text-ink-faint line-through" : "text-ink")}>
             {text}

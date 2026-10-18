@@ -1,10 +1,47 @@
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { copyFile, mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
-const execAsync = promisify(exec);
+/**
+ * Run a bash pipeline in its own process group. On timeout the WHOLE group is
+ * killed: exec's timeout only signals the shell, which left pg_dump running
+ * with its server transaction open, holding locks that blocked migrations.
+ */
+export function runPipeline(
+  cmd: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("/bin/bash", ["-c", cmd], {
+      env,
+      detached: true,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (c: Buffer) => (stderr = (stderr + c).slice(-2000)));
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }, timeoutMs);
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) reject(new Error(`timed out after ${Math.round(timeoutMs / 1000)} s`));
+      else if (code === 0) resolve();
+      else reject(new Error(`exit ${code}: ${stderr.trim() || "(no stderr)"}`));
+    });
+  });
+}
 
 // Where finished dumps live. Configurable via AIOS_BACKUP_DIR so this can point
 // at a cloud-synced folder (e.g. Google Drive for Desktop) for offsite backup;
@@ -35,13 +72,12 @@ export async function runBackup(log: (msg: string) => void): Promise<void> {
     // pipefail: without it a missing or failing pg_dump still exits 0 (gzip's
     // status) and leaves a 20-byte "dump". The URL goes in through the env, so
     // a failure's "Command failed: …" text (the job alert body) has no password.
-    await execAsync(`set -o pipefail; pg_dump "$AIOS_DUMP_URL" | gzip > "${tmp}"`, {
-      timeout: DUMP_TIMEOUT_MS,
-      shell: "/bin/bash",
-      env: { ...process.env, AIOS_DUMP_URL: url },
-    }).catch((e: { killed?: boolean }) => {
-      if (e.killed) throw new Error(`pg_dump timed out after ${DUMP_TIMEOUT_MS / 60_000} min`);
-      throw e;
+    await runPipeline(
+      `set -o pipefail; pg_dump "$AIOS_DUMP_URL" | gzip > "${tmp}"`,
+      { ...process.env, AIOS_DUMP_URL: url },
+      DUMP_TIMEOUT_MS,
+    ).catch((e: Error) => {
+      throw new Error(`pg_dump ${e.message}`);
     });
     const { size } = await stat(tmp);
     if (size < 1024) throw new Error(`dump suspiciously small (${size} bytes)`);

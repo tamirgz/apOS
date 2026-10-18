@@ -13,6 +13,7 @@ import type { AIEvent, AIProvider } from "@/core/ai/provider";
 import { providers, resolveRoute } from "@/core/ai/routing";
 import type { AIProviderId } from "@/core/db/schema/ai-routes";
 import { getToolsByNames } from "@/core/ai/tool-registry";
+import { stabilizeRefs } from "@/core/ai/refs";
 import { reportAgentRunOutcome } from "@/core/alerts";
 import type { AiToolDef } from "@/core/modules/types.server";
 import { withRunSlot } from "./run-queue";
@@ -612,7 +613,9 @@ function wrapWithApproval(
   return {
     ...tool,
     description: `${tool.description} NOTE: this action requires the user's approval — calling it queues the request; it executes only after the user approves.`,
-    async execute(input) {
+    async execute(raw, ctx) {
+      // Park stable ids, not this run's handles — they're gone by approval time.
+      const input = stabilizeRefs(ctx, raw);
       const { approvals } = await import("@/core/db/schema/approvals");
       const { notify } = await import("@/core/notify");
       const [row] = await db
@@ -660,7 +663,13 @@ export async function executeApproval(approvalId: string): Promise<void> {
   try {
     if (!tool) throw new Error(`tool ${row.toolName} no longer exists`);
     const input = tool.input.parse(row.input);
-    const result = await tool.execute(input, { db });
+    const result = await tool.execute(input, { db, agentName: row.agentName });
+    // A tool reports most failures as an {error} value, not a throw.
+    const toolError =
+      result && typeof result === "object" && "error" in result
+        ? String((result as { error: unknown }).error)
+        : null;
+    if (toolError) throw new Error(toolError);
     await patch({ status: "executed", result: result ?? null });
     await notify({
       title: `Approved & done: ${row.toolName}`,
@@ -669,10 +678,11 @@ export async function executeApproval(approvalId: string): Promise<void> {
       source: `agent:${row.agentName}`,
     });
   } catch (e) {
-    await patch({ status: "failed", result: { error: String(e) } });
+    const msg = e instanceof Error ? e.message : String(e);
+    await patch({ status: "failed", result: { error: msg } });
     await notify({
       title: `Approved action failed: ${row.toolName}`,
-      body: String(e).slice(0, 300),
+      body: msg.slice(0, 300),
       level: "warn",
       source: `agent:${row.agentName}`,
     });

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, asc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
-import { registerRefs, resolveRef } from "@/core/ai/refs";
+import { isUuid, registerRefs, resolveRef } from "@/core/ai/refs";
 import { resolveProjectByName } from "@/modules/projects/subject";
 import { features, projects } from "@/modules/projects/schema";
 import {
@@ -91,7 +91,7 @@ export async function resolveProject(
 
 /** A module/feature by its list ref (m2) or its NAME within the project. */
 export async function resolveFeature(ctx: AiToolContext, projectId: string | null, name: string) {
-  if (/^m\d+$/.test(name.trim())) {
+  if (/^m\d+$/.test(name.trim()) || isUuid(name)) {
     const r = resolveRef(ctx, "module", name);
     return "error" in r ? r : { ref: `features:${r.id}` };
   }
@@ -109,7 +109,7 @@ export async function resolveFeature(ctx: AiToolContext, projectId: string | nul
  */
 export async function resolveCycle(ctx: AiToolContext, projectId: string | null, name: string): Promise<{ id: string } | { error: string }> {
   const key = name.trim();
-  if (/^c\d+$/.test(key)) return resolveRef(ctx, "cycle", key);
+  if (/^c\d+$/.test(key) || isUuid(key)) return resolveRef(ctx, "cycle", key);
   const rows = await ctx.db.select().from(cycles);
   const scoped = rows.filter((c) => !c.projectId || !projectId || c.projectId === projectId);
   if (key.toLowerCase() === "current") {

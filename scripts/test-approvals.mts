@@ -9,6 +9,9 @@
 import { sql } from "@/core/db/client";
 import { getToolsByNames } from "@/core/ai/tool-registry";
 import { openPRInput } from "@/modules/workbench/tools";
+import { stabilizeRefs } from "@/core/ai/refs";
+import { db } from "@/core/db/client";
+import { resolveCycle, resolveTask } from "@/modules/tasks/tools";
 
 const R: { n: string; pass: boolean; d: string }[] = [];
 const rec = (n: string, pass: boolean, d = "") => R.push({ n, pass, d });
@@ -40,7 +43,26 @@ for (const [n, input] of [
   rec(n, !err, err ?? "");
 }
 
-// 3. Every parked row still awaiting execution parses against its tool today.
+// 3. A parked call carries stable ids, and the resolvers accept them with a
+//    fresh (ref-less) context — the one executeApproval runs in.
+const tid = "00000000-0000-4000-8000-0000000000aa";
+const runCtx: any = { db, refs: { t3: { kind: "task", id: tid, name: "x" }, ms1: { kind: "milestone", id, name: "m" } } };
+const parked = stabilizeRefs(runCtx, { ref: "t3", nested: { milestone: "MS1" }, list: ["t3", "keep"], note: "t3 stays in prose" });
+rec(
+  "stabilizeRefs swaps handles for ids",
+  JSON.stringify(parked) === JSON.stringify({ ref: tid, nested: { milestone: id }, list: [tid, "keep"], note: "t3 stays in prose" }),
+  JSON.stringify(parked),
+);
+const fresh: any = { db, refs: {} };
+const rt = await resolveTask(fresh, tid);
+rec("resolveTask accepts a uuid without refs", "id" in rt && rt.id === tid, JSON.stringify(rt));
+const [cyc] = await sql`select id from cycles limit 1`;
+if (cyc) {
+  const rc = await resolveCycle(fresh, null, cyc.id);
+  rec("resolveCycle accepts a uuid without refs", "id" in rc && rc.id === cyc.id, JSON.stringify(rc));
+}
+
+// 4. Every parked row still awaiting execution parses against its tool today.
 const rows = await sql`select id, tool_name, input from approvals where status in ('pending','approved')`;
 for (const r of rows) {
   const err = parses(r.tool_name, r.input);

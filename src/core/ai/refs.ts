@@ -7,6 +7,7 @@ import type { AiToolContext } from "@/core/modules/types.server";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isUuid = (s: string) => UUID_RE.test(s.trim());
 
 /**
  * Register listed rows under short per-run handles and return each row with its
@@ -60,4 +61,26 @@ export function resolveRef(
   return {
     error: `Unknown ${kind} "${key}". Call the ${kind} list first and use the ref it returns.`,
   };
+}
+
+/**
+ * Replace every session handle (t3, w2, ms1…) in a tool input with the real id
+ * it stands for. Handles live only in the run that issued them, so a call that
+ * is parked for later (an approval) must carry stable ids — every resolver
+ * accepts a raw uuid in place of a handle.
+ */
+export function stabilizeRefs<T>(ctx: AiToolContext, input: T): T {
+  const refs = ctx.refs;
+  if (!refs || !Object.keys(refs).length) return input;
+  const walk = (v: unknown): unknown => {
+    if (typeof v === "string") {
+      const k = v.trim();
+      return (refs[k] ?? refs[k.toLowerCase()])?.id ?? v;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object")
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    return v;
+  };
+  return walk(input) as T;
 }

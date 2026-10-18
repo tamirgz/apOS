@@ -1,7 +1,7 @@
 import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { approvals } from "@/core/db/schema/approvals";
-import { serverModules } from "@/modules/registry.server";
+import { getServerModules } from "@/modules/registry.server";
 import { AgentsList } from "../components/AgentsList";
 import { ApprovalsPanel } from "../components/ApprovalsPanel";
 import { ExternalReports } from "../components/ExternalReports";
@@ -27,7 +27,7 @@ export async function AgentsPage() {
       .limit(15),
     getReportsDir(),
   ]);
-  const templates = serverModules.flatMap((m) =>
+  const templates = getServerModules().flatMap((m) =>
     m.agentTemplates.map((t) => ({ ...t, moduleId: m.id })),
   );
   return (

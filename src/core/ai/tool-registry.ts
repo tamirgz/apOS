@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AiToolDef } from "@/core/modules/types.server";
-import { serverModules } from "@/modules/registry.server";
+import { getServerModules } from "@/modules/registry.server";
 import { notify } from "@/core/notify";
 import { NOTIFICATION_LEVELS } from "@/core/db/schema/notifications";
 
@@ -260,7 +260,7 @@ const CORE_TOOLS: AiToolDef[] = [
 export function getToolRegistry(): Map<string, AiToolDef> {
   const map = new Map<string, AiToolDef>();
   for (const t of CORE_TOOLS) map.set(t.name, t);
-  for (const mod of serverModules) {
+  for (const mod of getServerModules()) {
     for (const t of mod.aiTools) {
       if (map.has(t.name)) {
         throw new Error(`Duplicate AI tool name: ${t.name}`);

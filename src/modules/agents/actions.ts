@@ -12,7 +12,7 @@ import {
   agents,
 } from "@/core/db/schema/agents";
 import type { AIProviderId } from "@/core/db/schema/ai-routes";
-import { serverModules } from "@/modules/registry.server";
+import { getServerModules } from "@/modules/registry.server";
 
 function validateSchedule(schedule: string | null | undefined) {
   if (!schedule) return null;
@@ -75,7 +75,7 @@ export async function createAgent(input: {
 }
 
 export async function createFromTemplate(templateId: string) {
-  const template = serverModules
+  const template = getServerModules()
     .flatMap((m) => m.agentTemplates)
     .find((t) => t.id === templateId);
   if (!template) throw new Error(`unknown template: ${templateId}`);

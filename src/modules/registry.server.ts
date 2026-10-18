@@ -22,32 +22,43 @@ import { orbitServerManifest } from "./orbit/manifest.server";
 import { flowsServerManifest } from "./flows/manifest.server";
 import { studioServerManifest } from "./studio/manifest.server";
 
-export const serverModules: ModuleServerManifest[] = [
-  todayServerManifest,
-  askServerManifest,
-  inboxServerManifest,
-  calendarServerManifest,
-  gmailServerManifest,
-  workbenchServerManifest,
-  tasksServerManifest,
-  projectsServerManifest,
-  peopleServerManifest,
-  notesServerManifest,
-  ideasServerManifest,
-  investmentsServerManifest,
-  knowledgeServerManifest,
-  orbitServerManifest,
-  flowsServerManifest,
-  studioServerManifest,
-  obsidianServerManifest,
-  notionServerManifest,
-  telegramServerManifest,
-  agentsServerManifest,
-  settingsServerManifest,
-];
+let cached: ModuleServerManifest[] | null = null;
+
+/**
+ * Every module's server manifest, built on first call — never at import time.
+ * Several manifests import pages/actions that import this file back (agents,
+ * flows, investments, studio, today); an eager array read their bindings while
+ * they were still initializing whenever a chunk entered through one of them,
+ * a TDZ ReferenceError → intermittent 500s (AIOS-36).
+ */
+export function getServerModules(): ModuleServerManifest[] {
+  return (cached ??= [
+    todayServerManifest,
+    askServerManifest,
+    inboxServerManifest,
+    calendarServerManifest,
+    gmailServerManifest,
+    workbenchServerManifest,
+    tasksServerManifest,
+    projectsServerManifest,
+    peopleServerManifest,
+    notesServerManifest,
+    ideasServerManifest,
+    investmentsServerManifest,
+    knowledgeServerManifest,
+    orbitServerManifest,
+    flowsServerManifest,
+    studioServerManifest,
+    obsidianServerManifest,
+    notionServerManifest,
+    telegramServerManifest,
+    agentsServerManifest,
+    settingsServerManifest,
+  ]);
+}
 
 export function getServerModule(
   id: string,
 ): ModuleServerManifest | undefined {
-  return serverModules.find((m) => m.id === id);
+  return getServerModules().find((m) => m.id === id);
 }

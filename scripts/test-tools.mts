@@ -17,7 +17,7 @@
  */
 import { db, sql } from "@/core/db/client";
 import { getToolsByNames } from "@/core/ai/tool-registry";
-import { serverModules } from "@/modules/registry.server";
+import { getServerModules } from "@/modules/registry.server";
 import { eq, like } from "drizzle-orm";
 import { projects } from "@/modules/projects/schema";
 import { tasks } from "@/modules/tasks/schema";
@@ -31,7 +31,7 @@ const CORE = [
   "notify.send", "web.search", "web.read",
 ];
 const names = new Set<string>();
-for (const m of serverModules) for (const t of m.aiTools) names.add(t.name);
+for (const m of getServerModules()) for (const t of m.aiTools) names.add(t.name);
 const T = new Map(getToolsByNames([...names, ...CORE]).map((t: any) => [t.name, t]));
 
 const ctx: any = { db, refs: {}, subject: null, subjectCursor: null };

@@ -556,6 +556,7 @@ export async function requestPR(taskId: string) {
   if (!task.repoPath) return { ok: false as const, error: "This task has no repo to open a PR against." };
 
   const { approvals } = await import("@/core/db/schema/approvals");
+  const { openPRInput } = await import("./tools");
   // One open request per task — a second click (or a reload and click) must
   // not queue a duplicate approval that would push the branch twice.
   const [open] = await db
@@ -584,7 +585,7 @@ export async function requestPR(taskId: string) {
       runId: task.id,
       agentName: "Workbench",
       toolName: "workbench.openPR",
-      input: { taskId, title, body },
+      input: openPRInput.parse({ taskId, title, body }),
     })
     .returning();
   await sql.notify("approvals_changed", row.id);

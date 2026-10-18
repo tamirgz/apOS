@@ -14,7 +14,8 @@
     "db:studio": "drizzle-kit studio",
     "test:memory": "tsx scripts/test-memory.mts",
     "test:work": "tsx --env-file=.env.local scripts/test-work.mts",
-    "test:stats": "tsx scripts/test-stats.mts"
+    "test:stats": "tsx scripts/test-stats.mts",
+    "test:approvals": "tsx --env-file=.env.local scripts/test-approvals.mts"
   },
   "dependencies": {
     "3d-force-graph": "^1.80.0",

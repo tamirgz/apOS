@@ -19,6 +19,7 @@ import {
   removeRelation,
   updateWorkItem,
   withIdentifiers,
+  type AcceptanceInput,
   type WorkItemPatch,
 } from "./core";
 import { ACCEPTED_EXTENSIONS, addAttachment, attachmentMeta, decodeBase64, readLocalFile, typeOf } from "./attachments";
@@ -33,6 +34,7 @@ import {
   TASK_PRIORITIES,
   TASK_STATUSES,
   ATTACHMENT_KINDS,
+  type MilestoneCriterion,
   type Task,
 } from "./schema";
 
@@ -138,8 +140,29 @@ const summary = (t: Task & { identifier: string | null }) => ({
   completedAt: t.completedAt,
   hasParent: !!t.parentId,
   version: t.version,
+  ...(t.acceptance.length ? { acceptance: t.acceptance.map((c) => ({ text: c.text, done: c.done })) } : {}),
   ...(activeClaim(t) ? { claimedBy: t.claimedBy, claimedUntil: t.claimExpiresAt } : {}),
 });
+
+const ACCEPTANCE = z
+  .array(z.union([z.string().min(1), z.object({ text: z.string().min(1), done: z.boolean().optional() })]))
+  .max(30)
+  .optional()
+  .describe(
+    "Optional acceptance criteria — what must be true for the item to count as done, one checkable statement each. When the item is delegated, the Workbench judge rules on every one.",
+  );
+
+/** Tool input → criteria; on an update an unchanged text keeps its id and tick. */
+const toAcceptance = (
+  input: z.infer<typeof ACCEPTANCE>,
+  current: MilestoneCriterion[] = [],
+): AcceptanceInput[] | undefined =>
+  input?.map((c) => {
+    const text = typeof c === "string" ? c : c.text;
+    const was = current.find((x) => x.text === text.trim());
+    const done = typeof c === "string" ? was?.done : c.done;
+    return { id: was?.id, text, done: done ?? false };
+  });
 
 const IF_VERSION = z
   .number()
@@ -185,6 +208,7 @@ export const taskTools: AiToolDef[] = [
         .max(200)
         .optional()
         .describe("Optional retry key. A repeat create with the same key in the same project returns the first item instead of a duplicate."),
+      acceptance: ACCEPTANCE,
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
@@ -223,6 +247,7 @@ export const taskTools: AiToolDef[] = [
           cycleId,
           parentId,
           idempotencyKey: input.idempotencyKey,
+          acceptance: toAcceptance(input.acceptance),
         },
         actorOf(ctx),
       );
@@ -418,6 +443,7 @@ export const taskTools: AiToolDef[] = [
       priority: z.enum(TASK_PRIORITIES).optional(),
       estimate: z.number().int().min(0).max(100).nullable().optional(),
       labels: z.array(z.string()).optional().describe("Replaces the label set"),
+      acceptance: ACCEPTANCE.describe("Replaces the acceptance criteria (see tasks.create)"),
       dueAt: z.string().optional().describe("ISO 8601; empty string clears it"),
       startAt: z.string().optional().describe("ISO 8601; empty string clears it"),
       project: z.string().optional().describe("Project NAME or key to move it to; empty string unfiles"),
@@ -429,6 +455,9 @@ export const taskTools: AiToolDef[] = [
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
       if ("error" in t) return t;
+      const [cur] = input.acceptance
+        ? await ctx.db.select({ acceptance: tasks.acceptance }).from(tasks).where(eq(tasks.id, t.id))
+        : [];
       const patch: WorkItemPatch = {
         title: input.title,
         notes: input.notes,
@@ -436,6 +465,7 @@ export const taskTools: AiToolDef[] = [
         priority: input.priority,
         estimate: input.estimate,
         labels: input.labels,
+        acceptance: toAcceptance(input.acceptance, cur?.acceptance),
         dueAt: isoOrNull(input.dueAt),
         startAt: isoOrNull(input.startAt),
       };

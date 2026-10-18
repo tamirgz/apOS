@@ -519,6 +519,13 @@
       "when": 1792311341232,
       "tag": "0073_task_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1792311805773,
+      "tag": "0074_acceptance_criteria",
+      "breakpoints": true
     }
   ]
 }

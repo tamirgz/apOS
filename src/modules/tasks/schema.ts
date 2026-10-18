@@ -85,6 +85,9 @@ export const tasks = pgTable(
      *  clears expired ones (work_backfill). */
     claimedBy: text("claimed_by"),
     claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+    /** What "done" means for this item — checked one by one by the Workbench
+     *  judge when the item is delegated. Same shape as a milestone's exit criteria. */
+    acceptance: jsonb("acceptance").$type<MilestoneCriterion[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

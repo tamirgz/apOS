@@ -6,6 +6,7 @@
  * Worker-safe: no "use server", no revalidatePath, db passed in.
  */
 import { and, asc, desc, eq, getTableColumns, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import type { Db } from "@/core/db/client";
 import { features, projects } from "@/modules/projects/schema";
 import {
@@ -18,6 +19,7 @@ import {
   tasks,
   workCounters,
   type LinkKind,
+  type MilestoneCriterion,
   type RelationKind,
   type Task,
   type TaskPriority,
@@ -53,7 +55,18 @@ export interface WorkItemInput {
   completedAt?: Date | null;
   /** A creator's retry key — the same key in the same project returns the existing item. */
   idempotencyKey?: string | null;
+  /** Acceptance criteria; an entry without an id is new. Replaces the whole list on update. */
+  acceptance?: AcceptanceInput[];
 }
+
+export type AcceptanceInput = { id?: string; text: string; done?: boolean };
+
+/** Trim, drop empties, give new criteria an id. */
+export const cleanAcceptance = (list: AcceptanceInput[] | undefined): MilestoneCriterion[] =>
+  (list ?? [])
+    .filter((c) => c.text?.trim())
+    .slice(0, 30)
+    .map((c) => ({ id: c.id ?? randomUUID(), text: c.text.trim().slice(0, 500), done: !!c.done }));
 
 export type WorkItemPatch = Partial<Omit<WorkItemInput, "externalRef" | "createdAt" | "idempotencyKey">>;
 
@@ -200,6 +213,10 @@ async function displayValue(db: Db, field: string, v: unknown): Promise<string |
       return day(v as Date);
     case "labels":
       return (v as string[]).length ? (v as string[]).join(", ") : null;
+    case "acceptance":
+      return (v as MilestoneCriterion[]).length
+        ? (v as MilestoneCriterion[]).map((c) => `${c.done ? "✓" : "○"} ${c.text}`).join("; ").slice(0, 500)
+        : null;
     case "projectRef": {
       const pid = projectIdOf(v as string);
       if (!pid) return null;
@@ -239,6 +256,7 @@ const TRACKED: (keyof WorkItemPatch)[] = [
   "estimate",
   "labels",
   "notes",
+  "acceptance",
 ];
 
 function same(a: unknown, b: unknown): boolean {
@@ -316,6 +334,7 @@ export async function createWorkItem(
       parentId: input.parentId ?? null,
       estimate: input.estimate ?? null,
       labels: cleanLabels(input.labels),
+      acceptance: cleanAcceptance(input.acceptance),
       externalRef: input.externalRef ?? null,
       cycleId: input.cycleId ?? null,
       sortOrder: input.sortOrder ?? Date.now() / 1000,
@@ -379,6 +398,7 @@ export async function updateWorkItem(
       next.title = t;
     } else if (k === "notes") next.notes = (v as string | null)?.trim() || null;
     else if (k === "labels") next.labels = cleanLabels(v as string[]);
+    else if (k === "acceptance") next.acceptance = cleanAcceptance(v as AcceptanceInput[]);
     else next[k] = v;
   }
   if ("parentId" in next) await assertParent(db, id, next.parentId as string | null);

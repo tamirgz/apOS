@@ -163,6 +163,7 @@ interface Verdict {
   score?: number;
   gaps?: string[];
   rationale?: string;
+  criteria?: { id: string; text: string; pass: boolean; evidence: string }[];
 }
 
 /** The delegation judge's ruling — the automated ask↔result gate (A2 · Trust). */
@@ -206,6 +207,24 @@ function JudgePanel({
       </div>
       {verdict?.rationale && (
         <p className="text-sm leading-relaxed text-ink-dim">{verdict.rationale}</p>
+      )}
+      {verdict?.criteria && verdict.criteria.length > 0 && (
+        <ul className="mt-3 flex flex-col gap-1.5">
+          {verdict.criteria.map((c) => (
+            <li key={c.id} className="flex gap-2 text-xs leading-relaxed">
+              <span
+                className="shrink-0 font-mono"
+                style={{ color: c.pass ? "var(--color-plasma)" : "var(--color-flare)" }}
+              >
+                {c.pass ? "✓" : "✗"}
+              </span>
+              <span className="min-w-0">
+                <span className="text-ink">{c.text}</span>
+                {c.evidence && <span className="text-ink-faint"> — {c.evidence}</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
       {verdict?.gaps && verdict.gaps.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1">

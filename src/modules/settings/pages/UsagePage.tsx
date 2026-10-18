@@ -1,3 +1,4 @@
+import { CostPanel } from "../components/CostPanel";
 import { UsagePanel } from "../components/UsagePanel";
 import { SettingsNav } from "../components/SettingsNav";
 
@@ -6,7 +7,10 @@ export function UsagePage() {
   return (
     <div className="max-w-4xl">
       <SettingsNav />
-      <UsagePanel />
+      <div className="flex flex-col gap-5">
+        <CostPanel />
+        <UsagePanel />
+      </div>
     </div>
   );
 }

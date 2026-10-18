@@ -10,11 +10,16 @@
  * fold it into the rich parent row rather than showing a bare generation row.
  * Tool sub-calls (agent.subtask, gates) pass their OWN track, so they appear as
  * their own rows — nested work stays visible.
+ *
+ * A generation that reports token usage also leaves a usage_ledger row (cost
+ * from core/ai/prices) once it ends — history, where model_calls is live.
  */
 import { hostname } from "node:os";
 import { and, eq, isNotNull, lt, or } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
 import { modelCalls } from "@/core/db/schema/model-calls";
+import { usageLedger } from "@/core/db/schema/usage-ledger";
+import { costOf, priceFor } from "./prices";
 import type { AIEvent, ModelTrack } from "./provider";
 
 /** A single coalesced embedding row (upserted, throttled) — embeddings are far
@@ -87,10 +92,41 @@ async function closeCall(id: string | null) {
   }
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Append the call's ledger row — best-effort, like the queue row. */
+export async function recordUsage(
+  provider: string,
+  model: string,
+  track: ModelTrack | undefined,
+  tokensIn: number,
+  tokensOut: number,
+): Promise<void> {
+  try {
+    const price = await priceFor(provider, model);
+    await db.insert(usageLedger).values({
+      provider,
+      model: model.slice(0, 200),
+      source: track?.source ?? "unknown",
+      label: (track?.label ?? "").slice(0, 200),
+      taskKey: track?.taskKey ?? null,
+      agentId: track?.agentId && UUID.test(track.agentId) ? track.agentId : null,
+      parentKind: track?.parentKind ?? null,
+      parentId: track?.parentId ?? null,
+      tokensIn,
+      tokensOut,
+      costUsd: costOf(price, tokensIn, tokensOut),
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
 /**
  * Wrap a provider's event stream so a live row exists for exactly the duration
  * of the call. The row opens when iteration starts (the real call begin) and is
- * removed in `finally` — on normal end, break, or throw.
+ * removed in `finally` — on normal end, break, or throw. Usage events are summed
+ * into the call's ledger row, written as it ends.
  */
 export async function* trackGeneration(
   provider: string,
@@ -99,10 +135,20 @@ export async function* trackGeneration(
   gen: AsyncIterable<AIEvent>,
 ): AsyncIterable<AIEvent> {
   const id = await openCall(provider, model, track);
+  const usage = { seen: false, in: 0, out: 0 };
   try {
-    yield* gen;
+    for await (const event of gen) {
+      if (event.type === "usage") {
+        usage.seen = true;
+        usage.in += event.inputTokens;
+        usage.out += event.outputTokens;
+      }
+      yield event;
+    }
   } finally {
     await closeCall(id);
+    // Not awaited: a catalog fetch for the price mustn't hold up the caller.
+    if (usage.seen) void recordUsage(provider, model, track, usage.in, usage.out);
   }
 }
 

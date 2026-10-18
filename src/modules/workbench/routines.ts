@@ -239,6 +239,7 @@ export async function queuePrApproval(taskId: string): Promise<void> {
   if (!r || r.deliverPr !== "true") return;
 
   const { approvals } = await import("@/core/db/schema/approvals");
+  const { openPRInput } = await import("./tools");
   const title = `apOS routine: ${r.name}`.slice(0, 120);
   const body = [
     `Automated by the apOS routine **${r.name}**.`,
@@ -259,13 +260,13 @@ export async function queuePrApproval(taskId: string): Promise<void> {
       toolName: "workbench.openPR",
       // One stable branch per routine → one PR that updates each run, instead
       // of a fresh PR per commit piling up.
-      input: {
+      input: openPRInput.parse({
         taskId,
         title,
         body,
         prBranch: `aios/routine-${r.id}`,
         routineId: r.id,
-      },
+      }),
     })
     .returning();
   await sql.notify("approvals_changed", row.id);

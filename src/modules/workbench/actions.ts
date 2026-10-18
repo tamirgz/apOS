@@ -7,7 +7,7 @@ import { db, sql } from "@/core/db/client";
 import { recordUsage } from "@/core/usage";
 import { clipToObsidianRaw } from "@/core/obsidian-clip";
 import { deleteBranchIfMerged, removeIsolation } from "./git";
-import { pickExecutor } from "./queries";
+import { noteExecutorFallback, pickExecutor } from "./queries";
 import { assertFreeModel } from "./models";
 import {
   attemptEvents,
@@ -127,15 +127,17 @@ export async function createTask(input: {
     })
     .returning();
 
+  const pick = await pickExecutor(input.executorId, input.taskType);
   const [attempt] = await db
     .insert(taskAttempts)
     .values({
       taskId: task.id,
       seq: 1,
-      executorId: await pickExecutor(input.executorId, input.taskType),
+      executorId: pick.executorId,
       model: input.model ?? null,
     })
     .returning();
+  await noteExecutorFallback(attempt.id, pick.fallback);
 
   // The worker owns execution; the web app never spawns anything itself.
   await sql.notify("workbench_run", attempt.id);
@@ -165,20 +167,22 @@ export async function retryTask(
     .orderBy(desc(taskAttempts.seq))
     .limit(1);
 
+  const pick = await pickExecutor(
+    executorId ?? last?.executorId ?? undefined,
+    task.taskType,
+  );
   const [attempt] = await db
     .insert(taskAttempts)
     .values({
       taskId,
       seq: (last?.seq ?? 0) + 1,
-      executorId: await pickExecutor(
-        executorId ?? last?.executorId ?? undefined,
-        task.taskType,
-      ),
+      executorId: pick.executorId,
       // An explicit model pins this attempt (e.g. a free-model comparison run);
       // otherwise inherit the previous attempt's model.
       model: model !== undefined ? model : (last?.model ?? null),
     })
     .returning();
+  await noteExecutorFallback(attempt.id, pick.fallback);
 
   await db
     .update(workbenchTasks)
@@ -556,6 +560,7 @@ export async function requestPR(taskId: string) {
   if (!task.repoPath) return { ok: false as const, error: "This task has no repo to open a PR against." };
 
   const { approvals } = await import("@/core/db/schema/approvals");
+  const { openPRInput } = await import("./tools");
   // One open request per task — a second click (or a reload and click) must
   // not queue a duplicate approval that would push the branch twice.
   const [open] = await db
@@ -584,7 +589,7 @@ export async function requestPR(taskId: string) {
       runId: task.id,
       agentName: "Workbench",
       toolName: "workbench.openPR",
-      input: { taskId, title, body },
+      input: openPRInput.parse({ taskId, title, body }),
     })
     .returning();
   await sql.notify("approvals_changed", row.id);

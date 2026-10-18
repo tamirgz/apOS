@@ -183,24 +183,40 @@ const seatbeltDisabled = (): boolean =>
 
 /**
  * Wrap a command in `sandbox-exec` (write-confinement) when it's a local CLI on
- * macOS and seatbelt isn't disabled. Falls back to the bare command otherwise —
- * never blocks a run just because the sandbox couldn't be set up.
+ * macOS and seatbelt isn't disabled. Falls back to the bare command otherwise,
+ * with `confined: false` and why — the caller decides whether that's acceptable
+ * (it isn't for an auto-approve CLI, see AUTO_APPROVE_FLAGS).
  */
 export function maybeSeatbelt(
   bin: string,
   args: string[],
   opts: { workdir: string; home: string },
-): { bin: string; args: string[] } {
-  if (process.platform !== "darwin" || seatbeltDisabled()) return { bin, args };
-  if (!existsSync("/usr/bin/sandbox-exec")) return { bin, args };
+): { bin: string; args: string[]; confined: boolean; reason?: string } {
+  if (process.platform !== "darwin")
+    return { bin, args, confined: false, reason: "seatbelt is macOS-only" };
+  if (seatbeltDisabled())
+    return { bin, args, confined: false, reason: "WORKBENCH_SEATBELT is off" };
+  if (!existsSync("/usr/bin/sandbox-exec"))
+    return { bin, args, confined: false, reason: "/usr/bin/sandbox-exec not found" };
   try {
     const workdir = realpathSync(opts.workdir);
     const home = realpathSync(opts.home);
     return {
       bin: "/usr/bin/sandbox-exec",
       args: ["-p", SEATBELT_PROFILE, "-D", `WORKDIR=${workdir}`, "-D", `HOMEDIR=${home}`, bin, ...args],
+      confined: true,
     };
   } catch {
-    return { bin, args }; // couldn't resolve paths — run unsandboxed rather than fail
+    return { bin, args, confined: false, reason: "couldn't resolve the sandbox paths" };
   }
 }
+
+/** CLI flags that make an agent approve its own writes and shell commands. Such
+ *  a CLI only runs inside the seatbelt — that's the one thing keeping its
+ *  writes in the workdir; opencode's permission config doesn't confine bash. */
+export const AUTO_APPROVE_FLAGS = [
+  "--dangerously-skip-permissions",
+  "--skip-permissions-unsafe",
+  "--yolo",
+  "-y", // qwen's short --yolo
+];

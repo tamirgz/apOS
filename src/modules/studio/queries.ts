@@ -249,13 +249,15 @@ export async function flowStats(flowId: string): Promise<FlowStats> {
 export interface ToolOption {
   name: string;
   description: string;
+  /** Approval-tier: a flow run parks the call for the user instead of running it. */
+  needsApproval: boolean;
 }
 
 /** Every registered tool, for the Tool/action node's picker. */
 export async function listToolOptions(): Promise<ToolOption[]> {
   const { getAllTools } = await import("@/core/ai/tool-registry");
   return getAllTools()
-    .map((t) => ({ name: t.name, description: t.description }))
+    .map((t) => ({ name: t.name, description: t.description, needsApproval: t.risk === "approval" }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

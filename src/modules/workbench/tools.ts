@@ -4,9 +4,30 @@ import { db, sql } from "@/core/db/client";
 import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
 import { registerRefs, resolveRef } from "@/core/ai/refs";
 import { resolveProjectByName } from "@/modules/projects/subject";
-import { pickExecutor } from "./queries";
+import { noteExecutorFallback, pickExecutor } from "./queries";
 import { openPullRequest } from "./git";
 import { TASK_TYPES, taskAttempts, workbenchTasks } from "./schema";
+
+/**
+ * workbench.openPR's input. `taskId` is the stable form an approval parks
+ * (session refs like 'w2' are gone by the time the user approves); `ref` is
+ * what a live agent passes. Every parked openPR is built through this schema.
+ */
+export const openPRInput = z.object({
+  ref: z
+    .string()
+    .optional()
+    .describe("Workbench task ref from workbench.list, e.g. 'w2'"),
+  taskId: z.string().uuid().optional().describe("Workbench task id (instead of ref)"),
+  title: z.string().min(1).describe("PR title"),
+  body: z.string().describe("PR description (markdown)"),
+  prBranch: z
+    .string()
+    .optional()
+    .describe("Stable head branch to reuse (a routine coalesces onto one)"),
+  routineId: z.string().uuid().optional(),
+});
+export type OpenPRInput = z.infer<typeof openPRInput>;
 
 /**
  * Delegation as a tool: chat and agents can hand work to the Workbench
@@ -17,6 +38,8 @@ export const workbenchTools: AiToolDef[] = [
     name: "workbench.delegate",
     description:
       "Delegate a one-off task to a background executor (research, code, docs). Returns immediately with a task id; the work happens unattended and the user reviews it in the Workbench. Use for anything that needs more than a couple of tool calls.",
+    // Starts an unattended coding run, like tasks.delegate — same tier.
+    risk: "approval",
     input: z.object({
       prompt: z
         .string()
@@ -44,14 +67,12 @@ export const workbenchTools: AiToolDef[] = [
           createdFrom: "ai",
         })
         .returning();
+      const pick = await pickExecutor(undefined, i.taskType);
       const [attempt] = await db
         .insert(taskAttempts)
-        .values({
-          taskId: task.id,
-          seq: 1,
-          executorId: await pickExecutor(undefined, i.taskType),
-        })
+        .values({ taskId: task.id, seq: 1, executorId: pick.executorId })
         .returning();
+      await noteExecutorFallback(attempt.id, pick.fallback);
       await sql.notify("workbench_run", attempt.id);
       return { taskId: task.id, status: "queued", url: `/m/workbench/${task.id}` };
     },
@@ -60,28 +81,11 @@ export const workbenchTools: AiToolDef[] = [
     name: "workbench.openPR",
     description:
       "Open a pull request for a Workbench task's branch — push the branch to GitHub and create the PR. Identify the task by its `ref` from workbench.list (e.g. 'w2'). This is an outward action: it is queued for the user's approval and pushes only once approved. Never merges.",
-    input: z.object({
-      ref: z.string().describe("Workbench task ref from workbench.list, e.g. 'w2'"),
-      title: z.string().min(1).describe("PR title"),
-      body: z.string().describe("PR description (markdown)"),
-      prBranch: z
-        .string()
-        .optional()
-        .describe("Stable head branch to reuse (a routine coalesces onto one)"),
-      routineId: z.string().uuid().optional(),
-    }),
+    input: openPRInput,
     risk: "approval",
-    execute: async (
-      i: {
-        ref: string;
-        title: string;
-        body: string;
-        prBranch?: string;
-        routineId?: string;
-      },
-      ctx: AiToolContext,
-    ) => {
-      const t = resolveRef(ctx, "wtask", i.ref);
+    execute: async (i: OpenPRInput, ctx: AiToolContext) => {
+      // A parked approval carries the stable taskId; a live run passes its ref.
+      const t = i.taskId ? { id: i.taskId } : resolveRef(ctx, "wtask", i.ref);
       if ("error" in t) return t;
       const [task] = await db
         .select()

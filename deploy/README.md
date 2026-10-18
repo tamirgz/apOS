@@ -58,10 +58,11 @@ run or reach for host CLI config), and tasks fall back to the `native` executor.
 Everything else (chat, agents, pipelines, enrichment, search, integrations)
 works in-container. For full Workbench (CLI agents), use the native install.
 
-The worker's nightly `pg_dump` backup is a **no-op in the container** (the Node
-image has no `pg_dump`, and it would need to match Postgres 17) — it logs a
-harmless "BACKUP FAILED" and continues. Back up the `app_pgdata` volume at the
-Docker level instead. Also tracked as a follow-up.
+The worker's nightly `pg_dump` backup (03:30, plus a catch-up at boot) works in
+the container: the image ships `pg_dump` 17 to match the Postgres 17 service,
+and dumps land in the `app_backups` volume (`/backups`, newest 14 kept). Bind a
+host folder to `/backups` instead for offsite sync. A failed backup raises the
+standard job alert (a notification plus a card that clears on the next success).
 
 ## Test it in isolation
 `deploy/test-deploy.sh` runs the stack on a **separate** project + port (:3778) +

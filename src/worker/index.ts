@@ -387,6 +387,13 @@ async function main() {
   }
   log("advisory lock acquired — single runner confirmed");
 
+  // Seed the local-first routes before anything resolves one: on a fresh
+  // install nothing else has (chat / Settings › Models seed them lazily).
+  const { ensureDefaultRoutes } = await import("@/core/ai/routing");
+  await ensureDefaultRoutes()
+    .then((n) => log(n ? `seeded ${n} default AI route(s)` : "default AI routes present"))
+    .catch((e) => log(`default route seed failed: ${e}`));
+
   await sweepOrphans();
   await sweepOrphanedFlowRuns().catch((e) => log(`flow orphan sweep failed: ${e}`));
   await sweepOrphanedWorkbench().catch((e) => log(`workbench orphan sweep failed: ${e}`));
@@ -591,12 +598,13 @@ async function main() {
 
   // Nightly database backup (03:30) + catch-up at boot when the newest dump
   // is older than a day (covers a Mac that was asleep at 03:30).
+  // Through runJob, so a failing backup raises the job alert like any job.
   new Cron("30 3 * * *", { protect: true }, async () => {
-    await runBackup(log);
+    await runJob("backup", () => runBackup(log));
   });
   if (!(await hasFreshBackup())) {
     log("no fresh backup found — running one now");
-    runBackup(log).catch(() => {});
+    void runJob("backup", () => runBackup(log));
   }
 
   // Embedding sweep: local nomic-embed-text via Ollama, rows with NULL

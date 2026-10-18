@@ -285,6 +285,10 @@ export async function POST(req: Request) {
         return (sentence > 0 ? head.slice(0, sentence + 1) : head).trimEnd();
       };
 
+      // Token usage summed over every model pass of this run (verify retries
+      // included), saved on the chat_runs row for Settings › Usage.
+      const usage = { in: 0, out: 0 };
+
       // One model pass. In verify mode we forward progress (tool chips/reasoning)
       // but HOLD the text until it's been checked, so a failed answer can be
       // replaced/completed rather than shown then contradicted.
@@ -297,7 +301,8 @@ export async function POST(req: Request) {
             system: directive ? `${baseSystem}\n\n${directive}` : baseSystem,
             messages,
             tools: activeTools,
-            toolCtx: { db },
+            // The user is in the conversation: approval-tier tools run directly.
+            toolCtx: { db, userPresent: true },
             model: route.model,
             reasoning,
             signal: runAbort.signal,
@@ -309,6 +314,10 @@ export async function POST(req: Request) {
             },
           })) {
             if (event.type === "tool_call") calls.add(event.name);
+            if (event.type === "usage") {
+              usage.in += event.inputTokens;
+              usage.out += event.outputTokens;
+            }
             if (event.type === "tool_result") {
               const r = event.result as Record<string, unknown>;
               if (r && !r.error) results.all.push(r);
@@ -508,6 +517,8 @@ export async function POST(req: Request) {
               status: finalError ? "failed" : "succeeded",
               result: finalAnswer || null,
               error: finalError || null,
+              tokensIn: usage.in,
+              tokensOut: usage.out,
               finishedAt: new Date(),
             })
             .where(eq(chatRuns.id, chatRunId));

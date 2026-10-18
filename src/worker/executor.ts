@@ -13,6 +13,7 @@ import type { AIEvent, AIProvider } from "@/core/ai/provider";
 import { providers, resolveRoute } from "@/core/ai/routing";
 import type { AIProviderId } from "@/core/db/schema/ai-routes";
 import { getToolsByNames } from "@/core/ai/tool-registry";
+import { invokeTool, withApprovalNotes } from "@/core/ai/invoke-tool";
 import { reportAgentRunOutcome } from "@/core/alerts";
 import type { AiToolDef } from "@/core/modules/types.server";
 import { withRunSlot } from "./run-queue";
@@ -269,10 +270,10 @@ async function runClaimed(
     }
 
     const tools = [
-      ...getToolsByNames([
-        ...new Set([...agent.tools, ...memoryToolNames, ...orchestrationToolNames]),
-      ]).map(
-        (t) => (t.risk === "approval" ? wrapWithApproval(t, agent, runId) : t),
+      ...withApprovalNotes(
+        getToolsByNames([
+          ...new Set([...agent.tools, ...memoryToolNames, ...orchestrationToolNames]),
+        ]),
       ),
       ...ledgerTools(ledger),
       ...flowTools,
@@ -367,6 +368,7 @@ async function runClaimed(
             db,
             agentRunId: runId,
             agentName: agent.name,
+            approvalOrigin: { agentId: agent.id, runId, agentName: agent.name },
             ledger,
             subject: null,
             subjectCursor: null,
@@ -604,43 +606,6 @@ async function runClaimed(
   }
 }
 
-function wrapWithApproval(
-  tool: AiToolDef,
-  agent: Agent,
-  runId: string,
-): AiToolDef {
-  return {
-    ...tool,
-    description: `${tool.description} NOTE: this action requires the user's approval — calling it queues the request; it executes only after the user approves.`,
-    async execute(input) {
-      const { approvals } = await import("@/core/db/schema/approvals");
-      const { notify } = await import("@/core/notify");
-      const [row] = await db
-        .insert(approvals)
-        .values({
-          agentId: agent.id,
-          runId,
-          agentName: agent.name,
-          toolName: tool.name,
-          input,
-        })
-        .returning();
-      await sql.notify("approvals_changed", row.id);
-      await notify({
-        title: `Approval needed: ${tool.name}`,
-        body: `Agent "${agent.name}" wants to run ${tool.name} with:\n${JSON.stringify(input, null, 2).slice(0, 400)}`,
-        level: "warn",
-        source: `agent:${agent.name}`,
-        href: "/m/agents",
-      });
-      return {
-        pending_approval: row.id,
-        note: "Queued for the user's approval; it will execute once approved. Mention this in your report.",
-      };
-    },
-  };
-}
-
 /** Called by the worker when the user approves — executes the parked call. */
 export async function executeApproval(approvalId: string): Promise<void> {
   const { approvals } = await import("@/core/db/schema/approvals");
@@ -660,7 +625,13 @@ export async function executeApproval(approvalId: string): Promise<void> {
   try {
     if (!tool) throw new Error(`tool ${row.toolName} no longer exists`);
     const input = tool.input.parse(row.input);
-    const result = await tool.execute(input, { db });
+    const result = await invokeTool(tool, input, { db, agentName: row.agentName, approved: true });
+    // A tool reports most failures as an {error} value, not a throw.
+    const toolError =
+      result && typeof result === "object" && "error" in result
+        ? String((result as { error: unknown }).error)
+        : null;
+    if (toolError) throw new Error(toolError);
     await patch({ status: "executed", result: result ?? null });
     await notify({
       title: `Approved & done: ${row.toolName}`,
@@ -669,10 +640,11 @@ export async function executeApproval(approvalId: string): Promise<void> {
       source: `agent:${row.agentName}`,
     });
   } catch (e) {
-    await patch({ status: "failed", result: { error: String(e) } });
+    const msg = e instanceof Error ? e.message : String(e);
+    await patch({ status: "failed", result: { error: msg } });
     await notify({
       title: `Approved action failed: ${row.toolName}`,
-      body: String(e).slice(0, 300),
+      body: msg.slice(0, 300),
       level: "warn",
       source: `agent:${row.agentName}`,
     });

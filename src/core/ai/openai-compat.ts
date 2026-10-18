@@ -10,6 +10,7 @@ import type { AIEvent, AIRunOptions } from "./provider";
 import { fromWireName, toWireName } from "./provider";
 import { acquireLocalSlot } from "./local-queue";
 import { findRepetitionLoop } from "./repetition";
+import { invokeTool } from "./invoke-tool";
 
 export async function* runOpenAICompatible(
   baseURL: string,
@@ -202,7 +203,7 @@ export async function* runOpenAICompatible(
           try {
             const input = def.input.parse(JSON.parse(call.args || "{}"));
             yield { type: "tool_call", name, input };
-            result = await def.execute(input, opts.toolCtx);
+            result = await invokeTool(def, input, opts.toolCtx);
             if (!repeatable) toolMemo.set(sig, result);
           } catch (e) {
             result = { error: String(e) };

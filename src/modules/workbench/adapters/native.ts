@@ -94,7 +94,9 @@ export const nativeAdapter: Adapter = {
     // closes a cycle back to the engine. Lazily it resolves at call time,
     // when every manifest is already initialized.
     const { getAllTools } = await import("@/core/ai/tool-registry");
-    const tools = getAllTools();
+    const { withApprovalNotes } = await import("@/core/ai/invoke-tool");
+    // Unattended: approval-tier calls are parked by the provider loop's invokeTool.
+    const tools = withApprovalNotes(getAllTools());
 
     let finalText = "";
     let inputTokens = 0;
@@ -113,7 +115,11 @@ export const nativeAdapter: Adapter = {
         ].join("\n"),
         messages: [{ role: "user", content: ctx.prompt }],
         tools,
-        toolCtx: { db },
+        toolCtx: {
+          db,
+          agentName: "Workbench",
+          approvalOrigin: { agentId: ctx.attemptId, runId: ctx.attemptId, agentName: "Workbench (native)" },
+        },
         model,
         // A "docs" write (e.g. the Investments deep report) is prose from
         // provided data — NOT an agentic loop. Force reasoning OFF so a local

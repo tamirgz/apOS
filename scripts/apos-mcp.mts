@@ -17,6 +17,8 @@ console.log = console.info = console.debug = (...a: unknown[]) => console.error(
 const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
 const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
 const { getAllTools } = await import("@/core/ai/tool-registry");
+const { invokeTool } = await import("@/core/ai/invoke-tool");
+const { randomUUID } = await import("node:crypto");
 const { toWireName } = await import("@/core/ai/provider");
 const { db, sql } = await import("@/core/db/client");
 type AiToolContext = import("@/core/modules/types.server").AiToolContext;
@@ -27,8 +29,15 @@ const EXPOSED = (name: string) =>
   /^(tasks|cycles|modules|milestones|attachments)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
 
 const actor = process.env.APOS_ACTOR?.trim() || "mcp";
+const sessionId = randomUUID();
 // One context for the whole session, so list refs (t1, c1, m1) stay valid across calls.
-const ctx: AiToolContext = { db, agentName: actor };
+// No user is assumed present: approval-tier calls are parked and return
+// {pending_approval}; the user approves them in apOS.
+const ctx: AiToolContext = {
+  db,
+  agentName: actor,
+  approvalOrigin: { agentId: sessionId, runId: sessionId, agentName: `MCP ${actor}` },
+};
 
 const server = new McpServer(
   { name: "apos", version: "1.0.0" },
@@ -47,14 +56,17 @@ for (const t of tools) {
     toWireName(t.name),
     {
       title: t.name,
-      description: t.risk === "approval" ? `${t.description} (Consequential — confirm with the user first.)` : t.description,
+      description:
+        t.risk === "approval"
+          ? `${t.description} (Needs the user's approval: the call is queued in apOS and returns {pending_approval: id}; it runs only once they approve.)`
+          : t.description,
       inputSchema: (t.input as ZodObject).shape,
       annotations: { destructiveHint: t.risk === "approval", readOnlyHint: /\.(list|get|attachments)$/.test(t.name) },
     },
     async (args: unknown) => {
       try {
         const parsed = t.input.parse(args ?? {});
-        const out = await t.execute(parsed, ctx);
+        const out = await invokeTool(t, parsed, ctx);
         const isError = !!out && typeof out === "object" && "error" in out;
         return { content: [{ type: "text" as const, text: JSON.stringify(out, null, 1) }], isError };
       } catch (e) {

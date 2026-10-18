@@ -8,13 +8,15 @@ const url =
   process.env.DATABASE_URL ?? "postgres://aios:aios@localhost:5544/aios";
 
 // TLS policy, resolved once:
-//  • local DB  → plaintext (dev container on localhost).
+//  • local DB  → plaintext (dev container on localhost, or a URL that says
+//    sslmode=disable — the container edition's compose-network Postgres).
 //  • cloud DB  → TLS. With AIOS_DB_CA_FILE set, verify the server's cert chain
 //    AND hostname against that CA (verify-full) — protects against MITM, not
 //    just passive snooping. Without a CA file, fall back to `require` (encrypt
 //    only). A CA path that can't be read degrades to `require` with a warning
 //    rather than hard-crashing the whole app on a missing file.
-const isLocalDb = /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url);
+const isLocalDb =
+  /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url) || /[?&]sslmode=disable\b/.test(url);
 type SslPolicy = false | "require" | { ca: string; rejectUnauthorized: true };
 function resolveSsl(): SslPolicy {
   if (isLocalDb) return false;

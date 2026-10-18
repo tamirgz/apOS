@@ -21,9 +21,10 @@ export interface ArchiveEntry {
 
 const DAY = 86_400_000;
 const PALETTE = ["--color-plasma", "--color-ion", "--color-violet", "--color-solar", "--color-orchid", "--color-gold", "--color-flare"];
-// Rewritten by the weekly consolidation, so age = staleness. current_focus is
-// the user's own words — its age says nothing.
-const WEEKLY = ["active_projects"];
+// Blocks an agent rewrites on a schedule, where age = staleness. None today:
+// active_projects is rebuilt in code on every work change, and current_focus
+// is the user's own words — neither one's age says anything.
+const WEEKLY: string[] = [];
 const LANES: [string, string[]][] = [
   ["procedural", ["lesson", "policy"]],
   ["semantic", ["fact", "decision"]],

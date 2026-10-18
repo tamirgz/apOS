@@ -9,7 +9,7 @@ export default defineConfig({
     url: process.env.DATABASE_URL ?? "postgres://aios:aios@localhost:5544/aios",
     // A hosted DB (Supabase/Aiven) enforces TLS; the raw URL has no sslmode, so
     // migrations would fail without this. Local (localhost) doesn't use it.
-    ssl: /@(localhost|127\.0\.0\.1)/.test(process.env.DATABASE_URL ?? "")
+    ssl: /@(localhost|127\.0\.0\.1)|[?&]sslmode=disable\b/.test(process.env.DATABASE_URL ?? "")
       ? false
       : "require",
   },

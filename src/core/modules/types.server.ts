@@ -23,6 +23,15 @@ export interface FocusSubject {
 
 export interface AiToolContext {
   db: Db;
+  /**
+   * A user is in the loop for this call (chat): approval-tier tools execute
+   * directly. Unset everywhere else, where invokeTool parks them instead.
+   */
+  userPresent?: boolean;
+  /** Set only by executeApproval: the user approved this exact parked call. */
+  approved?: boolean;
+  /** Who a parked approval-tier call is credited to (agent / flow / session). */
+  approvalOrigin?: { agentId: string; runId: string; agentName: string };
   /** Set when the tool is invoked from an agent run (not chat). */
   agentRunId?: string;
   /**

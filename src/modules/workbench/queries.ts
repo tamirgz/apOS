@@ -154,20 +154,40 @@ export async function listExecutors() {
 
 /** Resolve the executor a new task should run on. Falls back to `native` (always
  *  available) when the chosen/default executor's CLI isn't installed here, so a
- *  container never queues a task doomed to fail on a missing binary. */
+ *  container never queues a task doomed to fail on a missing binary — and says
+ *  so: callers record the fallback on the attempt (noteExecutorFallback). */
 export async function pickExecutor(
   explicitId: string | undefined,
   taskType: TaskType,
-): Promise<string> {
+): Promise<{ executorId: string; fallback: { from: string; reason: string } | null }> {
   const id = explicitId || TYPE_DEFAULT_EXECUTOR[taskType];
   const [row] = await db
     .select({ kind: executors.kind, commandTemplate: executors.commandTemplate })
     .from(executors)
     .where(eq(executors.id, id));
-  if (!row) return id; // unknown id — let the engine's gate report it
+  if (!row) return { executorId: id, fallback: null }; // unknown id — let the engine's gate report it
   const a = executorAvailability(row.kind, {
     commandTemplate: row.commandTemplate,
     taskType,
   });
-  return a.ok ? id : "native";
+  return a.ok
+    ? { executorId: id, fallback: null }
+    : { executorId: "native", fallback: { from: id, reason: a.reason ?? "unavailable" } };
+}
+
+/** Put a fallback on the attempt's timeline, so the run shows it didn't get the executor it asked for. */
+export async function noteExecutorFallback(
+  attemptId: string,
+  fallback: { from: string; reason: string } | null,
+): Promise<void> {
+  if (!fallback) return;
+  await db.insert(attemptEvents).values({
+    attemptId,
+    type: "status",
+    payload: {
+      phase: `executor fallback: ${fallback.from} → native (${fallback.reason})`,
+      fallbackFrom: fallback.from,
+      reason: fallback.reason,
+    },
+  });
 }

@@ -17,7 +17,7 @@ import { agentRuns, agents, type Agent } from "@/core/db/schema/agents";
 import { notifications } from "@/core/db/schema/notifications";
 import { getSetting, SETTING_KEYS } from "@/core/app-settings";
 import { reportJobOutcome } from "@/core/alerts";
-import { serverModules } from "@/modules/registry.server";
+import { getServerModules } from "@/modules/registry.server";
 import { fireRoutine } from "@/modules/workbench/routines";
 import { routines } from "@/modules/workbench/schema";
 import { runFlow } from "@/modules/flows/engine";
@@ -403,7 +403,7 @@ async function main() {
   await syncFlowCrons();
 
   // Module background jobs (e.g. knowledge ingestion, calendar sync).
-  const moduleJobs = serverModules.flatMap((m) => m.jobs ?? []);
+  const moduleJobs = getServerModules().flatMap((m) => m.jobs ?? []);
   const jobHandlers = new Map(
     moduleJobs.map((j) => [j.channel, j.handle] as const),
   );

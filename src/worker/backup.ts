@@ -59,6 +59,18 @@ const DUMP_TIMEOUT_MS = 10 * 60_000;
 const url =
   process.env.DATABASE_URL ?? "postgres://aios:aios@localhost:5544/aios";
 
+/** The connection URL without its password, plus the password for PGPASSWORD. */
+export function splitPassword(raw: string): { dumpUrl: string; password: string } {
+  try {
+    const u = new URL(raw);
+    const password = decodeURIComponent(u.password);
+    u.password = "";
+    return { dumpUrl: u.toString(), password };
+  } catch {
+    return { dumpUrl: raw, password: "" };
+  }
+}
+
 /** Nightly pg_dump → gzip with simple retention. Throws on failure, so the
  *  worker's runJob raises the job alert (notification + self-clearing card). */
 export async function runBackup(log: (msg: string) => void): Promise<void> {
@@ -71,10 +83,13 @@ export async function runBackup(log: (msg: string) => void): Promise<void> {
     // folder (and we don't stream gzip straight into a FUSE mount).
     // pipefail: without it a missing or failing pg_dump still exits 0 (gzip's
     // status) and leaves a 20-byte "dump". The URL goes in through the env, so
-    // a failure's "Command failed: …" text (the job alert body) has no password.
+    // a failure's "Command failed: …" text (the job alert body) has no password,
+    // and the password itself rides in PGPASSWORD: the shell expands
+    // $AIOS_DUMP_URL into pg_dump's argv, which any local `ps` can read.
+    const { dumpUrl, password } = splitPassword(url);
     await runPipeline(
       `set -o pipefail; pg_dump "$AIOS_DUMP_URL" | gzip > "${tmp}"`,
-      { ...process.env, AIOS_DUMP_URL: url },
+      { ...process.env, AIOS_DUMP_URL: dumpUrl, ...(password ? { PGPASSWORD: password } : {}) },
       DUMP_TIMEOUT_MS,
     ).catch((e: Error) => {
       throw new Error(`pg_dump ${e.message}`);

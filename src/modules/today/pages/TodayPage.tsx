@@ -8,11 +8,11 @@ import { DeckGrid, type DeckWidget } from "@/core/ui/DeckGrid";
  */
 export async function TodayPage() {
   // Lazy: the registry imports this module's manifest, which imports this page.
-  const [{ serverModules }, { modules }] = await Promise.all([
+  const [{ getServerModules }, { modules }] = await Promise.all([
     import("@/modules/registry.server"),
     import("@/modules/registry"),
   ]);
-  const widgets: DeckWidget[] = serverModules.flatMap((m) => {
+  const widgets: DeckWidget[] = getServerModules().flatMap((m) => {
     const accent =
       modules.find((mod) => mod.id === m.id)?.accent ?? "var(--color-ink-faint)";
     return m.widgets.map((w) => ({

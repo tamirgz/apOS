@@ -6,7 +6,7 @@
  * Agents UI and exported to docs/AGENTS-REFERENCE.md by scripts/gen-agent-docs.
  */
 import { getAllTools } from "@/core/ai/tool-registry";
-import { serverModules } from "@/modules/registry.server";
+import { getServerModules } from "@/modules/registry.server";
 import type { AgentTemplate } from "@/core/modules/types.server";
 
 // A tool is an OUTPUT (suggest/act) if its action verb mutates; otherwise it's
@@ -62,7 +62,7 @@ export function allAgentTemplateDocs(): {
   module: string;
   doc: AgentDocView;
 }[] {
-  return serverModules.flatMap((m) =>
+  return getServerModules().flatMap((m) =>
     (m.agentTemplates ?? []).map((t) => ({
       template: t,
       module: m.id,

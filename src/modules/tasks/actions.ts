@@ -15,6 +15,7 @@ import {
   deleteWorkItem,
   getWorkItem,
   listWorkItems,
+  releaseWorkItem,
   updateWorkItem,
   type WorkItemInput,
   type RelationSide,
@@ -59,6 +60,13 @@ export async function moveTask(id: string, status: TaskStatus, sortOrder: number
 export async function updateTask(id: string, patch: WorkItemPatch) {
   const item = await updateWorkItem(db, id, patch, "user");
   revalidateWork(item?.projectRef);
+  return item;
+}
+
+/** The user can release any claim — an agent that died mid-task, say. */
+export async function releaseTaskClaim(id: string) {
+  const item = await releaseWorkItem(db, id, "user", { force: true });
+  revalidateWork(item && !("error" in item) ? item.projectRef : null);
   return item;
 }
 

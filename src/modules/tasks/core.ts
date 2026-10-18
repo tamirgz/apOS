@@ -5,7 +5,7 @@
  *
  * Worker-safe: no "use server", no revalidatePath, db passed in.
  */
-import { and, asc, desc, eq, getTableColumns, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "@/core/db/client";
 import { features, projects } from "@/modules/projects/schema";
 import {
@@ -430,6 +430,127 @@ export async function updateWorkItem(
     if (row.featureRef !== cur.featureRef) await syncFeatureStatus(db, row.featureRef);
   }
   return (await withIdentifiers(db, [row]))[0];
+}
+
+/** A claim attempt that lost: someone else holds the item until `until`. */
+export interface WorkItemClaimed {
+  error: "claimed";
+  by: string;
+  until: Date;
+}
+
+/** Does the item carry a live (unexpired) claim? */
+export const activeClaim = (t: Pick<Task, "claimedBy" | "claimExpiresAt">, now = new Date()) =>
+  t.claimedBy && t.claimExpiresAt && t.claimExpiresAt > now ? { by: t.claimedBy, until: t.claimExpiresAt } : null;
+
+/**
+ * Claim an item for `ttlMinutes`: one worker at a time. Taking it moves a todo
+ * item to doing. The holder re-claiming extends the claim; anyone else gets
+ * `{ error: "claimed", by, until }` until it's released or expires. The check
+ * is in the UPDATE, so two claimers racing can't both win.
+ */
+export async function claimWorkItem(
+  db: Db,
+  id: string,
+  actor: Actor,
+  ttlMinutes = 60,
+): Promise<WorkItem | WorkItemClaimed | null> {
+  const [cur] = await db.select().from(tasks).where(eq(tasks.id, id));
+  if (!cur) return null;
+  const now = new Date();
+  const until = new Date(now.getTime() + ttlMinutes * 60_000);
+  const [row] = await db
+    .update(tasks)
+    .set({
+      claimedBy: actor,
+      claimExpiresAt: until,
+      status: sql`case when ${tasks.status} = 'todo' then 'doing' else ${tasks.status} end`,
+      version: sql`${tasks.version} + 1`,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(tasks.id, id),
+        or(isNull(tasks.claimedBy), eq(tasks.claimedBy, actor), lt(tasks.claimExpiresAt, now)),
+      ),
+    )
+    .returning();
+  if (!row) {
+    const [held] = await db.select().from(tasks).where(eq(tasks.id, id));
+    const c = held && activeClaim(held, now);
+    // Released or expired between the two reads: try once more.
+    return c ? { error: "claimed", ...c } : claimWorkItem(db, id, actor, ttlMinutes);
+  }
+
+  const log: (typeof taskActivity.$inferInsert)[] = [];
+  if (!activeClaim(cur, now) || cur.claimedBy !== actor)
+    log.push({ taskId: id, actor, kind: "changed", field: "claim", fromValue: activeClaim(cur, now)?.by ?? null, toValue: actor });
+  if (row.status !== cur.status) {
+    log.push({
+      taskId: id,
+      actor,
+      kind: "changed",
+      field: "status",
+      fromValue: await displayValue(db, "status", cur.status),
+      toValue: await displayValue(db, "status", row.status),
+    });
+    await syncFeatureStatus(db, row.featureRef);
+  }
+  if (log.length) await db.insert(taskActivity).values(log);
+  return (await withIdentifiers(db, [row]))[0];
+}
+
+/**
+ * Drop a claim. Only its holder may — or anyone once it has expired; `force`
+ * (the user, in the UI) releases whoever holds it. Status is left as is.
+ */
+export async function releaseWorkItem(
+  db: Db,
+  id: string,
+  actor: Actor,
+  opts: { force?: boolean } = {},
+): Promise<WorkItem | WorkItemClaimed | null> {
+  const [cur] = await db.select().from(tasks).where(eq(tasks.id, id));
+  if (!cur) return null;
+  const held = activeClaim(cur);
+  if (held && held.by !== actor && !opts.force) return { error: "claimed", ...held };
+  if (!cur.claimedBy) return (await withIdentifiers(db, [cur]))[0];
+  const [row] = await db
+    .update(tasks)
+    .set({ claimedBy: null, claimExpiresAt: null, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+    .where(eq(tasks.id, id))
+    .returning();
+  if (held) await db.insert(taskActivity).values({ taskId: id, actor, kind: "changed", field: "claim", fromValue: held.by, toValue: null });
+  return (await withIdentifiers(db, [row]))[0];
+}
+
+/** Clear claims past their expiry, noting each in the item's history. */
+export async function expireClaims(db: Db): Promise<number> {
+  const now = new Date();
+  const stale = await db
+    .select({ id: tasks.id, by: tasks.claimedBy })
+    .from(tasks)
+    .where(lt(tasks.claimExpiresAt, now));
+  if (!stale.length) return 0;
+  // Re-checked in the UPDATE: a claim renewed since the read is kept.
+  const gone = await db
+    .update(tasks)
+    .set({ claimedBy: null, claimExpiresAt: null, version: sql`${tasks.version} + 1` })
+    .where(and(inArray(tasks.id, stale.map((t) => t.id)), lt(tasks.claimExpiresAt, now)))
+    .returning({ id: tasks.id });
+  const by = new Map(stale.map((t) => [t.id, t.by]));
+  if (gone.length)
+    await db.insert(taskActivity).values(
+      gone.map((g) => ({
+        taskId: g.id,
+        actor: "system:claims",
+        kind: "changed" as const,
+        field: "claim",
+        fromValue: `${by.get(g.id) ?? "?"} (expired)`,
+        toValue: null,
+      })),
+    );
+  return gone.length;
 }
 
 export async function addComment(db: Db, taskId: string, body: string, actor: Actor) {

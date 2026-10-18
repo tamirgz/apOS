@@ -19,6 +19,7 @@ import {
   GitCommitHorizontal,
   Hash,
   Layers,
+  Lock,
   Pencil,
   Plus,
   Repeat,
@@ -40,6 +41,7 @@ import {
   deleteTaskAttachment,
   loadWorkItem,
   relateTask,
+  releaseTaskClaim,
   unrelateTask,
   updateTask,
 } from "../actions";
@@ -48,7 +50,7 @@ import { AttachButton, AttachmentList, Lightbox } from "./Attachments";
 import { TASK_PRIORITIES, TASK_STATUSES, type TaskAttachment, type TaskPriority, type TaskStatus } from "../schema";
 import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, displayTitle, plainTitle, type RelationSide } from "../states";
 import type { WorkProject } from "../queries";
-import { LabelPill, PriorityGlyph, StateGlyph, Who, branchName, dueTone, isClosed, splitTitle } from "./work-ui";
+import { LabelPill, PriorityGlyph, StateGlyph, Who, branchName, claimantName, dueTone, isClosed, liveClaim, splitTitle } from "./work-ui";
 
 type Loaded = NonNullable<Awaited<ReturnType<typeof loadWorkItem>>>;
 
@@ -349,6 +351,7 @@ export function WorkItemDetail({
     </>
   );
   const ic = "size-3.5 shrink-0";
+  const claim = liveClaim(item, now);
 
   const propertiesEl = (
     <dl className={cn("wk-props", !full && "border-b wk-line px-[18px] py-3.5")}>
@@ -366,6 +369,26 @@ export function WorkItemDetail({
           </select>
         </>,
       )}
+      {claim &&
+        propRow(
+          <Lock className={ic} />,
+          "Claimed",
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+            <span className="max-w-full truncate font-mono text-[12px] text-plasma" title={claim.by}>
+              {claimantName(claim.by)}
+            </span>
+            <span className="shrink-0 text-[12px] text-ink-faint">
+              until {claim.until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+            <button
+              type="button"
+              onClick={() => act(() => releaseTaskClaim(id), "Claim released")}
+              className="ml-auto shrink-0 text-[12px] text-ink-dim hover:text-ink"
+            >
+              Release
+            </button>
+          </span>,
+        )}
       {propRow(
         <Signal className={ic} />,
         "Priority",

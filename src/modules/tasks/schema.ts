@@ -80,6 +80,11 @@ export const tasks = pgTable(
     /** A creator's retry key: a second tasks.create with the same key in the
      *  same project returns this item instead of making a duplicate. */
     idempotencyKey: text("idempotency_key"),
+    /** Who is working this item (an actor, e.g. "agent:claude-code/2.1#3f9a1c")
+     *  and until when. A claim past its expiry is free to take; the worker
+     *  clears expired ones (work_backfill). */
+    claimedBy: text("claimed_by"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

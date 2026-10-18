@@ -5,14 +5,17 @@ import { isUuid, registerRefs, resolveRef } from "@/core/ai/refs";
 import { resolveProjectByName } from "@/modules/projects/subject";
 import { features, projects } from "@/modules/projects/schema";
 import {
+  activeClaim,
   addComment,
   addRelation,
   blockingRelations,
+  claimWorkItem,
   createWorkItem,
   deleteWorkItem,
   findByIdentifier,
   getWorkItem,
   listRelations,
+  releaseWorkItem,
   removeRelation,
   updateWorkItem,
   withIdentifiers,
@@ -135,6 +138,7 @@ const summary = (t: Task & { identifier: string | null }) => ({
   completedAt: t.completedAt,
   hasParent: !!t.parentId,
   version: t.version,
+  ...(activeClaim(t) ? { claimedBy: t.claimedBy, claimedUntil: t.claimExpiresAt } : {}),
 });
 
 const IF_VERSION = z
@@ -349,6 +353,38 @@ export const taskTools: AiToolDef[] = [
             : { at: a.createdAt, by: a.actor, [a.kind]: a.field ?? true, from: a.fromValue, to: a.toValue },
         ),
       };
+    },
+  },
+  {
+    name: "tasks.claim",
+    description:
+      "Claim a work item before working on it, so no other agent picks it up. A todo item moves to doing. Lasts `ttlMinutes` (default 60); claim again to extend it, and tasks.release when done. If someone else holds it you get {error:'claimed', by, until} — pick another item.",
+    input: z.object({
+      ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')"),
+      ttlMinutes: z.number().int().min(1).max(24 * 60).optional().describe("How long the claim lasts (default 60)"),
+    }),
+    async execute(input, ctx) {
+      const t = await resolveTask(ctx, input.ref);
+      if ("error" in t) return t;
+      const row = await claimWorkItem(ctx.db, t.id, actorOf(ctx), input.ttlMinutes ?? 60);
+      if (!row) return { error: "work item not found" };
+      if ("error" in row) return row;
+      return { claimed: { identifier: row.identifier, status: row.status, until: row.claimExpiresAt, version: row.version } };
+    },
+  },
+  {
+    name: "tasks.release",
+    description: "Release your claim on a work item (from tasks.claim), so others can pick it up. The item's state is unchanged.",
+    input: z.object({
+      ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')"),
+    }),
+    async execute(input, ctx) {
+      const t = await resolveTask(ctx, input.ref);
+      if ("error" in t) return t;
+      const row = await releaseWorkItem(ctx.db, t.id, actorOf(ctx));
+      if (!row) return { error: "work item not found" };
+      if ("error" in row) return row;
+      return { released: { identifier: row.identifier, status: row.status, version: row.version } };
     },
   },
   {

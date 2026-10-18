@@ -25,7 +25,7 @@ const COST_REASON: Record<AIProviderId, string> = {
   tokenharbor: "Token Harbor API key — METERED per-token, but models ending ':free' cost $0",
 };
 
-/** Per-agent token/run aggregates for the last 30 days, plus which mode (cloud/local) each currently runs on. */
+/** Per-agent (and per chat route) token/run aggregates for the last 30 days, plus which mode (cloud/local) each currently runs on. */
 export async function UsagePanel() {
   const [rows, defaultRoute] = await Promise.all([
     db.execute<UsageRow>(dsql`
@@ -40,6 +40,18 @@ export async function UsagePanel() {
         left join agents a on a.id = r.agent_id
        where r.created_at > now() - interval '30 days'
        group by 1, 2, 3
+      union all
+      -- Chat prompts are runs too (⌘K, Ask, Investments): one row per route.
+      select 'chat · ' || c.task_key as agent_name,
+             c.provider as provider,
+             c.model as model,
+             count(*)::int as runs,
+             count(*) filter (where c.status in ('failed','timed_out'))::int as failures,
+             coalesce(sum(c.tokens_in), 0)::int as tokens_in,
+             coalesce(sum(c.tokens_out), 0)::int as tokens_out
+        from chat_runs c
+       where c.created_at > now() - interval '30 days'
+       group by 1, 2, 3
        order by tokens_out desc
     `),
     // What an agent with no pinned provider/model actually falls back to.
@@ -52,7 +64,7 @@ export async function UsagePanel() {
   return (
     <div className="flex flex-col gap-2.5">
       <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-ink-faint">
-        agent usage — last 30 days
+        agent &amp; chat usage — last 30 days
       </p>
       <div className="glass rounded-xl p-3">
         {list.length === 0 ? (

@@ -28,7 +28,7 @@ const CORE_TOOLS: AiToolDef[] = [
   {
     name: "memory.update",
     description:
-      "Update a persistent memory block (always-injected context: active_projects, or a new label for a durable topic; who_i_am, current_focus and preferences only with the user's own words, in chat — agent runs can't write them). Keep blocks concise — they have char budgets; replaced values are archived automatically.",
+      "Update a persistent memory block (always-injected context: a new label for a durable topic; who_i_am, current_focus and preferences only with the user's own words, in chat — agent runs can't write them; active_projects is built from the tracker and can't be written). Keep blocks concise — they have char budgets; replaced values are archived automatically.",
     input: z.object({
       label: z
         .string()
@@ -43,11 +43,14 @@ const CORE_TOOLS: AiToolDef[] = [
         .describe("What this block holds (only used when creating a new one)"),
     }),
     async execute(input, ctx) {
-      const { updateMemoryBlock, USER_OWNED_BLOCKS } = await import("@/core/memory");
+      const { updateMemoryBlock, USER_OWNED_BLOCKS, CODE_BUILT_BLOCKS } = await import("@/core/memory");
       // Same normalisation as updateMemoryBlock, so "current focus" can't slip past.
       const slug = input.label.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
       if (ctx?.agentName && USER_OWNED_BLOCKS.includes(slug)) {
         return { error: `Not recorded: "${input.label}" holds the user's own words and is written by the user, not by agents.` };
+      }
+      if (CODE_BUILT_BLOCKS.includes(slug)) {
+        return { error: `Not recorded: "${input.label}" is built from the work tracker on every change — update the projects or work items instead.` };
       }
       const next = await updateMemoryBlock(
         input.label,

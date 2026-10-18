@@ -54,16 +54,6 @@ async function indexChangedSince(
   return [...rows].length > 0;
 }
 
-/** Standard shape: run when the listed kinds changed since the last success. */
-function changeGate(kinds: string[], what: string): Gate {
-  return async (lastSuccessAt) => {
-    if (!lastSuccessAt) return RUN("first run");
-    return (await indexChangedSince(kinds, lastSuccessAt))
-      ? RUN(`${what} changed since last success`)
-      : SKIP(`no ${what} changes since ${lastSuccessAt.toISOString()}`);
-  };
-}
-
 const GATES: Record<string, Gate> = {
   // Re-derives per-project health from tasks/notes/work. Content changes are
   // the primary signal — but NOT the only one: a project going idle is itself a
@@ -212,11 +202,11 @@ const GATES: Record<string, Gate> = {
       : SKIP("nothing changed all week — no material to review");
   },
 
-  // Weekly distillation into memory blocks — an empty week distills nothing.
-  "Memory consolidation": changeGate(
-    ["project", "task", "note", "idea", "knowledge", "workbench", "ask"],
-    "work-state",
-  ),
+  // Retired: active_projects is built in code from the tracker on every work
+  // change (projects/active-projects.ts). An install that still has the agent
+  // keeps it, but its cron never runs.
+  "Memory consolidation": async () =>
+    SKIP("retired — active_projects is now built from the tracker in code"),
 };
 
 /**

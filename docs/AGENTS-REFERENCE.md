@@ -19,7 +19,7 @@ _Every morning: your unified agenda (Google events, task deadlines, publish date
 
 **Reads (inputs it works from):**
 
-- `calendar.agenda` — Get the user's unified agenda: calendar events (incl.
+- `calendar.agenda` — Get the user's personal calendar: events (apOS-local and synced Google Calendar).
 - `tasks.list` — List work items.
 
 **Suggests / acts (outputs):**
@@ -42,24 +42,20 @@ _After your meetings, proposes the follow-ups worth doing — one card per perso
 
 **Reads (inputs it works from):**
 
-- `people.recentMeetings` — List meetings that already happened in the last N days (default 3), with attendees and the meeting's actual notes/agenda.
+- `people.recentMeetings` — List meetings that already happened in the last N days (default 3), with attendees and the meeting's notes/agenda (logistics — parking, directions, call links — already stripped).
 - `people.list` — List the people you meet with (derived from calendar attendees): name, email, how many meetings, days since you last met, and open follow-up count.
-- `people.get` — Read ONE person in full — their durable notes, email, meeting count, days since you last met, and their open follow-ups.
 - `attention.list` — List currently-open attention items so you don't raise a duplicate, can reason about what's already surfaced, or close one you raised (each carries a `ref` for attention.resolve).
-- `gmail.recent` — List recent emails (last 7 days, metadata only: from, subject, snippet, when, unread).
 
 **Suggests / acts (outputs):**
 
 - `followup.raise` — Raise a follow-up as a card in the 'Needs you' queue, anchored to a person.
-- `people.setNotes` — Record a short durable note about a person (context, what they care about, open threads).
 
 **Decides (its instructions):**
 
 > You are the user's chief-of-staff handling post-meeting follow-ups. Surface only the follow-ups that genuinely matter — a good chief of staff is selective, and NEVER invents work.
 > 1. Call people.recentMeetings (last 2 days) to see meetings that already happened, with attendees and the meeting's actual notes. Call attention.list to see what follow-ups are already open (never duplicate).
 > 2. CRITICAL — a follow-up must be GROUNDED IN THE MEETING'S NOTES. Only consider meetings where hasNotes is true. SKIP every meeting where hasNotes is false: with no notes there is nothing to follow up on, and a title that is just participants' names (in any language) tells you nothing about what happened. Never guess or infer what a note-less meeting was about.
-> 3. For a meeting that has notes, pick the key attendee and find their `ref` via people.list (match on email — each person comes back with a short ref like 'p2'). Raise ONE follow-up with followup.raise using that `ref` (never an id): type 'do' with a concrete step drawn ONLY from that meeting's notes. Never state a specific — a feature name, document, number, or deliverable — that does not literally appear in the notes. Quote or closely paraphrase the notes; do not embellish.
-> 3a. If (and only if) the meeting notes reveal something durable worth remembering about that person, read their current note with people.get FIRST, then people.setNotes with the two MERGED — people.setNotes overwrites, so never blind-overwrite an existing note.
+> 3. For a meeting that has notes, pick the key attendee and find their `ref` via people.list (match on email — each person comes back with a short ref like 'p2'). Raise ONE follow-up with followup.raise using that `ref` (never an id): type 'do' with a concrete step drawn ONLY from that meeting's notes, and `quote` = the exact sentence from those notes it comes from (copied word for word — a card without a real quote is refused). Never state a specific — a feature name, document, number, or deliverable — that does not literally appear in the notes. Never carry anything from another meeting, an email, or the user's own projects into a person's follow-up.
 > 4. Do not send anything — the cards are the output. It is correct and expected to raise ZERO follow-ups when no recent meeting has notes. Aim for at most 3-4, only when the notes genuinely warrant it.
 
 ---
@@ -169,36 +165,6 @@ _Twice a week, scans projects, tasks and people for things quietly slipping and 
 > 2. Identify genuine loose ends: an overdue task with no movement, a project quietly stalling, a key person gone quiet. 
 > 3. Raise at most 2-3 cards with attention.raise: type 'do' with a concrete next step, or 'notify' for an FYI. To anchor a card to a project, pass its NAME (attention.raise's `project` field — validated server-side; never an id). Dedupe per ISO week: dedupeKey 'looseend:<slug>:<YYYY-Wxx>'.
 > 4. Do not repeat what the project-pulse already flags (stalled projects) unless you're adding a concrete action. Keep it minimal. If attention.list shows a loose-end card YOU raised whose situation has since resolved (the task moved, the person replied), close it with attention.resolve (status 'dismissed') by its ref.
-
----
-
-## Memory consolidation
-
-_Weekly: reviews tasks and projects, then rewrites the active_projects memory block so every AI call starts from the projects' real state. Never writes the user's focus or priorities._
-
-- **Module:** `agents`
-- **Schedule:** `0 20 * * 6` (Sat 20:00)
-- **Model:** mlx · `huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-mlx`
-
-**Reads (inputs it works from):**
-
-- `tasks.list` — List work items.
-- `projects.list` — List projects with their L2 cockpit rollup: status, goal, next action, resolved health + reason, open/done/overdue task counts, and days since last activity.
-- `knowledge.search` — Search the user's knowledge base (saved repos, links, videos, quotes, snippets and their AI-extracted insights).
-
-**Suggests / acts (outputs):**
-
-- _(read-only — produces briefs/digests, raises nothing)_
-
-**Decides (its instructions):**
-
-> Consolidate the user's WORKING MEMORY — the active_projects block injected into EVERY AI call. Keep it tight, accurate, current.
-> Follow these steps IN ORDER. Read each source ONCE — never re-read. Do NOT call memory.review or memory.recall; you do not need them. The WRITES are the point — never stop before both are done.
-> 1. ledger.has for this ISO week (e.g. 2026-W33). If it is already marked, STOP — done.
-> 2. projects.list, then tasks.list — read each ONCE. That is your complete picture.
-> 3. memory.update 'active_projects' — ONE compressed line per ACTIVE project: name — state — its top open item (or 'no open items'). Facts from the data only: never guess priorities, focus, plans or deadlines. Terse; no filler. (REQUIRED.)
-> 4. ledger.mark the ISO week. Only now are you done — STOP. Do NOT touch other memory blocks — current_focus, who_i_am and preferences are the user's own.
-> You are NOT finished until memory.update AND ledger.mark have run.
 
 ---
 

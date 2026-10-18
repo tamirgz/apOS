@@ -40,7 +40,10 @@ const memoryError = (e: unknown) => ({
 });
 
 export async function saveMemoryBlock(label: string, value: string) {
-  const { updateMemoryBlock } = await import("@/core/memory");
+  const { updateMemoryBlock, CODE_BUILT_BLOCKS } = await import("@/core/memory");
+  if (CODE_BUILT_BLOCKS.includes(label)) {
+    return { ok: false as const, error: `${label} is built from the work tracker on every change — edit the projects or items instead` };
+  }
   try {
     await updateMemoryBlock(label, value, "replace");
   } catch (e) {

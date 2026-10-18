@@ -37,7 +37,7 @@ const DEFAULT_BLOCKS = [
   },
   {
     label: "active_projects",
-    description: "Short live summary of key projects and their state.",
+    description: "Live summary of active projects and their state — built from the tracker, refreshed on every work change.",
   },
 ] as const;
 
@@ -47,6 +47,11 @@ const DEFAULT_BLOCKS = [
  * week" into current_focus, and every other agent then repeated the guess.
  */
 export const USER_OWNED_BLOCKS: string[] = ["who_i_am", "current_focus", "preferences"];
+
+/** Blocks rebuilt from apOS data in code (active_projects ← the tracker, see
+ *  projects/active-projects.ts). memory.update can't write them: the next
+ *  rebuild would overwrite it anyway. */
+export const CODE_BUILT_BLOCKS: string[] = ["active_projects"];
 
 /** Blocks the memory system relies on — editable, never deletable. */
 export const PROTECTED_BLOCKS: string[] = [...DEFAULT_BLOCKS.map((b) => b.label), "operating_rules"];
@@ -299,13 +304,14 @@ export async function rememberEntry(input: {
 /**
  * Block-freshness health-check. Bounding the injected snapshot only stays safe
  * if that snapshot keeps being refreshed — otherwise the always-injected memory
- * silently rots. The weekly-consolidated block (active_projects) is expected to
- * update ~weekly — current_focus is the user's own, so its age says nothing; if one goes past STALE_BLOCK_DAYS the
- * consolidation agent has likely stopped, and the daily maintenance sweep
- * surfaces it. This is what makes "bounded injection doesn't harm growth" true.
+ * silently rots. A block an agent rewrites on a schedule is expected to update
+ * ~weekly; if one goes past STALE_BLOCK_DAYS its agent has likely stopped, and
+ * the daily maintenance sweep surfaces it. None today: active_projects is built
+ * in code on every work change (its age only means nothing changed), and
+ * current_focus is the user's own, so its age says nothing either.
  */
 const STALE_BLOCK_DAYS = 9;
-const WEEKLY_BLOCKS = ["active_projects"];
+const WEEKLY_BLOCKS: string[] = [];
 export async function checkMemoryFreshness(): Promise<
   { label: string; ageDays: number }[]
 > {

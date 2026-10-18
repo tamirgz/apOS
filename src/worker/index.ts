@@ -642,15 +642,13 @@ async function main() {
   // sync meant a slow/missing model silently starved indexing + embedding.
   new Cron("*/5 * * * *", { protect: true }, async () => {
     // Sort newly-indexed items into their broad "area of development" drawer
-    // (local LLM, topic-based). Bounded per tick so it never hogs Ollama — and
-    // yielded entirely while an agent run holds the GPU (idempotent, catches up).
-    if (activeRunCount() > 0) {
-      log("area classify: skipped — an agent run is active (yielding the GPU)");
-      return;
-    }
+    // (topic-based). Bounded per tick so it never hogs Ollama. While an agent
+    // run holds the GPU only the ~35 ms decision-model tier runs; the rows it is
+    // unsure of wait for qwen on a later tick (idempotent, catches up).
+    const busy = activeRunCount() > 0;
     try {
       const { classifyAreas } = await import("@/core/area-classify");
-      await classifyAreas(60, log);
+      await classifyAreas(60, log, { llm: !busy });
     } catch (e) {
       log(`area classify failed: ${String(e).slice(0, 120)}`);
     }

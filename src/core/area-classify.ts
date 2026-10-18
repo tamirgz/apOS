@@ -13,9 +13,15 @@ import { sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { projects } from "@/modules/projects/schema";
 import { searchIndex } from "@/core/db/schema/search-index";
+import { decide, DECIDE_MODEL } from "@/core/ai/decide";
+import { recordUsage } from "@/core/ai/model-track";
+import type { ModelTrack } from "@/core/ai/provider";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 const CLASSIFIER_MODEL = "qwen3:8b";
+/** laya's pick is kept at or above this confidence; below it qwen decides.
+ *  Shadow test on 120 real rows (AIOS-35): 91% agreement, 57% coverage. */
+const DECIDE_MIN_CONFIDENCE = 0.5;
 
 interface Area {
   id: string;
@@ -70,6 +76,38 @@ async function classifyBatch(
   }
 }
 
+const DECIDE_TRACK = { label: "area classify", taskKey: "area.classify" };
+
+/**
+ * First tier: the local decision model files one item in ~35 ms. Returns the
+ * area ref ("none" included) when it is confident, else null → ask qwen.
+ * `track` gives the call its own ledger row; a sweep passes `tokens` instead
+ * and records one total.
+ */
+async function decideArea(
+  areas: Area[],
+  item: { kind: string; text: string },
+  track?: ModelTrack,
+  tokens?: { calls: number; in: number },
+): Promise<string | null> {
+  const criteria: Record<string, string | null> = Object.fromEntries(
+    areas.map((a) => [a.name, a.description || null]),
+  );
+  criteria.none = "fits none of these areas";
+  const d = await decide(
+    `[${item.kind}] ${item.text.slice(0, 1500)}`,
+    { area: { type: "choice", instructions: "Which life area is this item's topic about?", criteria } },
+    track,
+  );
+  if (d && tokens) {
+    tokens.calls++;
+    tokens.in += d.tokensIn;
+  }
+  const a = d?.answers.area;
+  if (!a || a.confidence < DECIDE_MIN_CONFIDENCE) return null;
+  return refForName(areas, a.choice);
+}
+
 /** Map a model-returned area name to its ref, tolerant of partial matches. */
 function refForName(areas: Area[], raw: string): string {
   const v = (raw ?? "").trim().toLowerCase();
@@ -92,8 +130,9 @@ export async function assessQueryArea(query: string): Promise<string | null> {
   try {
     const areas = await loadAreas();
     if (areas.length === 0) return null;
-    const map = await classifyBatch(areas, [{ n: 1, kind: "query", text: q }]);
-    const ref = refForName(areas, map["1"] ?? "none");
+    const ref =
+      (await decideArea(areas, { kind: "query", text: q }, { source: "ask", ...DECIDE_TRACK })) ??
+      refForName(areas, (await classifyBatch(areas, [{ n: 1, kind: "query", text: q }]))["1"] ?? "none");
     return ref === "none" ? null : ref;
   } catch {
     return null;
@@ -101,28 +140,49 @@ export async function assessQueryArea(query: string): Promise<string | null> {
 }
 
 /**
- * Classify up to `batch` unclassified index rows into an area drawer.
- * Returns how many were classified.
+ * Classify up to `batch` unclassified index rows into an area drawer: the
+ * decision model files the ones it is sure of, qwen the rest. `llm: false`
+ * (an agent run holds the GPU) runs only the cheap tier — unsure rows stay
+ * NULL for a later tick. Returns how many were classified.
  */
 export async function classifyAreas(
   batch = 60,
   log: (m: string) => void = () => {},
+  opts: { llm?: boolean } = {},
 ): Promise<number> {
+  const llm = opts.llm ?? true;
   const areas = await loadAreas();
   if (areas.length === 0) return 0;
 
+  // Random order: rows the cheap tier is unsure of must not pin the batch
+  // while qwen is held off, starving newer rows.
   const rows = await db
     .select({ id: searchIndex.id, kind: searchIndex.kind, title: searchIndex.title, snippet: searchIndex.snippet })
     .from(searchIndex)
     .where(dsql`${searchIndex.embedding} is not null and ${searchIndex.areaRef} is null`)
+    .orderBy(dsql`random()`)
     .limit(batch);
   if (rows.length === 0) return 0;
 
-  let done = 0;
+  const pairs: { id: string; ref: string }[] = [];
+  const unsure: typeof rows = [];
+  const tokens = { calls: 0, in: 0 };
+  for (const r of rows) {
+    const ref = await decideArea(areas, { kind: r.kind, text: `${r.title}\n${r.snippet ?? ""}` }, undefined, tokens);
+    if (ref) pairs.push({ id: r.id, ref });
+    else unsure.push(r);
+  }
+  const fast = pairs.length;
+  // One ledger row per sweep, not per item — rows re-asked while qwen is held
+  // off would otherwise flood it.
+  if (tokens.calls) {
+    void recordUsage("ollama", DECIDE_MODEL, { source: "job", ...DECIDE_TRACK, label: `area classify ×${tokens.calls}` }, tokens.in, 0);
+  }
+
   // Small sub-batches keep each prompt focused and each call fast.
   const CHUNK = 12;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const chunk = rows.slice(i, i + CHUNK);
+  for (let i = 0; llm && i < unsure.length; i += CHUNK) {
+    const chunk = unsure.slice(i, i + CHUNK);
     const items = chunk.map((r, j) => ({
       n: j + 1,
       kind: r.kind,
@@ -135,17 +195,16 @@ export async function classifyAreas(
       log(`area classify chunk failed: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
-    // One statement per chunk instead of one UPDATE round-trip per row.
-    const pairs = chunk.map((r, j) => ({
-      id: r.id,
-      ref: refForName(areas, map[String(j + 1)] ?? "none"),
-    }));
+    chunk.forEach((r, j) => pairs.push({ id: r.id, ref: refForName(areas, map[String(j + 1)] ?? "none") }));
+  }
+
+  if (pairs.length > 0) {
+    // One statement instead of one UPDATE round-trip per row.
     await db.execute(dsql`
       update search_index si set area_ref = v.ref
         from jsonb_to_recordset(${JSON.stringify(pairs)}::jsonb) as v(id uuid, ref text)
        where si.id = v.id`);
-    done += pairs.length;
+    log(`classified ${pairs.length} item(s) into area drawers (${fast} by the decision model)`);
   }
-  if (done > 0) log(`classified ${done} item(s) into area drawers`);
-  return done;
+  return pairs.length;
 }

@@ -24,6 +24,11 @@ x-app: &app
     OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     AIOS_DEFAULT_BRAIN: ${AIOS_DEFAULT_BRAIN:-}
     AIOS_DEFAULT_MODEL: ${AIOS_DEFAULT_MODEL:-}
+    # Nightly pg_dump backups (worker) — on a volume, not the container's
+    # throwaway home. Bind a host folder here instead for offsite sync.
+    AIOS_BACKUP_DIR: /backups
+  volumes:
+    - app_backups:/backups
   extra_hosts:
     # Lets the container reach host Ollama on Linux/Colima (Docker Desktop /
     # OrbStack provide host.docker.internal automatically; this is harmless there).
@@ -86,3 +91,4 @@ services:
 
 volumes:
   app_pgdata:
+  app_backups:

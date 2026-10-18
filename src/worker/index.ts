@@ -598,12 +598,13 @@ async function main() {
 
   // Nightly database backup (03:30) + catch-up at boot when the newest dump
   // is older than a day (covers a Mac that was asleep at 03:30).
+  // Through runJob, so a failing backup raises the job alert like any job.
   new Cron("30 3 * * *", { protect: true }, async () => {
-    await runBackup(log);
+    await runJob("backup", () => runBackup(log));
   });
   if (!(await hasFreshBackup())) {
     log("no fresh backup found — running one now");
-    runBackup(log).catch(() => {});
+    void runJob("backup", () => runBackup(log));
   }
 
   // Embedding sweep: local nomic-embed-text via Ollama, rows with NULL

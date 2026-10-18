@@ -15,14 +15,16 @@ function backupDir(): string {
   return process.env.AIOS_BACKUP_DIR?.trim() || join(homedir(), "Backups", "aios");
 }
 const KEEP = 14;
+// A ~40 MB dump from the cloud DB took 33 s one night and 116 s the next; the
+// old 2-minute cap killed it at random.
+const DUMP_TIMEOUT_MS = 10 * 60_000;
 
 const url =
   process.env.DATABASE_URL ?? "postgres://aios:aios@localhost:5544/aios";
 
-/** Nightly pg_dump → gzip with simple retention. Never throws. */
-export async function runBackup(
-  log: (msg: string) => void,
-): Promise<boolean> {
+/** Nightly pg_dump → gzip with simple retention. Throws on failure, so the
+ *  worker's runJob raises the job alert (notification + self-clearing card). */
+export async function runBackup(log: (msg: string) => void): Promise<void> {
   const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
   const name = `aios-${stamp}.sql.gz`;
   const tmp = join(tmpdir(), name);
@@ -30,7 +32,17 @@ export async function runBackup(
     // Dump to a local temp first, then move the finished file into place — so a
     // partial write never appears as a "complete" dump in a cloud-synced
     // folder (and we don't stream gzip straight into a FUSE mount).
-    await execAsync(`pg_dump "${url}" | gzip > "${tmp}"`, { timeout: 120_000 });
+    // pipefail: without it a missing or failing pg_dump still exits 0 (gzip's
+    // status) and leaves a 20-byte "dump". The URL goes in through the env, so
+    // a failure's "Command failed: …" text (the job alert body) has no password.
+    await execAsync(`set -o pipefail; pg_dump "$AIOS_DUMP_URL" | gzip > "${tmp}"`, {
+      timeout: DUMP_TIMEOUT_MS,
+      shell: "/bin/bash",
+      env: { ...process.env, AIOS_DUMP_URL: url },
+    }).catch((e: { killed?: boolean }) => {
+      if (e.killed) throw new Error(`pg_dump timed out after ${DUMP_TIMEOUT_MS / 60_000} min`);
+      throw e;
+    });
     const { size } = await stat(tmp);
     if (size < 1024) throw new Error(`dump suspiciously small (${size} bytes)`);
 
@@ -50,22 +62,10 @@ export async function runBackup(
       await unlink(join(dir, old));
       log(`backup pruned: ${old}`);
     }
-    return true;
   } catch (e) {
     await unlink(tmp).catch(() => {}); // don't leave a partial temp behind
     log(`BACKUP FAILED: ${e}`);
-    try {
-      const { notify } = await import("@/core/notify");
-      await notify({
-        title: "Database backup failed",
-        body: String(e).slice(0, 300),
-        level: "warn",
-        source: "backup",
-      });
-    } catch {
-      // notification failure must not mask the backup failure
-    }
-    return false;
+    throw e;
   }
 }
 

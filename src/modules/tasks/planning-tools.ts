@@ -88,7 +88,7 @@ export const planningTools: AiToolDef[] = [
   {
     name: "cycles.create",
     description:
-      "Create a cycle (sprint) with a start and end date, for one project (or cross-project when no project applies). Cycles start on a Sunday (the work week is Sun–Thu): a one-week cycle runs Sunday → Saturday.",
+      "Create a cycle (sprint) with a start and end date, for one project (or cross-project when no project applies). Cycles are whole calendar weeks: each starts on a Sunday and a one-week cycle spans Sunday → Saturday (work days Sun–Thu, weekend Fri–Sat).",
     input: z.object({
       name: z.string().min(1),
       startsAt: z.string().describe("Start date, ISO 8601 — a Sunday"),

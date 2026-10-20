@@ -96,8 +96,13 @@ function valueText(field: string | null, v: string | null): string {
   if (!v) return "";
   if (field === "status" && v in STATUS_META) return STATUS_META[v as TaskStatus].label;
   if (field === "priority" && v in PRIORITY_META) return PRIORITY_META[v as TaskPriority].label;
-  if ((field === "dueAt" || field === "startAt") && !Number.isNaN(Date.parse(v)))
-    return new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  if ((field === "dueAt" || field === "startAt") && !Number.isNaN(Date.parse(v))) {
+    const d = new Date(v);
+    const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    // Older rows hold a bare day ("2026-10-11"); a full instant shows its time unless it's midnight.
+    const timed = v.length > 10 && (d.getHours() || d.getMinutes());
+    return timed ? `${date}, ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}` : date;
+  }
   return v.length > 60 ? `${v.slice(0, 57)}…` : v;
 }
 

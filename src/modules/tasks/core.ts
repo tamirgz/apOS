@@ -201,7 +201,8 @@ export async function syncFeatureStatus(db: Db, featureRef: string | null | unde
 
 // ── activity ───────────────────────────────────────────────────────────────
 
-const day = (d: Date | null | undefined) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+/** The full instant, so a same-day time change shows in the history. */
+const instant = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
 
 async function displayValue(db: Db, field: string, v: unknown): Promise<string | null> {
   if (v === null || v === undefined || v === "") return null;
@@ -210,7 +211,7 @@ async function displayValue(db: Db, field: string, v: unknown): Promise<string |
       return STATUS_META[v as TaskStatus]?.label ?? String(v);
     case "dueAt":
     case "startAt":
-      return day(v as Date);
+      return instant(v as Date);
     case "labels":
       return (v as string[]).length ? (v as string[]).join(", ") : null;
     case "acceptance":
@@ -260,7 +261,8 @@ const TRACKED: (keyof WorkItemPatch)[] = [
 ];
 
 function same(a: unknown, b: unknown): boolean {
-  if (a instanceof Date || b instanceof Date) return day(a as Date) === day(b as Date);
+  // By instant, not by day: moving a start from 06:00 to 10:00 is a change.
+  if (a instanceof Date || b instanceof Date) return (a ? +new Date(a as Date) : null) === (b ? +new Date(b as Date) : null);
   if (Array.isArray(a) || Array.isArray(b)) return JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
   return (a ?? null) === (b ?? null);
 }

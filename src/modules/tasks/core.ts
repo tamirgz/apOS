@@ -260,7 +260,8 @@ const TRACKED: (keyof WorkItemPatch)[] = [
 ];
 
 function same(a: unknown, b: unknown): boolean {
-  if (a instanceof Date || b instanceof Date) return day(a as Date) === day(b as Date);
+  // By instant, not by day: moving a start from 06:00 to 10:00 is a change.
+  if (a instanceof Date || b instanceof Date) return (a ? +new Date(a as Date) : null) === (b ? +new Date(b as Date) : null);
   if (Array.isArray(a) || Array.isArray(b)) return JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
   return (a ?? null) === (b ?? null);
 }

@@ -24,6 +24,8 @@ import {
 } from "./core";
 import { ACCEPTED_EXTENSIONS, addAttachment, attachmentMeta, decodeBase64, readLocalFile, typeOf } from "./attachments";
 import { cycleStatus } from "./cycles";
+import { milestoneResolver, orderMilestones } from "./milestone-scope";
+import { loadMilestoneBundle } from "./milestones";
 import { delegateWorkItem } from "./delegate";
 import { parseIdentifier } from "./keys";
 import {
@@ -180,6 +182,32 @@ const conflictResult = (ctx: AiToolContext, current: Task & { identifier: string
 });
 
 const isoOrNull = (s: string | undefined) => (s === undefined ? undefined : s ? new Date(s) : null);
+
+/**
+ * The milestones an item counts toward: named on its own, through its module,
+ * or through a nested milestone. Resolved with just this item — membership
+ * doesn't depend on the others — and whatever its state (the resolver leaves
+ * cancelled items out of progress, not out of membership).
+ */
+async function milestonesOf(ctx: AiToolContext, item: Task) {
+  const bundle = await loadMilestoneBundle(ctx.db);
+  if (!bundle.milestones.length) return [];
+  const resolve = milestoneResolver(bundle, [{ ...item, status: "todo" as const }]);
+  const capName = new Map(bundle.capabilities.map((c) => [c.id, c.name]));
+  const hits = orderMilestones(bundle.milestones).flatMap((m) => {
+    const hit = resolve(m.id).items[0];
+    if (!hit) return [];
+    const rows = bundle.content.filter((r) => r.milestoneId === m.id && !r.exclude);
+    const via = rows.some((r) => r.kind === "item" && r.targetId === item.id)
+      ? "item"
+      : rows.some((r) => r.kind === "module" && item.featureRef === `features:${r.targetId}`)
+        ? "module"
+        : "nested milestone";
+    const capability = hit.capabilityId ? (capName.get(hit.capabilityId) ?? null) : null;
+    return [{ id: m.id, name: m.name, status: m.status, capability, via }];
+  });
+  return registerRefs(ctx, "milestone", "ms", hits);
+}
 
 export const taskTools: AiToolDef[] = [
   {
@@ -342,19 +370,28 @@ export const taskTools: AiToolDef[] = [
   {
     name: "tasks.get",
     description:
-      "Full detail of one work item: notes, sub-items, parent, relations (the full current set — blocks / blocked_by / relates / duplicates / duplicated_by, each with the other item's status), attachments (on the item and on each comment), and its recent history/comments (last 20).",
+      "Full detail of one work item: notes, module, cycle, the milestones it counts toward (with capability, and whether it's in by itself, through its module or through a nested milestone), sub-items, parent, relations (the full current set — blocks / blocked_by / relates / duplicates / duplicated_by, each with the other item's status), attachments (on the item and on each comment), and its recent history/comments (last 20).",
     input: z.object({ ref: z.string().describe("Ref from tasks.list ('t3') or identifier ('ETHOS-12')") }),
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
       if ("error" in t) return t;
       const d = await getWorkItem(ctx.db, t.id);
       if (!d) return { error: "work item not found" };
+      const fid = d.item.featureRef?.startsWith("features:") ? d.item.featureRef.slice(9) : null;
+      const [[feature], [cycle], inMilestones] = await Promise.all([
+        fid ? ctx.db.select({ name: features.name }).from(features).where(eq(features.id, fid)) : [],
+        d.item.cycleId ? ctx.db.select({ name: cycles.name }).from(cycles).where(eq(cycles.id, d.item.cycleId)) : [],
+        milestonesOf(ctx, d.item),
+      ]);
       const [item] = registerRefs(ctx, "task", "t", [summary(d.item)]);
       const brief = (a: (typeof d.attachments)[number]) => ({ id: a.id, name: a.name, version: a.version, kind: a.kind, sizeBytes: a.sizeBytes, sha256: a.sha256 });
       const byComment = Map.groupBy(d.attachments.filter((a) => a.commentId), (a) => a.commentId!);
       return {
         ...item,
         notes: d.item.notes,
+        module: feature?.name ?? null,
+        cycle: cycle?.name ?? null,
+        milestones: inMilestones,
         parent: d.parent ? { identifier: d.parent.identifier, title: d.parent.title } : null,
         subItems: registerRefs(ctx, "task", "t", d.children.map(summary)),
         // Current state, read from the relations table — not from `activity`,

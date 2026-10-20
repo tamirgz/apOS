@@ -79,7 +79,10 @@ for (const t of tools) {
         t.risk === "approval"
           ? `${t.description} (Needs the user's approval: the call is queued in apOS and returns {pending_approval: id}; it runs only once they approve.)`
           : t.description,
-      inputSchema: (t.input as ZodObject).shape,
+      // Strict: an argument the tool doesn't know (e.g. `description` for
+      // `notes`) is an error naming it — never silently dropped while the
+      // call reports success.
+      inputSchema: (t.input as ZodObject).strict(),
       annotations: { destructiveHint: t.risk === "approval", readOnlyHint: /\.(list|get|attachments)$/.test(t.name) },
     },
     async (args: unknown) => {

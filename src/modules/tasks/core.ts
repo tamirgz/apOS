@@ -201,7 +201,8 @@ export async function syncFeatureStatus(db: Db, featureRef: string | null | unde
 
 // ── activity ───────────────────────────────────────────────────────────────
 
-const day = (d: Date | null | undefined) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+/** The full instant, so a same-day time change shows in the history. */
+const instant = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
 
 async function displayValue(db: Db, field: string, v: unknown): Promise<string | null> {
   if (v === null || v === undefined || v === "") return null;
@@ -210,7 +211,7 @@ async function displayValue(db: Db, field: string, v: unknown): Promise<string |
       return STATUS_META[v as TaskStatus]?.label ?? String(v);
     case "dueAt":
     case "startAt":
-      return day(v as Date);
+      return instant(v as Date);
     case "labels":
       return (v as string[]).length ? (v as string[]).join(", ") : null;
     case "acceptance":

@@ -1,10 +1,12 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   index,
   integer,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { bytea } from "@/core/db/bytea";
@@ -221,3 +223,54 @@ export const projectFiles = pgTable(
 );
 
 export type ProjectFile = typeof projectFiles.$inferSelect;
+
+/**
+ * Project docs — named, versioned documents that belong to a project and to
+ * nothing else: an agent's resume notes, standing decisions, open questions.
+ * Deliberately NOT work items: no status, owner, cycle, module or milestone, so
+ * they never show up in item lists, WIP, cycle or milestone figures. The body
+ * is stored exactly as written. Every write appends a `project_doc_versions`
+ * row, so nothing is lost; a delete is soft (`deletedAt`) and in history too.
+ */
+export const projectDocs = pgTable(
+  "project_docs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    /** Slug, unique within the project ("lead-resume"). */
+    key: text("key").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    /** 1 on create, +1 on every write (and on a delete). */
+    version: integer("version").notNull().default(1),
+    updatedBy: text("updated_by").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("project_docs_key").on(t.projectId, t.key)],
+);
+
+export type ProjectDoc = typeof projectDocs.$inferSelect;
+
+export const DOC_CHANGES = ["write", "delete"] as const;
+
+/** Every version of every doc, the current one included. */
+export const projectDocVersions = pgTable(
+  "project_doc_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    docId: uuid("doc_id").notNull(),
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    change: text("change", { enum: DOC_CHANGES }).notNull().default("write"),
+    /** The write named the version it replaced (expectedVersion) — an unguarded one didn't. */
+    guarded: boolean("guarded").notNull(),
+    updatedBy: text("updated_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("project_doc_versions_version").on(t.docId, t.version)],
+);
+
+export type ProjectDocVersion = typeof projectDocVersions.$inferSelect;

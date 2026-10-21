@@ -212,9 +212,11 @@ const DIFF_MAX_LINES = 4000;
  * context (3 lines around each change); "@@" marks a skipped stretch.
  */
 export function lineDiff(a: string, b: string): string {
-  const x = a.split("\n");
-  const y = b.split("\n");
   if (a === b) return "";
+  // A newline both versions end with isn't a line of its own.
+  const both = a.endsWith("\n") && b.endsWith("\n");
+  const x = (both ? a.slice(0, -1) : a).split("\n");
+  const y = (both ? b.slice(0, -1) : b).split("\n");
   type Op = [" " | "-" | "+", string];
   let ops: Op[];
   if (x.length > DIFF_MAX_LINES || y.length > DIFF_MAX_LINES) {

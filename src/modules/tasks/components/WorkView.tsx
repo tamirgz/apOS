@@ -10,6 +10,7 @@ import {
   ChartGantt,
   Columns3,
   Download,
+  FileText,
   Flag,
   Gauge,
   Kanban,
@@ -49,7 +50,7 @@ const DAY = 86_400_000;
 
 // ── URL state ──────────────────────────────────────────────────────────────
 
-type Tab = "items" | "cycles" | "modules" | "milestones" | "timeline" | "mywork" | "overview";
+type Tab = "items" | "cycles" | "modules" | "milestones" | "timeline" | "mywork" | "overview" | "docs";
 type Layout = "board" | "list" | "calendar";
 const LAYOUTS: Layout[] = ["board", "list", "calendar"];
 
@@ -58,7 +59,7 @@ const LAYOUTS: Layout[] = ["board", "list", "calendar"];
  * cycle page is linkable. A project page opens on its Overview (the cockpit);
  * the all-work page opens on Work items. My work (every project) is all-work only.
  */
-function useWorkUrl(hasOverview: boolean, hasMyWork: boolean) {
+function useWorkUrl(hasOverview: boolean, hasMyWork: boolean, hasDocs = false) {
   const sp = useSearchParams();
   const raw = sp.get("tab");
   const tabs: Tab[] = [
@@ -69,6 +70,7 @@ function useWorkUrl(hasOverview: boolean, hasMyWork: boolean) {
     "timeline",
     ...(hasMyWork ? (["mywork"] as Tab[]) : []),
     ...(hasOverview ? (["overview"] as Tab[]) : []),
+    ...(hasDocs ? (["docs"] as Tab[]) : []),
   ];
   const fallback: Tab = hasOverview ? "overview" : "items";
   const tab: Tab = raw && (tabs as string[]).includes(raw) ? (raw as Tab) : fallback;
@@ -164,11 +166,14 @@ export function WorkView({
   data,
   projectId,
   overview,
+  docs,
   head,
 }: {
   data: WorkData;
   projectId?: string;
   overview?: ReactNode;
+  /** A project's Docs tab (durable state that isn't work) and how many it holds. */
+  docs?: { count: number; node: ReactNode };
   head?: WorkHead;
 }) {
   const router = useRouter();
@@ -183,7 +188,7 @@ export function WorkView({
   }
   const now = useNow();
   const [, startMove] = useTransition();
-  const { tab, moduleId, cycleId, milestoneId, go } = useWorkUrl(!!overview, !projectId);
+  const { tab, moduleId, cycleId, milestoneId, go } = useWorkUrl(!!overview, !projectId, !!docs);
 
   const prefKey = projectId ? "work.layout.project" : "work.layout.all";
   const [layout, setLayout] = useState<Layout>("board");
@@ -324,6 +329,7 @@ export function WorkView({
       count: data.milestones.milestones.filter((m) => m.status === "planned" || m.status === "active").length,
       active: tab === "milestones",
     },
+    ...(docs ? [{ id: "docs" as Tab, label: "Docs", icon: FileText, count: docs.count, active: tab === "docs" }] : []),
   ];
 
   // The all-work page's own header; a project page passes its own.
@@ -427,6 +433,7 @@ export function WorkView({
       </nav>
 
       {tab === "overview" && overview}
+      {tab === "docs" && docs?.node}
 
       {tab === "modules" && !openModule && (
         <ModulesView features={data.features} items={items} projects={data.projects} projectId={projectId} onOpen={(id) => go({ module: id })} />

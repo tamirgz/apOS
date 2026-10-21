@@ -23,12 +23,14 @@ import { ProjectAttention } from "../components/ProjectAttention";
 import { DeleteProjectButton } from "../components/DeleteProjectButton";
 import { ProjectNotes } from "../components/ProjectNotes";
 import { ProjectFiles } from "../components/ProjectFiles";
+import { ProjectDocs } from "../components/ProjectDocs";
 import { StatusCycleButton } from "../components/StatusCycleButton";
 import { ProjectTitle } from "../components/ProjectTitle";
 import { WorkView } from "../../tasks/components/WorkView";
 import { MilestoneStrip } from "../../tasks/components/MilestonesView";
 import { loadWorkData } from "../../tasks/queries";
 import { listProjectFiles } from "../files-actions";
+import { listProjectDocs } from "../docs-actions";
 
 // shared: core/ui/time.ts lastActiveLabel
 
@@ -57,12 +59,13 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
 
   const { listNotesForProject } = await import("@/modules/notes/actions");
   const { listAttentionForProject } = await import("@/modules/today/queries");
-  const [work, projectNotes, attention, projectFiles, categories] = await Promise.all([
+  const [work, projectNotes, attention, projectFiles, categories, docs] = await Promise.all([
     loadWorkData(id),
     listNotesForProject(id).catch(() => []),
     listAttentionForProject(id).catch(() => []),
     listProjectFiles(id),
     listProjectCategories(),
+    listProjectDocs(id),
   ]);
   const done = work.items.filter((t) => t.status === "done" || t.status === "cancelled").length;
   const openAttention = attention.filter((a) => a.status === "open");
@@ -76,6 +79,7 @@ export async function ProjectDetailPage({ params }: ModuleRouteProps) {
       <WorkView
         data={work}
         projectId={project.id}
+        docs={{ count: docs.length, node: <ProjectDocs projectId={project.id} docs={docs} /> }}
         head={{
           crumb: (
             <>

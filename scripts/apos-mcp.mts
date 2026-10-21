@@ -29,9 +29,9 @@ const { db, sql } = await import("@/core/db/client");
 type AiToolContext = import("@/core/modules/types.server").AiToolContext;
 type ZodObject = import("zod").ZodObject<import("zod").ZodRawShape>;
 
-/** The work-tracker surface: everything under tasks./cycles./modules./milestones./attachments., plus project basics. */
+/** The work-tracker surface: everything under tasks./cycles./modules./milestones./attachments./docs., plus project basics. */
 const EXPOSED = (name: string) =>
-  /^(tasks|cycles|modules|milestones|attachments)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
+  /^(tasks|cycles|modules|milestones|attachments|docs)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
 
 const prefix = process.env.APOS_ACTOR?.trim() || "";
 const sessionId = randomUUID();
@@ -65,6 +65,7 @@ const server = new McpServer(
       "apOS work tracker. Work items have identifiers like ETHOS-12 (project key + number); list tools also return short refs (t3, c1, m2, ms1) valid for this session. " +
       "States: backlog → todo → doing → review → done (or cancelled). Modules are a project's features (start → target, status planned/active/paused/shipped/cancelled); cycles are time-boxed sprints of whole calendar weeks: each starts on a Sunday, and a one-week cycle spans Sunday → Saturday. The user's work days are Sunday–Thursday; Friday and Saturday are the weekend. " +
       "Milestones are a project's named product stages (e.g. Visibility → MVP), each built from capabilities and delivery content: whole modules, single items from partly-in-scope modules, other milestones and any other apOS entity; their progress, forecast and readiness are computed from that content. " +
+      "Docs are a project's named, versioned documents for durable state that is not work (resume notes, standing decisions, open questions): read with docs.get, write with docs.put passing expectedVersion so a concurrent writer is never overwritten unseen; every version is kept. " +
       "Name projects by NAME or key, never by id. When you commit code for an item, put its identifier in the commit message — apOS links the commit to it.",
   },
 );
@@ -83,7 +84,7 @@ for (const t of tools) {
       // `notes`) is an error naming it — never silently dropped while the
       // call reports success.
       inputSchema: (t.input as ZodObject).strict(),
-      annotations: { destructiveHint: t.risk === "approval", readOnlyHint: /\.(list|get|attachments)$/.test(t.name) },
+      annotations: { destructiveHint: t.risk === "approval", readOnlyHint: /\.(list|get|attachments|history|diff)$/.test(t.name) },
     },
     async (args: unknown) => {
       try {

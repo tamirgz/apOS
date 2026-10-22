@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, sql } from "drizzle-orm";
 import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
 import { isUuid, registerRefs, resolveRef } from "@/core/ai/refs";
 import { resolveProjectByName } from "@/modules/projects/subject";
@@ -299,6 +299,11 @@ export const taskTools: AiToolDef[] = [
       label: z.string().optional(),
       module: z.string().optional().describe("Only items in this module (NAME or 'm2'); 'none' = items in no module"),
       cycle: z.string().optional().describe("Only items in this cycle (NAME, 'c1' or 'current'); 'none' = unplanned"),
+      completedSince: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional()
+        .describe("Only items completed on or after this date (YYYY-MM-DD), newest first — e.g. what got done this week. Combine with status 'done' or 'all'."),
       limit: z.number().int().min(1).max(100).default(50),
       relations: z
         .boolean()
@@ -339,12 +344,13 @@ export const taskTools: AiToolDef[] = [
         input.label ? sql`${input.label.toLowerCase()} = any(${tasks.labels})` : undefined,
         moduleFilter,
         cycleFilter,
+        input.completedSince ? gte(tasks.completedAt, new Date(input.completedSince)) : undefined,
       ].filter((f) => f !== undefined);
       const rows = await ctx.db
         .select()
         .from(tasks)
         .where(filters.length ? and(...filters) : undefined)
-        .orderBy(priorityRank, asc(tasks.sortOrder))
+        .orderBy(...(input.completedSince ? [desc(tasks.completedAt)] : [priorityRank, asc(tasks.sortOrder)]))
         .limit(input.limit);
       const items = await withIdentifiers(ctx.db, rows);
       const [featureNames, cycleNames] = await Promise.all([

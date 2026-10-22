@@ -78,6 +78,10 @@ export async function* runOpenAICompatible(
   let totalToolCalls = 0;
   let nudged = false;
   const TOOL_CALL_CAP = 10;
+  // The run's required write (opts.finishTool) survives the forced answer
+  // until it has succeeded once.
+  let finished = false;
+  const finishTool = tools.find((t) => t.function.name === toWireName(opts.finishTool ?? ""));
 
   // True when every turn ended in tool calls — i.e. the loop stopped because
   // the budget ran out, not because the model finished its answer.
@@ -85,11 +89,13 @@ export async function* runOpenAICompatible(
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       const forceAnswer = totalToolCalls >= TOOL_CALL_CAP;
+      const finishOnly = forceAnswer && finishTool && !finished ? [finishTool] : undefined;
       if (forceAnswer && !nudged) {
         messages.push({
           role: "system",
-          content:
-            "You have gathered enough information. Do NOT call any more tools — write your final answer now using the results already returned.",
+          content: finishOnly
+            ? `You have gathered enough information. Do NOT gather more — call ${finishTool!.function.name} now with your result, using what the tools already returned, then write your final answer.`
+            : "You have gathered enough information. Do NOT call any more tools — write your final answer now using the results already returned.",
         });
         nudged = true;
       }
@@ -114,7 +120,7 @@ export async function* runOpenAICompatible(
         {
           model: opts.model,
           messages,
-          tools: !forceAnswer && tools.length ? tools : undefined,
+          tools: finishOnly ?? (!forceAnswer && tools.length ? tools : undefined),
           stream: true,
           stream_options: { include_usage: true },
           ...extraBody,
@@ -240,6 +246,7 @@ export async function* runOpenAICompatible(
             yield { type: "tool_call", name, input };
             result = await invokeTool(def, input, opts.toolCtx);
             if (!repeatable) toolMemo.set(sig, result);
+            if (name === opts.finishTool && !(result as { error?: unknown } | null)?.error) finished = true;
           } catch (e) {
             result = { error: String(e) };
           }

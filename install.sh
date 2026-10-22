@@ -250,6 +250,15 @@ for m in $MODELS; do
     ok "model $m present"
   else say "pulling $m …"; run ollama pull "$m"; fi
 done
+# The Weekly reviewer's long synthesis needs more than Ollama's 8K default
+# context: same weights, a 32K window (no download).
+case " $MODELS " in *" qwen3-coder:30b "*)
+  if ! printf '%s\n' "$have_models" | grep -qxF "qwen3-coder:30b-32k"; then
+    say "creating qwen3-coder:30b-32k …"
+    printf 'FROM qwen3-coder:30b\nPARAMETER num_ctx 32768\n' > "${TMPDIR:-/tmp}/apos-32k.Modelfile"
+    run ollama create qwen3-coder:30b-32k -f "${TMPDIR:-/tmp}/apos-32k.Modelfile"
+  fi ;;
+esac
 
 # ── bring it up ──────────────────────────────────────────────────────────────
 if [ "$MODE" = container ]; then

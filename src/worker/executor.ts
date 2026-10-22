@@ -20,6 +20,15 @@ import { withRunSlot } from "./run-queue";
 import { waitForLocalIdle, freeIdleLocalResidents } from "@/core/ai/local-queue";
 
 const RUN_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** "Today is Thursday 2026-10-22 (local); this week began Sunday 2026-10-18 …" — the user's Sun–Thu week. */
+export function weekLine(now: Date): string {
+  const ymd = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const sunday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+  const day = now.toLocaleDateString("en-US", { weekday: "long" });
+  return `Today is ${day} ${ymd(now)} (local); this week began Sunday ${ymd(sunday)} — work days are Sunday–Thursday.`;
+}
 const HEARTBEAT_MS = 15 * 1000;
 
 function ledgerFor(agentId: string, runId: string) {
@@ -331,6 +340,9 @@ async function runClaimed(
       "Idempotency: use ledger.has to check items before acting and ledger.mark after processing. Never redo work a previous run already did.",
       "Write discipline: only call a mutating tool (create, update, delete, send, notify) when your task explicitly calls for that change. When reading or gathering context, use read-only tools — never create, modify, or send anything as an incidental side effect.",
       `Current date-time: ${new Date().toISOString()}`,
+      // Spelled out: a local model left to work out the weekday or the week's
+      // start from an ISO stamp gets it wrong ("this week's Sunday" = a Tuesday).
+      weekLine(new Date()),
       "",
       await renderMemoryContext(),
       recalled,
@@ -388,6 +400,7 @@ async function runClaimed(
           // default. Lets a many-item agent finish the list instead of
           // truncating at the default cap.
           maxTurns: agent.turnBudget ?? undefined,
+          finishTool: agent.successTool ?? undefined,
           signal: controller.signal,
           // Queue visibility: fold this run's model calls into the agent_run row.
           track: {

@@ -12,6 +12,26 @@ import { acquireLocalSlot } from "./local-queue";
 import { findRepetitionLoop } from "./repetition";
 import { invokeTool } from "./invoke-tool";
 
+/** A lost connection (server went away), as opposed to an error the server returned. */
+export function isDroppedConnection(e: unknown): boolean {
+  if (e instanceof OpenAI.APIConnectionError && !(e instanceof OpenAI.APIConnectionTimeoutError)) return true;
+  const text = [e, (e as { cause?: unknown })?.cause].map((x) => String(x ?? "")).join(" ");
+  return /\bterminated\b|ECONNRESET|ECONNREFUSED|EPIPE|fetch failed|other side closed|socket hang up|premature close/i.test(text);
+}
+
+/** Wait (up to 2 min) until the server answers again — a restart takes seconds to tens of seconds. */
+async function waitForServer(openai: OpenAI, signal: AbortSignal | undefined) {
+  const until = Date.now() + 120_000;
+  while (Date.now() < until && !signal?.aborted) {
+    try {
+      await openai.models.list({ signal: AbortSignal.timeout(4000) });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
 export async function* runOpenAICompatible(
   baseURL: string,
   apiKey: string,
@@ -83,6 +103,7 @@ export async function* runOpenAICompatible(
         { id: string; name: string; args: string }
       >();
 
+      for (let retried = false; ; retried = true) {
       // Hold a local-inference slot around JUST this generation call — released
       // in the finally before tool execution, so a tool's own local call
       // (attention.raise → embedText) can acquire the slot instead of
@@ -148,8 +169,22 @@ export async function* runOpenAICompatible(
         // The SDK ends the stream quietly when the signal aborts (e.g. the
         // caller's run timeout): that is a cut-off answer, not a finished one.
         if (opts.signal?.aborted) throw new Error("the run was stopped (timeout or cancel) before the model finished");
+        break;
+      } catch (e) {
+        // The connection to the model server dropped mid-call (Ollama.app
+        // restarting for an update, a crash). Only this generation call is
+        // lost — the tools before it already ran — so wait for the server and
+        // redo just this call, once. Anything else fails the run as before.
+        if (retried || opts.signal?.aborted || !isDroppedConnection(e)) throw e;
+        console.error(`[ai] ${opts.model}: connection dropped (${String(e).slice(0, 80)}) — retrying the call once`);
+        turnText = "";
+        loopCheckedAt = 0;
+        turnReasoning = "";
+        toolCallAcc.clear();
       } finally {
         releaseSlot?.();
+      }
+      await waitForServer(openai, opts.signal);
       }
 
       if (turnText) finalText = turnText;

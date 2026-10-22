@@ -25,6 +25,10 @@ export interface AIRunOptions {
   toolCtx: AiToolContext;
   model: string;
   maxTurns?: number;
+  // The tool the run exists to call (an agent's successTool). When the
+  // runaway-loop guard forces a final answer, this one tool stays available
+  // until it succeeds — so gathering can't crowd out the write.
+  finishTool?: string;
   signal?: AbortSignal;
   // Reasoning hint for local reasoning-capable models (MLX/LM Studio). Omitted →
   // the provider decides (MLX: light reasoning for agentic/tool runs so the model

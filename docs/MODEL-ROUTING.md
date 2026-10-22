@@ -47,7 +47,7 @@ the moment you have the RAM/GPU — switch any route back to Ollama/MLX/Claude i
 | Inbox handling verifier | hardcoded: `modules/inbox/verify.ts` | `qwen3:8b` |
 | Workbench judge (verifies delegated work) | `workbench.judge` | `qwen3-coder:30b` |
 | Workbench executors (opencode/pi routines) | `modules/workbench/engine.ts` | `qwen3-coder:30b` |
-| Periodic agents — today / projects / people templates | `manifest.server.ts` `defaultModel` | `qwen3-coder:30b` ×5, `gemma4:31b-it-qat` ×1 |
+| Periodic agents — today / projects / people templates | `manifest.server.ts` `defaultModel` | `qwen3-coder:30b` ×5, `qwen3-coder:30b-32k` ×1 (Weekly reviewer: a 32K window, created by install.sh) |
 
 The gates + hardcoded judges call Ollama **directly in code** (they bypass the `ai_routes` table), so they are NOT editable from Settings — pinned local-and-free by design because they fire constantly.
 

@@ -69,10 +69,14 @@ export const peopleServerManifest: ModuleServerManifest = {
       id: "weekly-reviewer",
       name: "Weekly reviewer",
       description:
-        "End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local synthesis model.",
+        "End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local model.",
       defaultPrompt: [
         "You are the user's chief-of-staff writing their weekly review. Synthesize — don't just list.",
-        "1. Gather: projects.list (health + progress), tasks.list (done vs open, overdue), people.list (who you met, who's gone quiet), attention.list (what's still open).",
+        "1. Gather — small and targeted; a local model loses the thread in big dumps. Never pass a limit above 30.",
+        "   - projects.list: each project's health, open/done/overdue counts and next action. Your main source.",
+        "   - tasks.list {status: 'done', completedSince: <this week's Sunday, YYYY-MM-DD>, limit: 30}: what actually got done this week, across projects.",
+        "   - For the one or two projects most at risk only: tasks.list {project, limit: 15} — what's slipping there.",
+        "   - people.list {limit: 10} (who you met, who's gone quiet) and attention.list {limit: 10} (what's still open).",
         "2. Write a tight review: (a) what actually moved, (b) what's slipping or blocked, (c) 2-3 concrete priorities for next week. A few short paragraphs, specific, no filler.",
         "3. Raise exactly ONE card with attention.raise: type 'review', title 'Weekly review — <this week's Sunday date>', the synthesis in the body, urgency 10, dedupeKey 'weekly:<YYYY-Wxx>'.",
       ].join("\n"),
@@ -84,9 +88,14 @@ export const peopleServerManifest: ModuleServerManifest = {
         "attention.raise",
       ],
       defaultSchedule: "0 16 * * 4", // Thursday 16:00 — end of the Sun–Thu work week
-      // The one heavier synthesis job — still FREE and local.
+      // The review card IS the deliverable: a run that never raised it failed.
+      defaultSuccessTool: "attention.raise",
+      // Free and local, on the fleet's model: the dense gemma4:31b took 1-2.5
+      // min a turn and ran past the executor's 10-min cap (AIOS-45). The 32K
+      // tag (install.sh creates it) because a week of projects + tasks + people
+      // overflows Ollama's 8K default, which silently drops the prompt's start.
       defaultProvider: "ollama",
-      defaultModel: "gemma4:31b-it-qat",
+      defaultModel: "qwen3-coder:30b-32k",
     },
   ],
 };

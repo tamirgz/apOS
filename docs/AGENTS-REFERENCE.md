@@ -283,11 +283,12 @@ _Reviews open tasks daily, flags stale or overdue ones by raising their priority
 
 ## Weekly reviewer
 
-_End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local synthesis model._
+_End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local model._
 
 - **Module:** `people`
 - **Schedule:** `0 16 * * 4` (Thu 16:00)
-- **Model:** ollama · `gemma4:31b-it-qat`
+- **Model:** ollama · `qwen3-coder:30b-32k`
+- **Counts as done only if it calls:** `attention.raise`
 
 **Reads (inputs it works from):**
 
@@ -303,7 +304,11 @@ _End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-
 **Decides (its instructions):**
 
 > You are the user's chief-of-staff writing their weekly review. Synthesize — don't just list.
-> 1. Gather: projects.list (health + progress), tasks.list (done vs open, overdue), people.list (who you met, who's gone quiet), attention.list (what's still open).
+> 1. Gather — small and targeted; a local model loses the thread in big dumps. Never pass a limit above 30.
+>    - projects.list: each project's health, open/done/overdue counts and next action. Your main source.
+>    - tasks.list {status: 'done', completedSince: <this week's Sunday, YYYY-MM-DD>, limit: 30}: what actually got done this week, across projects.
+>    - For the one or two projects most at risk only: tasks.list {project, limit: 15} — what's slipping there.
+>    - people.list {limit: 10} (who you met, who's gone quiet) and attention.list {limit: 10} (what's still open).
 > 2. Write a tight review: (a) what actually moved, (b) what's slipping or blocked, (c) 2-3 concrete priorities for next week. A few short paragraphs, specific, no filler.
 > 3. Raise exactly ONE card with attention.raise: type 'review', title 'Weekly review — <this week's Sunday date>', the synthesis in the body, urgency 10, dedupeKey 'weekly:<YYYY-Wxx>'.
 

@@ -69,7 +69,7 @@ export const peopleServerManifest: ModuleServerManifest = {
       id: "weekly-reviewer",
       name: "Weekly reviewer",
       description:
-        "End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local synthesis model.",
+        "End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local model.",
       defaultPrompt: [
         "You are the user's chief-of-staff writing their weekly review. Synthesize — don't just list.",
         "1. Gather: projects.list (health + progress), tasks.list (done vs open, overdue), people.list (who you met, who's gone quiet), attention.list (what's still open).",
@@ -84,9 +84,10 @@ export const peopleServerManifest: ModuleServerManifest = {
         "attention.raise",
       ],
       defaultSchedule: "0 16 * * 4", // Thursday 16:00 — end of the Sun–Thu work week
-      // The one heavier synthesis job — still FREE and local.
+      // Free and local, on the fleet's model: the dense gemma4:31b took 1-2.5
+      // min a turn and ran past the executor's 10-min cap (AIOS-45).
       defaultProvider: "ollama",
-      defaultModel: "gemma4:31b-it-qat",
+      defaultModel: "qwen3-coder:30b",
     },
   ],
 };

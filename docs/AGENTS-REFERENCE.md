@@ -283,11 +283,11 @@ _Reviews open tasks daily, flags stale or overdue ones by raising their priority
 
 ## Weekly reviewer
 
-_End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local synthesis model._
+_End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-3 priorities for next week — as one review card. Runs on a free local model._
 
 - **Module:** `people`
 - **Schedule:** `0 16 * * 4` (Thu 16:00)
-- **Model:** ollama · `gemma4:31b-it-qat`
+- **Model:** ollama · `qwen3-coder:30b`
 
 **Reads (inputs it works from):**
 

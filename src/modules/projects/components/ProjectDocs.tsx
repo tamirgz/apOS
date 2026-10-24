@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { FileClock, GitCompare, ScrollText, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Code, FileClock, GitCompare, ScrollText, ShieldCheck, ShieldAlert } from "lucide-react";
 import { cn } from "@/core/ui/cn";
+import { Markdown } from "@/core/ui/Markdown";
 import { timeAgo } from "@/core/ui/time";
 import { diffProjectDoc, projectDocHistory, readProjectDoc } from "../docs-actions";
 
@@ -24,7 +25,8 @@ const kb = (n: number) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
 /**
  * A project's docs — durable state agents keep through the docs.* tools
  * (resume notes, standing decisions). Read-only here: the list, one doc's body
- * exactly as stored, its version history, and a diff between any two versions.
+ * rendered as markdown (or exactly as stored, under Source), its version
+ * history, and a diff between any two versions.
  */
 export function ProjectDocs({ projectId, docs }: { projectId: string; docs: ProjectDocRow[] }) {
   const [key, setKey] = useState<string | null>(docs[0]?.key ?? null);
@@ -34,6 +36,8 @@ export function ProjectDocs({ projectId, docs }: { projectId: string; docs: Proj
   const [history, setHistory] = useState<History>([]);
   const [range, setRange] = useState<[number, number] | null>(null);
   const [diff, setDiff] = useState<string | null>(null);
+  // Rendered markdown by default; Source shows the body byte for byte.
+  const [source, setSource] = useState(false);
   const [pending, start] = useTransition();
 
   useEffect(() => {
@@ -134,9 +138,31 @@ export function ProjectDocs({ projectId, docs }: { projectId: string; docs: Proj
             </header>
 
             {pane === "read" && (
-              <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-ink/[0.03] p-4 font-mono text-[12.5px] leading-relaxed text-ink-dim">
-                {doc.body}
-              </pre>
+              <>
+                <div className="-mb-1 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setSource((s) => !s)}
+                    aria-pressed={source}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg px-2 py-0.5 text-[11px] transition",
+                      source ? "bg-plasma/15 text-ink" : "text-ink-faint hover:text-ink-dim",
+                    )}
+                    title={source ? "Show the rendered markdown" : "Show the stored text exactly as written"}
+                  >
+                    <Code className="size-3.5" /> Source
+                  </button>
+                </div>
+                {source ? (
+                  <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-ink/[0.03] p-4 font-mono text-[12.5px] leading-relaxed text-ink-dim">
+                    {doc.body}
+                  </pre>
+                ) : (
+                  <article className="max-h-[70vh] overflow-auto rounded-xl bg-ink/[0.03] px-5 py-4">
+                    <Markdown size="note">{doc.body}</Markdown>
+                  </article>
+                )}
+              </>
             )}
 
             {pane === "history" && (

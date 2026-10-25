@@ -6,6 +6,13 @@
 # leaves your machine), then migrates the DB and restarts the local worker +
 # web so the running app matches what you're pushing.
 #
+# A push that only deletes remote branches ships no code, so it skips all of
+# this: git passes each ref on stdin as "<local ref> <local sha> <remote ref>
+# <remote sha>", and a deletion's local sha is all zeros. Without this, a loop
+# of `git push --delete` restarted the services once per branch.
+#
 # Skip in a pinch with:  git push --no-verify
 #
+refs=$(cat)
+if [ -n "$refs" ] && [ -z "$(awk '$2 !~ /^0+$/' <<<"$refs")" ]; then exit 0; fi
 exec "$(git rev-parse --show-toplevel)/scripts/deploy-local.sh"

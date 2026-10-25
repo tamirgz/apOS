@@ -4,7 +4,9 @@
  *   - any mention            → a "commit" link on the item
  *   - "fixes / closes / resolves ETHOS-12" → the item is closed (done), as of
  *     the commit's date — so a merged PR whose title or body says it closes
- *     the item finishes it within one sweep
+ *     the item finishes it within one sweep. Only an item of a project that
+ *     owns the repo can be closed: another repo quoting "Closes ES-12" (an
+ *     example in apOS's own commits) links, never closes.
  *
  * Each sweep fetches the source first (refs only — the clone's checkout is
  * project_repos_sync's), so a merge is seen minutes after it lands, not after
@@ -107,11 +109,14 @@ export interface LinkResult {
   closed: number;
 }
 
-/** Apply one batch of commits. `allowClose` is false for the baseline scan. */
+/**
+ * Apply one batch of commits. `allowClose` is false for the baseline scan;
+ * `closeProjectRefs` are the projects whose items this repo may close.
+ */
 export async function applyCommits(
   db: Db,
   commits: Commit[],
-  opts: { repoUrl: string | null; allowClose: boolean },
+  opts: { repoUrl: string | null; allowClose: boolean; closeProjectRefs: string[] },
 ): Promise<LinkResult> {
   let linked = 0;
   let closed = 0;
@@ -130,7 +135,8 @@ export async function applyCommits(
       });
       if (!row) continue; // already linked — never re-close on a rescan
       linked++;
-      if (opts.allowClose && closes.includes(identifier) && !isClosed(item.status)) {
+      const own = !!item.projectRef && opts.closeProjectRefs.includes(item.projectRef);
+      if (opts.allowClose && own && closes.includes(identifier) && !isClosed(item.status)) {
         await updateWorkItem(db, item.id, { status: "done", completedAt: c.at }, "system:commit");
         await addComment(db, item.id, `Closed by commit ${short} (${c.author}): ${c.subject}`, "system:commit");
         closed++;
@@ -147,6 +153,7 @@ export async function linkCommits(db: Db): Promise<LinkResult & { repos: number 
     .from(projects)
     .where(isNotNull(projects.repoUrl));
   const total = { linked: 0, closed: 0, repos: 0 };
+  const repoKey = (url: string | null) => url?.trim().replace(/\.git$|\/+$/g, "") ?? "";
   for (const p of rows) {
     const dir = usableRepoPath(p.id, p.repoUrl);
     if (!dir) continue;
@@ -175,7 +182,8 @@ export async function linkCommits(db: Db): Promise<LinkResult & { repos: number 
         return gitLog(dir, ["-n", "50", head]);
       });
     }
-    const r = await applyCommits(db, commits, { repoUrl: p.repoUrl, allowClose });
+    const closeProjectRefs = rows.filter((o) => repoKey(o.repoUrl) === repoKey(p.repoUrl)).map((o) => `projects:${o.id}`);
+    const r = await applyCommits(db, commits, { repoUrl: p.repoUrl, allowClose, closeProjectRefs });
     total.linked += r.linked;
     total.closed += r.closed;
   }

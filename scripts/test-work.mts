@@ -141,7 +141,7 @@ try {
         { sha: sha2, author: "zz", subject: `fix: thing (fixes ${b.identifier})`, body: "", at: new Date("2026-10-20T14:51:00Z") },
         { sha: sha1, author: "zz", subject: `wip on ${b.identifier}`, body: "" },
       ],
-      { repoUrl: "https://github.com/zz/zz.git", allowClose: true },
+      { repoUrl: "https://github.com/zz/zz.git", allowClose: true, closeProjectRefs: [ref] },
     );
     assert.deepEqual(r, { linked: 2, closed: 1 });
     const d = await getWorkItem(db, b.id);
@@ -153,8 +153,20 @@ try {
     const again = await applyCommits(db, [{ sha: sha2, author: "zz", subject: `fixes ${b.identifier}`, body: "" }], {
       repoUrl: null,
       allowClose: true,
+      closeProjectRefs: [ref],
     });
     assert.deepEqual(again, { linked: 0, closed: 0 });
+  });
+
+  await check("commits: another project's repo links but never closes", async () => {
+    const e = await createWorkItem(db, { title: "ZZ e", projectRef: ref, status: "doing" }, "user");
+    const r = await applyCommits(db, [{ sha: "4".repeat(40), author: "zz", subject: `docs: e.g. "Closes ${e.identifier}"`, body: "" }], {
+      repoUrl: null,
+      allowClose: true,
+      closeProjectRefs: ["projects:00000000-0000-0000-0000-000000000000"],
+    });
+    assert.deepEqual(r, { linked: 1, closed: 0 });
+    assert.equal((await getWorkItem(db, e.id))!.item.status, "doing");
   });
 
   await check("baseline scan links but never closes", async () => {
@@ -162,6 +174,7 @@ try {
     const r = await applyCommits(db, [{ sha: "3".repeat(40), author: "zz", subject: `closes ${c.identifier}`, body: "" }], {
       repoUrl: null,
       allowClose: false,
+      closeProjectRefs: [ref],
     });
     assert.deepEqual(r, { linked: 1, closed: 0 });
   });

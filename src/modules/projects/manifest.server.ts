@@ -2,6 +2,7 @@ import type { ModuleServerManifest } from "@/core/modules/types.server";
 import { features, projectDocs, projectDocVersions, projectFiles, projects } from "./schema";
 import { projectTools } from "./tools";
 import { docTools } from "./doc-tools";
+import { decisionTools } from "./decision-tools";
 import { projectFilesJobs } from "./files-pipeline";
 import { projectRepoJobs } from "./repo-jobs";
 import { projectSetupJobs } from "./setup-jobs";
@@ -25,7 +26,7 @@ export const projectsServerManifest: ModuleServerManifest = {
     },
   ],
   schema: { projects, projectFiles, features, projectDocs, projectDocVersions },
-  aiTools: [...projectTools, ...docTools],
+  aiTools: [...projectTools, ...docTools, ...decisionTools],
   jobs: [...projectFilesJobs, ...projectRepoJobs, ...projectSetupJobs, ...activeProjectsJobs],
   agentTemplates: [
     {

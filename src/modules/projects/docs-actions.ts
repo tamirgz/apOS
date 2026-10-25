@@ -26,3 +26,9 @@ export async function diffProjectDoc(projectId: string, key: string, from: numbe
   if (!a || !b || "missing" in a || "missing" in b) return null;
   return lineDiff(a.body, b.body);
 }
+
+export async function listProjectDecisions(projectId: string) {
+  const { listDecisions, presentDecisions } = await import("./decisions");
+  const { rows } = await listDecisions(db, projectId, { includeSuperseded: true, limit: 2000 });
+  return presentDecisions(db, rows);
+}

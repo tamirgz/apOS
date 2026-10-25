@@ -274,3 +274,41 @@ export const projectDocVersions = pgTable(
 );
 
 export type ProjectDocVersion = typeof projectDocVersions.$inferSelect;
+
+/**
+ * Project decisions — typed records of what the user decided: the question,
+ * the answer, why (notes), when, and the work items it concerns. Replaces a
+ * free-text decision log in a doc, so "every decision on ES-217" or "what was
+ * decided since Monday" is a query, not a 94 KB read. Numbered per project
+ * (D1, D2…). A later decision that replaces one points back via
+ * `supersededBy`; the old one stays, out of default lists. `source` is the
+ * importer's own id for the record, so re-importing never duplicates.
+ */
+export const projectDecisions = pgTable(
+  "project_decisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    number: integer("number").notNull(),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    notes: text("notes"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
+    /** Work items (tasks.id) the decision concerns. */
+    taskIds: uuid("task_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    source: text("source"),
+    supersededBy: uuid("superseded_by"),
+    createdBy: text("created_by").notNull(),
+    updatedBy: text("updated_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_decisions_number").on(t.projectId, t.number),
+    uniqueIndex("project_decisions_source").on(t.projectId, t.source),
+    index("project_decisions_decided").on(t.projectId, t.decidedAt),
+    index("project_decisions_tasks").using("gin", t.taskIds),
+  ],
+);
+
+export type ProjectDecision = typeof projectDecisions.$inferSelect;

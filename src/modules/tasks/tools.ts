@@ -127,6 +127,22 @@ export async function resolveCycle(ctx: AiToolContext, projectId: string | null,
   return hit ? { id: hit.id } : { error: `No cycle "${name}"` };
 }
 
+async function cycleOf(ctx: AiToolContext, id: string) {
+  const [row] = await ctx.db.select({ cycleId: tasks.cycleId }).from(tasks).where(eq(tasks.id, id));
+  return row?.cycleId ?? null;
+}
+
+/**
+ * A done item is filed under the cycle of its done date (homeCycle). Say so
+ * when that overrode the cycle the caller meant — the one asked for, or the
+ * one it was in.
+ */
+async function refiled(ctx: AiToolContext, row: Task, meant: string | null) {
+  if (row.status !== "done" || !row.cycleId || row.cycleId === meant) return {};
+  const [home] = await ctx.db.select({ name: cycles.name }).from(cycles).where(eq(cycles.id, row.cycleId));
+  return home ? { cycle: home.name, note: `filed under "${home.name}", the cycle that holds its done date` } : {};
+}
+
 const projectIdOfRef = (ref: string | null | undefined) => (ref?.startsWith("projects:") ? ref.slice(9) : null);
 
 const summary = (t: Task & { identifier: string | null }) => ({
@@ -467,11 +483,11 @@ export const taskTools: AiToolDef[] = [
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
       if ("error" in t) return t;
+      const before = await cycleOf(ctx, t.id);
       const row = await updateWorkItem(ctx.db, t.id, { status: input.status }, actorOf(ctx), { ifVersion: input.ifVersion });
       if (row && "error" in row) return conflictResult(ctx, row.current);
-      return row
-        ? { updated: { identifier: row.identifier, status: row.status, version: row.version } }
-        : { error: "work item not found" };
+      if (!row) return { error: "work item not found" };
+      return { updated: { identifier: row.identifier, status: row.status, version: row.version }, ...(await refiled(ctx, row, before)) };
     },
   },
   {
@@ -558,11 +574,14 @@ export const taskTools: AiToolDef[] = [
         }
       }
       if (Object.values(patch).every((v) => v === undefined)) return { error: "nothing to update" };
+      const before = await cycleOf(ctx, t.id);
       const row = await updateWorkItem(ctx.db, t.id, patch, actorOf(ctx), { ifVersion: input.ifVersion });
       if (row && "error" in row) return conflictResult(ctx, row.current);
-      return row
-        ? { updated: { identifier: row.identifier, title: row.title, version: row.version } }
-        : { error: "work item not found" };
+      if (!row) return { error: "work item not found" };
+      return {
+        updated: { identifier: row.identifier, title: row.title, version: row.version },
+        ...(await refiled(ctx, row, patch.cycleId !== undefined ? patch.cycleId : before)),
+      };
     },
   },
   {

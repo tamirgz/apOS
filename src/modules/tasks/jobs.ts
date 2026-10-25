@@ -1,6 +1,7 @@
 import type { ModuleJob } from "@/core/modules/types.server";
 import { backfillWork, expireClaims } from "./core";
 import { linkCommits } from "./commits";
+import { reconcileDoneCycles } from "./cycles";
 import { syncFromWorkbench, syncPendingWorkbenchLinks } from "./delegate";
 
 export const workJobs: ModuleJob[] = [
@@ -18,7 +19,8 @@ export const workJobs: ModuleJob[] = [
   {
     // Identifiers stay complete (every project a key, every item a number) and
     // Workbench outcomes missed while the worker was down get written back,
-    // and expired claims are cleared. Idempotent — a no-op when nothing is missing.
+    // expired claims are cleared, and a done item filed outside the cycle of
+    // its done date moves there. Idempotent — a no-op when nothing is missing.
     channel: "work_backfill",
     schedule: "*/15 * * * *",
     runOnBoot: true,
@@ -26,9 +28,10 @@ export const workJobs: ModuleJob[] = [
       const r = await backfillWork(ctx.db);
       const wb = await syncPendingWorkbenchLinks(ctx.db);
       const claims = await expireClaims(ctx.db);
-      if (r.keys || r.numbers || wb || claims) {
+      const refiled = await reconcileDoneCycles(ctx.db);
+      if (r.keys || r.numbers || wb || claims || refiled) {
         console.log(
-          `[work] backfill: ${r.keys} key(s), ${r.numbers} number(s), ${wb} workbench write-back(s), ${claims} expired claim(s)`,
+          `[work] backfill: ${r.keys} key(s), ${r.numbers} number(s), ${wb} workbench write-back(s), ${claims} expired claim(s), ${refiled} done item(s) refiled to their cycle`,
         );
       }
     },

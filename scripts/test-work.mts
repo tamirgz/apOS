@@ -10,9 +10,9 @@
  * an attempt, so the worker has nothing to execute).
  */
 import assert from "node:assert/strict";
-import { eq, inArray, like, sql } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
-import { features, projects } from "@/modules/projects/schema";
+import { features, projectDecisions, projects } from "@/modules/projects/schema";
 import { workbenchTasks } from "@/modules/workbench/schema";
 import {
   addLink,
@@ -24,8 +24,8 @@ import {
   listRelations,
   updateWorkItem,
 } from "@/modules/tasks/core";
-import { applyCommits, commitUrl, scanMessage } from "@/modules/tasks/commits";
-import { burndown, createCycle, cycleStatus, deleteCycle, listCycles, rollOverCycle } from "@/modules/tasks/cycles";
+import { applyCommits, commitUrl, parseLog, scanMessage } from "@/modules/tasks/commits";
+import { burndown, createCycle, cycleGhosts, cycleStatus, deleteCycle, listCycles, reconcileDoneCycles, rollOverCycle } from "@/modules/tasks/cycles";
 import { syncFromWorkbench } from "@/modules/tasks/delegate";
 import { importPlane, previewPlane, Progress } from "@/modules/tasks/plane/import";
 import { apiBaseFrom } from "@/modules/tasks/plane/client";
@@ -94,6 +94,25 @@ await check("cycle status + burndown", () => {
   assert.deepEqual(b.map((d) => d.remaining), [2, 1, 2, 2]);
 });
 
+await check("parseLog: committer date; ghost buckets", () => {
+  const sha = "a".repeat(40);
+  const [c] = parseLog(`${sha}\x1fzz\x1f2026-10-20T14:51:00+00:00\x1fES-747 fix (#548)\x1fCloses ES-747\x1e`);
+  assert.equal(c.at?.toISOString(), "2026-10-20T14:51:00.000Z");
+  assert.deepEqual(scanMessage(`${c.subject}\n${c.body}`).closes, ["ES-747"]);
+  assert.deepEqual(scanMessage("ES-746 part 1 of 4 (#540)").closes, [], "a leading id only links");
+  const cyc = { startsAt: new Date(Date.UTC(2026, 9, 18)), endsAt: new Date(Date.UTC(2026, 9, 24)) };
+  const at = (d: number) => new Date(Date.UTC(2026, 9, d, 12));
+  const g = cycleGhosts(cyc, [
+    { id: "1", status: "done", completedAt: at(24), dueAt: null }, // last day: inside
+    { id: "2", status: "done", completedAt: at(12), dueAt: null },
+    { id: "3", status: "cancelled", completedAt: at(20), dueAt: null },
+    { id: "4", status: "todo", completedAt: null, dueAt: null },
+    { id: "5", status: "doing", completedAt: null, dueAt: at(30) },
+    { id: "6", status: "doing", completedAt: null, dueAt: at(19) },
+  ]);
+  assert.deepEqual(g, { cancelled: ["3"], doneOutside: ["2"], undated: ["4"], dueOutside: ["5"] });
+});
+
 console.log("db");
 try {
   const p = await zzProject("ZZ Work Test", "ZZWT");
@@ -119,7 +138,7 @@ try {
     const r = await applyCommits(
       db,
       [
-        { sha: sha2, author: "zz", subject: `fix: thing (fixes ${b.identifier})`, body: "" },
+        { sha: sha2, author: "zz", subject: `fix: thing (fixes ${b.identifier})`, body: "", at: new Date("2026-10-20T14:51:00Z") },
         { sha: sha1, author: "zz", subject: `wip on ${b.identifier}`, body: "" },
       ],
       { repoUrl: "https://github.com/zz/zz.git", allowClose: true },
@@ -127,6 +146,7 @@ try {
     assert.deepEqual(r, { linked: 2, closed: 1 });
     const d = await getWorkItem(db, b.id);
     assert.equal(d!.item.status, "done");
+    assert.equal(d!.item.completedAt?.toISOString(), "2026-10-20T14:51:00.000Z", "done as of the commit, not the scan");
     assert.equal(d!.links.filter((l) => l.kind === "commit").length, 2);
     assert.ok(d!.activity.some((x) => x.actor === "system:commit" && x.kind === "comment"));
     await updateWorkItem(db, b.id, { status: "todo" }, "user");
@@ -152,15 +172,45 @@ try {
     const cur = await createCycle(db, { name: "ZZ c2", startsAt: new Date(now - 6 * DAY), endsAt: new Date(now + 7 * DAY), projectId: p.id });
     await updateWorkItem(db, b.id, { cycleId: done.id }, "user");
     await updateWorkItem(db, a.id, { cycleId: done.id }, "user");
+    const cycleOf = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0].cycleId;
+    assert.equal(await cycleOf(a.id), cur.id, "a done item planned into a past cycle is filed under the one holding its done date");
     const mine = (await listCycles(db, { projectId: p.id })).find((c) => c.id === done.id)!;
     assert.equal(mine.status, "completed");
-    assert.equal(mine.total, 2);
-    assert.equal(mine.done, 1);
+    assert.equal(mine.total, 1);
+    assert.equal(mine.done, 0);
     assert.equal(await rollOverCycle(db, done.id, cur.id), 1);
     assert.equal((await db.select().from(tasks).where(eq(tasks.id, b.id)))[0].cycleId, cur.id);
     await deleteCycle(db, cur.id);
     assert.equal((await db.select().from(tasks).where(eq(tasks.id, b.id)))[0].cycleId, null);
     await deleteCycle(db, done.id);
+  });
+
+  await check("cycles: done items follow their done date (create, close, sweep)", async () => {
+    const now = Date.now();
+    const past = await createCycle(db, { name: "ZZ past", startsAt: new Date(now - 21 * DAY), endsAt: new Date(now - 15 * DAY), projectId: p.id });
+    const cur = await createCycle(db, { name: "ZZ now", startsAt: new Date(now - 3 * DAY), endsAt: new Date(now + 3 * DAY), projectId: p.id });
+    try {
+      const x = await createWorkItem(db, { title: "ZZ x", projectRef: ref, status: "done", cycleId: past.id }, "user");
+      assert.equal(x.cycleId, cur.id, "created done → filed by today's date");
+      const y = await createWorkItem(db, { title: "ZZ y", projectRef: ref, status: "doing", cycleId: past.id }, "user");
+      await updateWorkItem(db, y.id, { status: "done" }, "user");
+      const gy = await getWorkItem(db, y.id);
+      assert.equal(gy!.item.cycleId, cur.id, "closing moves it to the cycle of its done date");
+      assert.ok(gy!.activity.some((r) => r.field === "cycleId"), "the move is in the item's history");
+      // A done item in the wrong cycle from before the rule: the sweep repairs it.
+      const z = await createWorkItem(db, { title: "ZZ z", projectRef: ref, status: "todo", cycleId: cur.id }, "user");
+      await db.update(tasks).set({ status: "done", completedAt: new Date(now - 18 * DAY) }).where(eq(tasks.id, z.id));
+      const stuck = await createWorkItem(db, { title: "ZZ stuck", projectRef: ref, status: "todo", cycleId: cur.id }, "user");
+      await db.update(tasks).set({ status: "done", completedAt: new Date(now - 40 * DAY) }).where(eq(tasks.id, stuck.id));
+      assert.equal(await reconcileDoneCycles(db, { projectId: p.id }), 1, "only z has a home; stuck has no cycle for its date");
+      assert.equal((await db.select().from(tasks).where(eq(tasks.id, z.id)))[0].cycleId, past.id);
+      assert.equal(await reconcileDoneCycles(db, { projectId: p.id }), 0, "idempotent");
+      const now2 = (await listCycles(db, { projectId: p.id })).find((c) => c.id === cur.id)!;
+      assert.equal(now2.ghosts, 1, "the homeless one is reported as a ghost");
+    } finally {
+      await deleteCycle(db, cur.id);
+      await deleteCycle(db, past.id);
+    }
   });
 
   await check("workbench write-back: review → In review once; done → Done", async () => {
@@ -228,7 +278,7 @@ try {
       const listed = (await client.listTools()).tools;
       const names = listed.map((t) => t.name);
       assert.equal(listed.find((t) => t.name === "cycles__delete")?.annotations?.destructiveHint, true, "cycles.delete is marked destructive");
-      for (const n of ["tasks__create", "tasks__relate", "cycles__create", "cycles__delete", "modules__update", "projects__list"]) assert.ok(names.includes(n), `exposes ${n}`);
+      for (const n of ["tasks__create", "tasks__relate", "cycles__create", "cycles__delete", "cycles__get", "modules__update", "projects__list", "decisions__record", "decisions__list"]) assert.ok(names.includes(n), `exposes ${n}`);
       assert.ok(!names.includes("memory__update"), "only the work-tracker surface");
       const call = async (name: string, args: Record<string, unknown>) => {
         const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
@@ -241,7 +291,8 @@ try {
       const { created: mod } = await call("modules__create", { project: proj.key, name: "ZZ Auth", targetAt: new Date(Date.now() + 14 * DAY).toISOString() });
       assert.equal(mod.ref, "m1");
       const now = Date.now();
-      const { created: cyc } = await call("cycles__create", { project: proj.key, name: "ZZ sprint", startsAt: new Date(now - DAY).toISOString(), endsAt: new Date(now + 6 * DAY).toISOString() });
+      const sunday = new Date(now).setUTCHours(0, 0, 0, 0) - new Date(now).getUTCDay() * DAY; // cycles start on a Sunday
+      const { created: cyc } = await call("cycles__create", { project: proj.key, name: "ZZ sprint", startsAt: new Date(sunday).toISOString(), endsAt: new Date(sunday + 6 * DAY).toISOString() });
       assert.equal(cyc.status, "current");
       const a = (await call("tasks__create", { project: proj.key, title: "ZZ login form", feature: "m1", cycle: "current" })).created;
       const b = (await call("tasks__create", { project: proj.key, title: "ZZ session store", feature: "ZZ Auth" })).created;
@@ -254,18 +305,44 @@ try {
       await call("tasks__update", { ref: b.identifier, cycle: "ZZ sprint", parent: a.identifier, startAt: new Date(now).toISOString() });
       const got = await call("tasks__get", { ref: b.identifier });
       assert.equal(got.parent.identifier, a.identifier);
-      assert.ok(got.activity.some((x: { by: string }) => x.by === "agent:zz-test"), "activity credits the MCP actor");
+      assert.ok(got.activity.some((x: { by: string }) => /^agent:zz-test:zz-test\/0#[0-9a-f]{6}$/.test(x.by)), "activity credits the MCP actor (prefix:client/version#session)");
       await call("modules__update", { module: "m1", status: "paused", startAt: new Date(now).toISOString() });
       const [m] = await call("modules__list", { project: proj.key, status: "all" });
       assert.equal(m.status, "paused");
       assert.equal(m.items, 2);
+      const c3 = (await call("tasks__create", { project: proj.key, title: "ZZ dropped", cycle: "ZZ sprint" })).created;
+      await call("tasks__setStatus", { ref: c3.identifier, status: "cancelled" });
+      const g = await call("cycles__get", { cycle: "ZZ sprint", project: proj.key });
+      assert.equal(g.items, 2, "cancelled members are counted nowhere");
+      assert.deepEqual(g.ghosts.cancelled.items, [c3.identifier]);
+      assert.equal(g.ghosts.undated.count, 2, "open items with no due date");
+      assert.equal(g.ghosts.total, 3);
+      assert.equal((await call("cycles__list", { project: proj.key })).find((c: { name: string }) => c.name === "ZZ sprint").ghosts, 3);
       assert.equal((await call("cycles__rollOver", { from: "c1" })).moved, 2);
       await call("tasks__update", { ref: a.identifier, cycle: "ZZ sprint" });
-      assert.deepEqual(await call("cycles__delete", { cycle: "ZZ sprint" }), { deleted: true, unplanned: 1 });
-      assert.equal((await call("tasks__get", { ref: a.identifier })).cycle ?? null, null, "deleting a cycle un-plans its items, never deletes them");
+      assert.ok((await call("cycles__delete", { cycle: "ZZ sprint" })).pending_approval, "deleting a cycle waits for the user's approval");
+      const [sprint] = await db.select().from(cycles).where(and(eq(cycles.projectId, proj.id), eq(cycles.name, "ZZ sprint")));
+      await deleteCycle(db, sprint.id); // what approving it runs
+      assert.equal((await call("tasks__get", { ref: a.identifier })).cycle ?? null, null, "…never deletes them");
       assert.ok(!(await call("cycles__list", { project: proj.key, include: "all" })).some((c: { name: string }) => c.name === "ZZ sprint"), "the cycle is gone");
-      assert.ok((await client.callTool({ name: "cycles__delete", arguments: { cycle: "ZZ sprint" } }) as { content: { text: string }[] }).content[0].text.includes("No cycle"), "deleting it twice reports it missing");
       assert.equal((await call("tasks__unrelate", { ref: a.identifier, other: b.identifier })).removed, 1);
+      const d1 = (await call("decisions__record", { project: proj.key, question: "ZZ ship on Fridays?", answer: "No", notes: "weekend", decidedAt: "2026-10-05T09:52", items: [a.identifier], source: "zz:1" })).recorded;
+      assert.equal(d1.ref, "D1");
+      assert.equal(d1.decidedAt, "2026-10-05T09:52:00.000Z", "a date-time without offset is UTC");
+      assert.deepEqual(d1.items, [a.identifier]);
+      assert.equal((await call("decisions__record", { project: proj.key, question: "dup", answer: "dup", source: "zz:1" })).alreadyRecorded.ref, "D1", "same source → no duplicate");
+      await call("decisions__record", { project: proj.key, question: "ZZ use Postgres?", answer: "Yes", decidedAt: "2026-10-07" });
+      const d3 = await call("decisions__record", { project: proj.key, question: "ZZ ship on Fridays?", answer: "Yes, before noon", supersedes: "D1", items: [a.identifier] });
+      assert.deepEqual([d3.recorded.ref, d3.superseded], ["D3", "D1"]);
+      const onA = await call("decisions__list", { project: proj.key, item: a.identifier });
+      assert.deepEqual(onA.decisions.map((d: { ref: string }) => d.ref), ["D3"], "superseded ones are out of default lists");
+      assert.equal((await call("decisions__list", { project: proj.key, item: a.identifier, includeSuperseded: true })).total, 2);
+      assert.equal((await call("decisions__list", { project: proj.key, q: "postgres" })).decisions[0].ref, "D2");
+      assert.equal((await call("decisions__list", { project: proj.key, since: "2026-10-06", until: "2026-10-08" })).total, 1);
+      assert.equal((await call("decisions__get", { project: proj.key, decision: 1 })).supersededBy, "D3");
+      const upd = (await call("decisions__update", { project: proj.key, decision: "D2", addItems: [b.identifier], notes: "cheap" })).updated;
+      assert.deepEqual([upd.items, upd.notes], [[b.identifier], "cheap"]);
+      assert.ok((await client.callTool({ name: "decisions__record", arguments: { project: proj.key, question: "x", answer: "y", supersedes: 1 } }) as { isError?: boolean }).isError, "a superseded decision can't be superseded again");
       const bad = (await client.callTool({ name: "tasks__update", arguments: { ref: "ZZMCP-9999", title: "x" } })) as { isError?: boolean };
       assert.ok(bad.isError, "unknown identifier is an error, not a silent no-op");
     } finally {
@@ -279,9 +356,13 @@ try {
   if (projectIds.length) {
     await db.delete(features).where(inArray(features.projectId, projectIds));
     await db.delete(cycles).where(inArray(cycles.projectId, projectIds));
-    await db.execute(sql`delete from work_counters where scope in ${projectIds}`);
+    await db.delete(projectDecisions).where(inArray(projectDecisions.projectId, projectIds));
+    await db.execute(sql`delete from work_counters where scope in ${[...projectIds, ...projectIds.map((id) => `decisions:${id}`)]}`);
     await db.delete(projects).where(inArray(projects.id, projectIds));
   }
+  // The MCP test's approval-tier calls park an approval and ring the bell.
+  await db.execute(sql`delete from approvals where agent_name like 'MCP zz-test%'`);
+  await db.execute(sql`delete from notifications where source like 'agent:MCP zz-test%'`);
   if (wbIds.length) await db.delete(workbenchTasks).where(inArray(workbenchTasks.id, wbIds));
   const left = await db.select({ id: tasks.id }).from(tasks).where(like(tasks.title, "ZZ %"));
   const orphanLinks = await db.execute(sql`select count(*)::int n from task_links l left join tasks t on t.id = l.task_id where t.id is null`);

@@ -29,9 +29,9 @@ const { db, sql } = await import("@/core/db/client");
 type AiToolContext = import("@/core/modules/types.server").AiToolContext;
 type ZodObject = import("zod").ZodObject<import("zod").ZodRawShape>;
 
-/** The work-tracker surface: everything under tasks./cycles./modules./milestones./attachments./docs., plus project basics. */
+/** The work-tracker surface: everything under tasks./cycles./modules./milestones./attachments./docs./decisions., plus project basics. */
 const EXPOSED = (name: string) =>
-  /^(tasks|cycles|modules|milestones|attachments|docs)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
+  /^(tasks|cycles|modules|milestones|attachments|docs|decisions)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
 
 const prefix = process.env.APOS_ACTOR?.trim() || "";
 const sessionId = randomUUID();
@@ -66,7 +66,10 @@ const server = new McpServer(
       "States: backlog → todo → doing → review → done (or cancelled). Modules are a project's features (start → target, status planned/active/paused/shipped/cancelled); cycles are time-boxed sprints of whole calendar weeks: each starts on a Sunday, and a one-week cycle spans Sunday → Saturday. The user's work days are Sunday–Thursday; Friday and Saturday are the weekend. " +
       "Milestones are a project's named product stages (e.g. Visibility → MVP), each built from capabilities and delivery content: whole modules, single items from partly-in-scope modules, other milestones and any other apOS entity; their progress, forecast and readiness are computed from that content. " +
       "Docs are a project's named, versioned documents for durable state that is not work (resume notes, standing decisions, open questions): read with docs.get, write with docs.put passing expectedVersion so a concurrent writer is never overwritten unseen; every version is kept. " +
-      "Name projects by NAME or key, never by id. When you commit code for an item, put its identifier in the commit message — apOS links the commit to it.",
+      "Name projects by NAME or key, never by id. When you commit code for an item, put its identifier in the commit message — apOS links the commit to it. " +
+      "To have the merge finish the item, write a closing keyword before it — 'Closes ES-12' (also fixes / resolves) in the commit or squash-merged PR title or body: within ~10 minutes of it landing on the main line apOS sets the item to done as of the merge. A bare 'ES-12' only links, so a multi-part item stays open until the part that says 'Closes'. " +
+      "A done item is filed under the cycle that holds its done date, moved there automatically. " +
+      "Decisions the user makes are typed records (decisions.record / decisions.list / decisions.get): question, answer, notes, when and the items they concern — query them instead of keeping a decision log in a doc.",
   },
 );
 

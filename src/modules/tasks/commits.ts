@@ -1,9 +1,14 @@
 /**
- * Commit ↔ work-item linking. Scans each attached repo's read-only cache clone
- * (kept fresh by project_repos_sync) for identifiers like ETHOS-12 in commit
- * messages:
+ * Commit ↔ work-item linking. Scans the main line of each attached repo's
+ * read-only cache clone for identifiers like ETHOS-12 in commit messages:
  *   - any mention            → a "commit" link on the item
- *   - "fixes / closes / resolves ETHOS-12" → the item is closed (done)
+ *   - "fixes / closes / resolves ETHOS-12" → the item is closed (done), as of
+ *     the commit's date — so a merged PR whose title or body says it closes
+ *     the item finishes it within one sweep
+ *
+ * Each sweep fetches the source first (refs only — the clone's checkout is
+ * project_repos_sync's), so a merge is seen minutes after it lands, not after
+ * the nightly refresh.
  *
  * Ledger: projects.work_link_sha = the last HEAD scanned, advanced by
  * compare-and-swap so concurrent sweeps can't double-process a range. The
@@ -26,6 +31,8 @@ export interface Commit {
   author: string;
   subject: string;
   body: string;
+  /** Committer date — when it landed (a squash merge's merge time). */
+  at?: Date;
 }
 
 const CLOSE_RE = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[:\s]+((?:[A-Z]{1,5}-\d{1,6}(?:\s*(?:,|and|&)\s*)?)+)/gi;
@@ -51,28 +58,41 @@ export function parseLog(out: string): Commit[] {
     .map((r) => r.trim())
     .filter(Boolean)
     .map((r) => {
-      const [sha, author, subject, body] = r.split(SEP_FIELD);
-      return { sha, author, subject: subject ?? "", body: (body ?? "").trim() };
+      const [sha, author, at, subject, body] = r.split(SEP_FIELD);
+      const when = new Date(at ?? "");
+      return { sha, author, subject: subject ?? "", body: (body ?? "").trim(), ...(Number.isNaN(+when) ? {} : { at: when }) };
     })
     .filter((c) => /^[0-9a-f]{40}$/.test(c.sha));
 }
 
+// Never let git block on a credential prompt in the non-interactive worker.
+const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+
 async function gitLog(dir: string, range: string[]): Promise<Commit[]> {
   const { stdout } = await exec(
     "git",
-    ["-C", dir, "log", "--no-merges", `--format=%H${SEP_FIELD}%an${SEP_FIELD}%s${SEP_FIELD}%b${SEP_REC}`, ...range],
+    ["-C", dir, "log", "--no-merges", `--format=%H${SEP_FIELD}%an${SEP_FIELD}%cI${SEP_FIELD}%s${SEP_FIELD}%b${SEP_REC}`, ...range],
     { maxBuffer: 32 * 1024 * 1024 },
   );
   return parseLog(stdout);
 }
 
-async function headOf(dir: string): Promise<string | null> {
-  try {
-    const { stdout } = await exec("git", ["-C", dir, "rev-parse", "HEAD"]);
-    return stdout.trim() || null;
-  } catch {
-    return null;
+/**
+ * The source's main line as of now: fetch (refs only, never the checkout),
+ * then origin/main, else origin/master, else HEAD. A failed fetch (offline, a
+ * private remote) falls back to what the clone already has.
+ */
+async function mainLineHead(dir: string): Promise<string | null> {
+  await exec("git", ["-C", dir, "fetch", "--quiet", "--prune", "origin"], { env: GIT_ENV, timeout: 60_000 }).catch(() => {});
+  for (const ref of ["refs/remotes/origin/main", "refs/remotes/origin/master", "HEAD"]) {
+    try {
+      const { stdout } = await exec("git", ["-C", dir, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+      if (stdout.trim()) return stdout.trim();
+    } catch {
+      // not there — try the next
+    }
   }
+  return null;
 }
 
 /** A browsable commit URL for GitHub-style remotes; null for local-path repos. */
@@ -111,7 +131,7 @@ export async function applyCommits(
       if (!row) continue; // already linked — never re-close on a rescan
       linked++;
       if (opts.allowClose && closes.includes(identifier) && !isClosed(item.status)) {
-        await updateWorkItem(db, item.id, { status: "done" }, "system:commit");
+        await updateWorkItem(db, item.id, { status: "done", completedAt: c.at }, "system:commit");
         await addComment(db, item.id, `Closed by commit ${short} (${c.author}): ${c.subject}`, "system:commit");
         closed++;
       }
@@ -130,7 +150,7 @@ export async function linkCommits(db: Db): Promise<LinkResult & { repos: number 
   for (const p of rows) {
     const dir = usableRepoPath(p.id, p.repoUrl);
     if (!dir) continue;
-    const head = await headOf(dir);
+    const head = await mainLineHead(dir);
     if (!head || head === p.ledger) continue;
 
     // Claim the range first (CAS on the ledger we observed).

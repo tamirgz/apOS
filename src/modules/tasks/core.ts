@@ -27,6 +27,7 @@ import {
 } from "./schema";
 import { deriveKey, formatIdentifier, LOOSE_KEY, LOOSE_SCOPE, parseIdentifier } from "./keys";
 import { RELATION_SIDE_LABEL, STATUS_META, type RelationSide } from "./states";
+import { homeCycle } from "./cycles";
 
 export type { RelationSide };
 
@@ -321,6 +322,9 @@ export async function createWorkItem(
     if (hit) return hit;
   }
   const status = input.status ?? "todo";
+  const completedAt = isClosed(status) ? (input.completedAt ?? new Date()) : null;
+  // A done item lives in the cycle of its done date (homeCycle).
+  const cycleId = input.cycleId && status === "done" ? await homeCycle(db, input.cycleId, completedAt!) : (input.cycleId ?? null);
   const number = await allocateNumber(db, projectRef);
   const insert = db
     .insert(tasks)
@@ -338,13 +342,13 @@ export async function createWorkItem(
       labels: cleanLabels(input.labels),
       acceptance: cleanAcceptance(input.acceptance),
       externalRef: input.externalRef ?? null,
-      cycleId: input.cycleId ?? null,
+      cycleId,
       sortOrder: input.sortOrder ?? Date.now() / 1000,
       number,
       idempotencyKey: key,
       createdAt: input.createdAt ?? new Date(),
       updatedAt: new Date(),
-      completedAt: isClosed(status) ? (input.completedAt ?? new Date()) : null,
+      completedAt,
     })
     .returning();
   let row: Task;
@@ -415,6 +419,18 @@ export async function updateWorkItem(
     const closedNow = isClosed(next.status as TaskStatus);
     if (closedNow && !isClosed(cur.status)) next.completedAt = patch.completedAt ?? new Date();
     if (!closedNow) next.completedAt = null;
+  }
+  // A done item lives in the cycle of its done date — finishing a slipped item
+  // moves it to the cycle it was finished in, and planning a done item lands
+  // it in the cycle it was done in. With no such cycle it stays put.
+  if ("status" in next || "cycleId" in next) {
+    const status = (next.status ?? cur.status) as TaskStatus;
+    const cycleId = ("cycleId" in next ? next.cycleId : cur.cycleId) as string | null;
+    const doneAt = ("completedAt" in next ? next.completedAt : cur.completedAt) as Date | null;
+    if (status === "done" && cycleId && doneAt) {
+      const home = await homeCycle(db, cycleId, doneAt);
+      if (home !== cycleId) next.cycleId = home;
+    }
   }
 
   const changed = TRACKED.filter((f) => f in next && !same(next[f], cur[f as keyof Task]));

@@ -9,9 +9,10 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { AiToolDef } from "@/core/modules/types.server";
 import { registerRefs } from "@/core/ai/refs";
 import { FEATURE_STATUSES, features, projects } from "@/modules/projects/schema";
-import { createCycle, cycleStatus, deleteCycle, listCycles, rollOverCycle, updateCycle } from "./cycles";
+import { createCycle, cycleGhosts, cycleStatus, ghostCount, deleteCycle, listCycles, rollOverCycle, updateCycle } from "./cycles";
+import { identifierOf, projectKeyMap } from "./core";
 import { resolveCycle, resolveFeature, resolveProject } from "./tools";
-import { isClosed, tasks } from "./schema";
+import { cycles, isClosed, TASK_STATUSES, tasks } from "./schema";
 import { WEEK_START, WEEKDAY_LABELS } from "@/core/work-week";
 
 const dateOrNull = (s: string | undefined) => (s === undefined ? undefined : s ? new Date(s) : null);
@@ -57,7 +58,7 @@ export const planningTools: AiToolDef[] = [
   {
     name: "cycles.list",
     description:
-      "List cycles (time-boxed sprints) with their dates, status (upcoming / current / completed) and progress. Each comes back with a `ref` (c1…) for tasks.create / tasks.update / cycles.update.",
+      "List cycles (time-boxed sprints) with their dates, status (upcoming / current / completed), progress and `ghosts` — how many members distort the figures (cycles.get names them). Each comes back with a `ref` (c1…) for cycles.get / tasks.create / tasks.update / cycles.update.",
     input: z.object({
       project: z.string().optional().describe("Project NAME or key: its cycles plus cross-project ones; omit for all"),
       include: z.enum(["open", "all"]).default("open").describe("'open' (default) skips completed cycles"),
@@ -81,8 +82,56 @@ export const planningTools: AiToolDef[] = [
           crossProject: !c.projectId,
           items: c.total,
           done: c.done,
+          ghosts: c.ghosts,
         })),
       );
+    },
+  },
+  {
+    name: "cycles.get",
+    description:
+      "One cycle in full: dates, status, progress, items per state, and its ghosts — the members its counts mislead about, each bucket with a count and the item identifiers: `cancelled` (members counted nowhere), `doneOutside` (done on a date outside the window that no cycle holds — a done item is otherwise filed under the cycle of its done date automatically), `undated` (open, no due date) and `dueOutside` (open, due before the cycle starts or after it ends).",
+    input: z.object({
+      cycle: z.string().describe("Cycle ref ('c1'), NAME, or 'current'"),
+      project: z.string().optional().describe("Project NAME or key — picks among same-named or 'current' cycles"),
+    }),
+    async execute(input, ctx) {
+      const p = await resolveProject(ctx, input.project);
+      if (p && "error" in p) return p;
+      const r = await resolveCycle(ctx, p?.id ?? null, input.cycle);
+      if ("error" in r) return r;
+      const [[c], members, keys] = await Promise.all([
+        ctx.db.select().from(cycles).where(eq(cycles.id, r.id)),
+        ctx.db.select().from(tasks).where(eq(tasks.cycleId, r.id)),
+        projectKeyMap(ctx.db),
+      ]);
+      if (!c) return { error: "cycle not found" };
+      const [project] = c.projectId ? await ctx.db.select({ name: projects.name }).from(projects).where(eq(projects.id, c.projectId)) : [];
+      const counted = members.filter((m) => m.status !== "cancelled");
+      const done = counted.filter((m) => isClosed(m.status));
+      const name = new Map(members.map((m) => [m.id, identifierOf(m, keys) ?? m.title]));
+      const g = cycleGhosts(c, members);
+      const bucket = (ids: string[]) => ({ count: ids.length, items: ids.map((id) => name.get(id)!) });
+      const [row] = registerRefs(ctx, "cycle", "c", [{ id: c.id, name: c.name }]);
+      return {
+        ...row,
+        project: project?.name ?? null,
+        status: cycleStatus(c),
+        startsAt: c.startsAt,
+        endsAt: c.endsAt,
+        items: counted.length,
+        done: done.length,
+        points: counted.reduce((n, m) => n + (m.estimate ?? 0), 0),
+        pointsDone: done.reduce((n, m) => n + (m.estimate ?? 0), 0),
+        byStatus: Object.fromEntries(TASK_STATUSES.map((s) => [s, members.filter((m) => m.status === s).length]).filter(([, n]) => n)),
+        ghosts: {
+          total: ghostCount(g),
+          cancelled: bucket(g.cancelled),
+          doneOutside: bucket(g.doneOutside),
+          undated: bucket(g.undated),
+          dueOutside: bucket(g.dueOutside),
+        },
+      };
     },
   },
   {

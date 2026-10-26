@@ -412,7 +412,13 @@ function CycleCard({
   const now = useNow();
   const ops = useCycleOps(c, next);
   const m = cycleMetrics(c, items, [], now);
-  if (ops.editing) return ops.form;
+  if (ops.editing)
+    return (
+      <div className="flex flex-col gap-1">
+        {ops.form}
+        {ops.error && <p className="text-xs text-flare">{ops.error}</p>}
+      </div>
+    );
   const startsIn = Math.max(1, Math.ceil((+new Date(c.startsAt) - now) / DAY));
 
   return (

@@ -412,19 +412,28 @@ export function WorkItemDetail({
       )}
       {propRow(
         <User className={ic} />,
-        "Owner",
-        liveRun ? (
-          <>
-            <Who bot />
-            <span className="text-ink">Workbench run</span>
-            <span className="font-mono text-[11px] text-ink-faint">{(liveRun.state ?? "queued").replace("_", " ")}</span>
-          </>
-        ) : (
-          <>
-            <Who />
-            <span className="text-ink">You</span>
-          </>
-        ),
+        "Assignee",
+        <>
+          <input
+            key={`${item.id}:${item.assignee ?? ""}`}
+            defaultValue={item.assignee ?? ""}
+            placeholder="Unassigned"
+            onBlur={(e) => {
+              const next = e.target.value.trim() || null;
+              if (next !== (item.assignee ?? null)) save({ assignee: next });
+            }}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            aria-label="Assignee"
+            className="wk-inline min-w-0 flex-1"
+          />
+          {liveRun && (
+            <>
+              <Who bot />
+              <span className="text-ink">Workbench run</span>
+              <span className="font-mono text-[11px] text-ink-faint">{(liveRun.state ?? "queued").replace("_", " ")}</span>
+            </>
+          )}
+        </>,
       )}
       {propRow(
         <Hash className={ic} />,

@@ -48,6 +48,8 @@ export interface WorkItemInput {
   parentId?: string | null;
   estimate?: number | null;
   labels?: string[];
+  /** Who is responsible — a person or agent, free text; null = unassigned. */
+  assignee?: string | null;
   externalRef?: string | null;
   cycleId?: string | null;
   sortOrder?: number;
@@ -257,6 +259,7 @@ const TRACKED: (keyof WorkItemPatch)[] = [
   "cycleId",
   "estimate",
   "labels",
+  "assignee",
   "notes",
   "acceptance",
 ];
@@ -340,6 +343,7 @@ export async function createWorkItem(
       parentId: input.parentId ?? null,
       estimate: input.estimate ?? null,
       labels: cleanLabels(input.labels),
+      assignee: input.assignee?.trim() || null,
       acceptance: cleanAcceptance(input.acceptance),
       externalRef: input.externalRef ?? null,
       cycleId,
@@ -402,7 +406,7 @@ export async function updateWorkItem(
       const t = String(v).trim();
       if (!t) throw new Error("Title is required");
       next.title = t;
-    } else if (k === "notes") next.notes = (v as string | null)?.trim() || null;
+    } else if (k === "notes" || k === "assignee") next[k] = (v as string | null)?.trim() || null;
     else if (k === "labels") next.labels = cleanLabels(v as string[]);
     else if (k === "acceptance") next.acceptance = cleanAcceptance(v as AcceptanceInput[]);
     else next[k] = v;

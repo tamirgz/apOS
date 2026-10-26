@@ -199,7 +199,7 @@ function parseRange(startsAt: Date, endsAt: Date) {
 
 export async function createCycle(
   db: Db,
-  input: { name: string; startsAt: Date; endsAt: Date; projectId?: string | null; externalRef?: string | null },
+  input: { name: string; startsAt: Date; endsAt: Date; goal?: string | null; projectId?: string | null; externalRef?: string | null },
 ) {
   const name = input.name.trim();
   if (!name) throw new Error("Name the cycle");
@@ -210,6 +210,7 @@ export async function createCycle(
       name,
       startsAt: input.startsAt,
       endsAt: input.endsAt,
+      goal: input.goal?.trim() || null,
       projectId: input.projectId ?? null,
       externalRef: input.externalRef ?? null,
     })
@@ -217,15 +218,17 @@ export async function createCycle(
   return row;
 }
 
-export async function updateCycle(db: Db, id: string, patch: { name?: string; startsAt?: Date; endsAt?: Date }) {
+export async function updateCycle(db: Db, id: string, patch: { name?: string; startsAt?: Date; endsAt?: Date; goal?: string | null }) {
   const [cur] = await db.select().from(cycles).where(eq(cycles.id, id));
   if (!cur) throw new Error("Cycle not found");
-  const next = { ...cur, ...patch, name: (patch.name ?? cur.name).trim() };
+  // A field left undefined keeps its value — spreading it would blank it.
+  const given = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+  const next = { ...cur, ...given, name: (patch.name ?? cur.name).trim() };
   if (!next.name) throw new Error("Name the cycle");
   parseRange(next.startsAt, next.endsAt);
   await db
     .update(cycles)
-    .set({ name: next.name, startsAt: next.startsAt, endsAt: next.endsAt })
+    .set({ name: next.name, startsAt: next.startsAt, endsAt: next.endsAt, goal: next.goal?.trim() || null })
     .where(eq(cycles.id, id));
 }
 

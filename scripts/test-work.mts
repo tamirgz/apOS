@@ -30,7 +30,7 @@ import { syncFromWorkbench } from "@/modules/tasks/delegate";
 import { importPlane, previewPlane, Progress } from "@/modules/tasks/plane/import";
 import { apiBaseFrom } from "@/modules/tasks/plane/client";
 import { htmlToText, mapModuleStatus, mapState } from "@/modules/tasks/plane/map";
-import { cycles, taskActivity, taskLinks, tasks } from "@/modules/tasks/schema";
+import { cycles, milestoneCapabilities, milestoneContent, milestones, taskActivity, taskLinks, tasks } from "@/modules/tasks/schema";
 import fixture from "../src/modules/tasks/plane/__fixtures__/responses.json" with { type: "json" };
 
 let failed = 0;
@@ -394,6 +394,120 @@ try {
       await client.close();
     }
   });
+  await check("apos MCP re-scope: criteria move, exclusions, overlap, decision ranges, cycle goal, assignee, milestone filter, modules.get", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+    const client = new Client({ name: "zz-test", version: "0" });
+    await client.connect(new StdioClientTransport({ command: "scripts/apos-mcp.sh", env: { ...process.env, APOS_ACTOR: "zz-test" } as Record<string, string>, stderr: "ignore" }));
+    try {
+      assert.ok((await client.listTools()).tools.some((t) => t.name === "modules__get"), "exposes modules__get");
+      const call = async (name: string, args: Record<string, unknown>) => {
+        const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+        if (r.isError) throw new Error(`${name}: ${r.content[0].text}`);
+        return JSON.parse(r.content[0].text);
+      };
+      const errOf = async (name: string, args: Record<string, unknown>) => {
+        const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+        assert.ok(r.isError, `${name} should fail`);
+        return r.content[0].text;
+      };
+      const { created: proj } = await call("projects__create", { name: "ZZ Rescope Test" });
+      projectIds.push(proj.id);
+      const P = proj.key;
+
+      // modules: the whole description, truncation flag, prepend/append
+      const long = `ZZ ${"long description ".repeat(25)}(ADR end)`;
+      await call("modules__create", { project: P, name: "ZZ Core", description: long });
+      await call("modules__create", { project: P, name: "ZZ Extra" });
+      const [listed] = (await call("modules__list", { project: P, status: "all" })).filter((m: { name: string }) => m.name === "ZZ Core");
+      assert.equal(listed.descriptionTruncated, true, "modules.list says when it cut a description");
+      const full = await call("modules__get", { module: "ZZ Core", project: P });
+      assert.equal(full.description, long, "modules.get returns the whole description");
+      const pre = (await call("modules__update", { module: "ZZ Core", project: P, prependDescription: "DEFERRED. " })).updated;
+      assert.equal(pre.description, `DEFERRED. ${long}`);
+      assert.equal((await call("modules__update", { module: "ZZ Core", project: P, appendDescription: "\n\nSee D9." })).updated.description, `DEFERRED. ${long}\n\nSee D9.`);
+      assert.equal((await call("modules__update", { module: "ZZ Extra", project: P, appendDescription: "Only text." })).updated.description, "Only text.", "appending to an empty description");
+      assert.match(await errOf("modules__update", { module: "ZZ Core", project: P, description: "x", appendDescription: "y" }), /not both/);
+
+      // items: assignee on create / update / clear; list filters by it
+      const i1 = (await call("tasks__create", { project: P, title: "ZZ r1", feature: "ZZ Core", assignee: " Dana " })).created;
+      const i2 = (await call("tasks__create", { project: P, title: "ZZ r2", feature: "ZZ Core" })).created;
+      const i3 = (await call("tasks__create", { project: P, title: "ZZ r3", feature: "ZZ Extra" })).created;
+      assert.equal(i1.assignee, "Dana", "trimmed");
+      assert.equal((await call("tasks__update", { ref: i2.identifier, assignee: "agent:ethos" })).updated.assignee, "agent:ethos");
+      assert.deepEqual((await call("tasks__list", { project: P, assignee: "dana" })).map((t: { identifier: string }) => t.identifier), [i1.identifier], "assignee match ignores case");
+      assert.deepEqual((await call("tasks__list", { project: P, assignee: "none" })).map((t: { identifier: string }) => t.identifier), [i3.identifier]);
+      assert.equal((await call("tasks__update", { ref: i2.identifier, assignee: "" })).updated.assignee, null, "empty string unassigns");
+      assert.ok((await call("tasks__get", { ref: i2.identifier })).activity.some((a: { changed?: string; to?: string }) => a.changed === "assignee" && a.to === "agent:ethos"), "assignee changes are in the history");
+
+      // milestones: two stages that share an item, then the re-scope moves
+      await call("milestones__create", { project: P, name: "ZZ MVP", description: "first cut" });
+      await call("milestones__create", { project: P, name: "ZZ Next" });
+      await call("milestones__addContent", { milestone: "ZZ MVP", project: P, modules: ["ZZ Core"] });
+      await call("milestones__addContent", { milestone: "ZZ Next", project: P, items: [i1.identifier, i3.identifier] });
+      const mvp = await call("milestones__get", { milestone: "ZZ MVP", project: P });
+      assert.deepEqual(mvp.sharedWith, [{ milestone: "ZZ Next", items: [i1.identifier] }], "overlap between unrelated milestones is reported");
+      assert.deepEqual(
+        (await call("tasks__list", { project: P, milestone: "ZZ MVP" })).map((t: { identifier: string }) => t.identifier).sort(),
+        [i1.identifier, i2.identifier].sort(),
+        "tasks.list filters by milestone scope",
+      );
+      const withMs = await call("tasks__list", { project: P, withMilestones: true });
+      assert.deepEqual(withMs.find((t: { identifier: string }) => t.identifier === i1.identifier).milestones, ["ZZ MVP", "ZZ Next"]);
+      assert.deepEqual(withMs.find((t: { identifier: string }) => t.identifier === i3.identifier).milestones, ["ZZ Next"]);
+      assert.match(await errOf("tasks__list", { project: P, milestone: "ZZ Nope" }), /milestone/i);
+
+      // exclusions: exclude on one side clears the overlap; a plain add flips it back
+      await call("milestones__addContent", { milestone: "ZZ MVP", project: P, items: [i1.identifier], exclude: true });
+      assert.equal((await call("milestones__get", { milestone: "ZZ MVP", project: P })).sharedWith, undefined, "excluding on one side resolves it");
+      const back = await call("milestones__addContent", { milestone: "ZZ MVP", project: P, items: [i1.identifier] });
+      assert.deepEqual(back.included, [i1.identifier], "a plain add flips an exclusion back into scope");
+      await call("milestones__addContent", { milestone: "ZZ MVP", project: P, items: [i2.identifier], exclude: true });
+      const rm = await call("milestones__removeContent", { milestone: "ZZ MVP", project: P, modules: ["ZZ Core"] });
+      assert.deepEqual(rm.droppedExclusions, [i2.identifier], "removing the module drops the exclusion that only it needed");
+      const after = await call("milestones__get", { milestone: "ZZ MVP", project: P });
+      assert.deepEqual([after.excluded, after.progress.total], [[], 1], "only the re-added single item is left");
+
+      // criteria: reword in place, move to another milestone keeping the checked state
+      await call("milestones__criteria", { milestone: "ZZ MVP", project: P, add: ["Login works", "Audit log", "Exports"] });
+      await call("milestones__criteria", { milestone: "ZZ MVP", project: P, check: ["2"], edit: [{ criterion: "1", text: "Login + SSO works" }] });
+      const mv = await call("milestones__criteria", { milestone: "ZZ MVP", project: P, move: ["2", "Exports"], to: "ZZ Next" });
+      assert.deepEqual(mv.criteria, ["1. [ ] Login + SSO works"]);
+      assert.deepEqual(mv.movedTo, { milestone: "ZZ Next", criteria: ["1. [x] Audit log", "2. [ ] Exports"] });
+      assert.match(await errOf("milestones__criteria", { milestone: "ZZ MVP", project: P, move: ["1"] }), /needs `to`/);
+      assert.match(await errOf("milestones__criteria", { milestone: "ZZ MVP", project: P, move: ["1"], to: "ZZ MVP" }), /this milestone/);
+      await call("milestones__update", { milestone: "ZZ MVP", project: P, description: "MVP-1: the re-scoped cut" });
+      assert.equal((await call("milestones__get", { milestone: "ZZ MVP", project: P })).goal, "MVP-1: the re-scoped cut");
+
+      // decisions: a number range, paging, brief rows
+      for (let n = 1; n <= 6; n++) await call("decisions__record", { project: P, question: `ZZ q${n}`, answer: `a${n}`, notes: "long notes" });
+      const range = await call("decisions__list", { project: P, from: "D2", to: 5, limit: 2, brief: true });
+      assert.equal(range.total, 4, "D2–D5 inclusive");
+      assert.equal(range.decisions.length, 2, "paged");
+      assert.deepEqual(Object.keys(range.decisions[0]).sort(), ["answer", "decidedAt", "question", "ref"], "brief rows carry only the essentials");
+      const page2 = await call("decisions__list", { project: P, from: 2, to: 5, limit: 2, offset: 2, brief: true });
+      assert.deepEqual(
+        [...range.decisions, ...page2.decisions].map((d: { ref: string }) => d.ref).sort(),
+        ["D2", "D3", "D4", "D5"],
+        "the two pages cover the range exactly",
+      );
+
+      // cycles: a goal on create, update, list and get; a rename keeps it; empty clears it
+      const now = Date.now();
+      const sunday = new Date(now).setUTCHours(0, 0, 0, 0) - new Date(now).getUTCDay() * DAY;
+      const span = { startsAt: new Date(sunday).toISOString(), endsAt: new Date(sunday + 6 * DAY).toISOString() };
+      const cyc = (await call("cycles__create", { project: P, name: "ZZ goal sprint", goal: "Ship the MVP cut", ...span })).created;
+      assert.equal(cyc.goal, "Ship the MVP cut");
+      await call("cycles__update", { cycle: "ZZ goal sprint", project: P, name: "ZZ goal sprint 2" });
+      assert.equal((await call("cycles__get", { cycle: "ZZ goal sprint 2", project: P })).goal, "Ship the MVP cut", "a rename keeps the goal");
+      await call("cycles__update", { cycle: "ZZ goal sprint 2", project: P, goal: "Close the gaps" });
+      assert.equal((await call("cycles__list", { project: P })).find((c: { name: string }) => c.name === "ZZ goal sprint 2").goal, "Close the gaps");
+      await call("cycles__update", { cycle: "ZZ goal sprint 2", project: P, goal: "" });
+      assert.equal((await call("cycles__get", { cycle: "ZZ goal sprint 2", project: P })).goal ?? null, null, "an empty goal clears it");
+    } finally {
+      await client.close();
+    }
+  });
   await check("apos CLI: comment, docs with conflicts, decisions — one line out, exit codes", async () => {
     const { spawnSync } = await import("node:child_process");
     const { mkdtempSync, writeFileSync } = await import("node:fs");
@@ -449,6 +563,10 @@ try {
     await db.delete(features).where(inArray(features.projectId, projectIds));
     await db.delete(cycles).where(inArray(cycles.projectId, projectIds));
     await db.delete(projectDecisions).where(inArray(projectDecisions.projectId, projectIds));
+    const zzMilestones = db.select({ id: milestones.id }).from(milestones).where(inArray(milestones.projectId, projectIds));
+    await db.delete(milestoneContent).where(inArray(milestoneContent.milestoneId, zzMilestones));
+    await db.delete(milestoneCapabilities).where(inArray(milestoneCapabilities.milestoneId, zzMilestones));
+    await db.delete(milestones).where(inArray(milestones.projectId, projectIds));
     await db.execute(sql`delete from project_doc_versions where doc_id in (select id from project_docs where project_id in ${projectIds})`);
     await db.execute(sql`delete from project_docs where project_id in ${projectIds}`);
     await db.execute(sql`delete from work_counters where scope in ${[...projectIds, ...projectIds.map((id) => `decisions:${id}`)]}`);

@@ -138,11 +138,12 @@ export async function unrelateTask(relationId: string) {
 
 const toDate = (s: string) => new Date(`${s}T00:00:00`);
 
-export async function createCycleAction(input: { name: string; startsAt: string; endsAt: string; projectId?: string | null }) {
+export async function createCycleAction(input: { name: string; startsAt: string; endsAt: string; goal?: string; projectId?: string | null }) {
   const row = await createCycle(db, {
     name: input.name,
     startsAt: toDate(input.startsAt),
     endsAt: toDate(input.endsAt),
+    goal: input.goal,
     projectId: input.projectId ?? null,
   });
   recordUsage("work.cycle.create");
@@ -150,11 +151,12 @@ export async function createCycleAction(input: { name: string; startsAt: string;
   return row;
 }
 
-export async function updateCycleAction(id: string, patch: { name?: string; startsAt?: string; endsAt?: string }) {
+export async function updateCycleAction(id: string, patch: { name?: string; startsAt?: string; endsAt?: string; goal?: string }) {
   await updateCycle(db, id, {
     name: patch.name,
     startsAt: patch.startsAt ? toDate(patch.startsAt) : undefined,
     endsAt: patch.endsAt ? toDate(patch.endsAt) : undefined,
+    goal: patch.goal,
   });
   revalidateWork();
 }

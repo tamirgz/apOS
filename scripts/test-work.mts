@@ -362,6 +362,50 @@ try {
       await client.close();
     }
   });
+  await check("apos CLI: comment, docs with conflicts, decisions — one line out, exit codes", async () => {
+    const { spawnSync } = await import("node:child_process");
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "zz-cli-")); // a caller's own cwd: file args resolve there
+    const cli = (args: string[], stdin?: string) => {
+      const r = spawnSync(join(process.cwd(), "scripts/apos.sh"), args, { cwd: dir, input: stdin, encoding: "utf8", env: { ...process.env, APOS_ACTOR: "zz-cli" } });
+      return { code: r.status, out: r.stdout, err: r.stderr };
+    };
+    const p = await zzProject("ZZ CLI Test", "ZZCLI");
+    const item = await createWorkItem(db, { title: "ZZ cli item", projectRef: `projects:${p.id}` }, "user");
+
+    const note = "## Finding\n\n  indented `code` — ünïcode\n\n| a | b |\n|---|---|\n| 1 | 2 |";
+    const c = cli(["tasks.comment", `ref=${item.identifier}`, "body=@-"], `${note}\n\n`);
+    assert.deepEqual([c.code, c.err], [0, ""]);
+    assert.match(c.out, /^[0-9a-f-]{36}\n$/, "stdout is the comment id alone");
+    const [row] = await db.select().from(taskActivity).where(eq(taskActivity.id, c.out.trim()));
+    assert.equal(row.body, note, "the body lands as sent (edges trimmed, like every comment)");
+    assert.match(row.actor ?? "", /^agent:zz-cli:apos-cli#[0-9a-f]{6}$/, "credited like an MCP session");
+
+    const doc = "# Resume\n\n## Next steps\n\nold\n\n## Notes\n\nkeep me\n";
+    writeFileSync(join(dir, "doc.md"), doc);
+    assert.deepEqual(cli(["docs.put", "project=ZZCLI", "key=zz-resume", "body=@doc.md", "expectedVersion=0"]).out, "1\n", "a new doc → version 1");
+    const patched = cli(["docs.patchSection", "project=ZZ CLI Test", "key=zz-resume", "heading=Next steps", "body=@-", "expectedVersion=1"], "\nnew\n\n");
+    assert.deepEqual([patched.code, patched.out], [0, "2\n"]);
+    const stale = cli(["docs.patchSection", "project=ZZCLI", "key=zz-resume", "heading=Notes", "body=x", "expectedVersion=1"]);
+    assert.equal(stale.code, 3, "a stale expectedVersion is a conflict");
+    assert.deepEqual([stale.out, stale.err.split("\n").length], ["", 2], "nothing on stdout, one line on stderr");
+    assert.match(stale.err, /^conflict: The doc is at version 2, not 1/);
+    const got = JSON.parse(cli(["docs.get", "project=ZZCLI", "key=zz-resume"]).out);
+    assert.deepEqual([got.version, got.body], [2, "# Resume\n\n## Next steps\n\nnew\n\n## Notes\n\nkeep me\n"], "the conflict wrote nothing");
+    assert.equal(cli(["docs.put", "project=ZZCLI", "key=zz-resume", "body=@doc.md", "expectedVersion=0"]).code, 3, "0 on an existing doc conflicts too");
+
+    const d = cli(["decisions.record", "project=ZZCLI", "question=ZZ ship it?", "answer=Yes", `items:=["${item.identifier}"]`, "source=zz-cli:1"]);
+    assert.deepEqual([d.code, d.out], [0, "D1\n"]);
+    assert.equal(cli(["decisions.record", "project=ZZCLI", "question=dup", "answer=dup", "source=zz-cli:1"]).out, "D1\n", "same source → the existing decision");
+
+    const bad = cli(["docs.put", "project=ZZCLI", "key=zz-resume", "body=x", "expectedVersion=two"]);
+    assert.deepEqual([bad.code, bad.out], [2, ""], "a value that doesn't fit the field is a usage error");
+    assert.match(bad.err, /^usage: expectedVersion takes a number/);
+    assert.equal(cli(["tasks.comment", "ref=ZZCLI-9999", "body=x"]).code, 1, "an unknown item is an error");
+    assert.equal(cli(["memory.update"]).code, 2, "only the work-tracker surface");
+  });
 } finally {
   // teardown
   const zzTasks = await db.select({ id: tasks.id }).from(tasks).where(inArray(tasks.projectRef, projectIds.map((id) => `projects:${id}`)));
@@ -370,6 +414,8 @@ try {
     await db.delete(features).where(inArray(features.projectId, projectIds));
     await db.delete(cycles).where(inArray(cycles.projectId, projectIds));
     await db.delete(projectDecisions).where(inArray(projectDecisions.projectId, projectIds));
+    await db.execute(sql`delete from project_doc_versions where doc_id in (select id from project_docs where project_id in ${projectIds})`);
+    await db.execute(sql`delete from project_docs where project_id in ${projectIds}`);
     await db.execute(sql`delete from work_counters where scope in ${[...projectIds, ...projectIds.map((id) => `decisions:${id}`)]}`);
     await db.delete(projects).where(inArray(projects.id, projectIds));
   }

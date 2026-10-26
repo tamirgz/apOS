@@ -48,6 +48,7 @@ export async function recordDecision(
   }
   const old = input.supersedes !== undefined ? await findDecision(db, input.projectId, input.supersedes) : null;
   if (input.supersedes !== undefined && !old) return { error: `No decision D${input.supersedes} in that project` };
+  if (old?.deletedAt) return { error: `D${old.number} is deleted` };
   if (old?.supersededBy) return { error: `D${old.number} is already superseded` };
   const number = await nextNumber(db, decisionScope(input.projectId));
   const [decision] = await db
@@ -86,7 +87,7 @@ export interface DecisionPatch {
 /** Correct a recorded decision (a typo, a missing item link). A changed decision is a new one: record it with `supersedes`. */
 export async function updateDecision(db: Db, projectId: string, number: number, patch: DecisionPatch, actor: string) {
   const cur = await findDecision(db, projectId, number);
-  if (!cur) return null;
+  if (!cur || cur.deletedAt) return null;
   const drop = new Set(patch.removeTaskIds ?? []);
   const taskIds = [...new Set([...cur.taskIds, ...(patch.addTaskIds ?? [])])].filter((id) => !drop.has(id));
   const [row] = await db
@@ -105,6 +106,41 @@ export async function updateDecision(db: Db, projectId: string, number: number, 
   return row;
 }
 
+/**
+ * Soft-delete a decision (a duplicate, a ruling recorded by mistake): it leaves
+ * every list but stays readable by number with who deleted it and when, and it
+ * keeps its `source`, so re-running an import doesn't bring it back. A decision
+ * it superseded becomes current again — reported as `reinstated`.
+ */
+export async function deleteDecision(
+  db: Db,
+  projectId: string,
+  number: number,
+  actor: string,
+): Promise<{ decision: ProjectDecision; reinstated: number[] } | { error: string } | null> {
+  return db.transaction(async (tx) => {
+    const [cur] = await tx
+      .select()
+      .from(projectDecisions)
+      .where(and(eq(projectDecisions.projectId, projectId), eq(projectDecisions.number, number)))
+      .for("update");
+    if (!cur) return null;
+    if (cur.deletedAt) return { error: `D${number} is already deleted (by ${cur.deletedBy}, ${cur.deletedAt.toISOString()})` };
+    const now = new Date();
+    const [decision] = await tx
+      .update(projectDecisions)
+      .set({ deletedAt: now, deletedBy: actor, updatedBy: actor, updatedAt: now })
+      .where(eq(projectDecisions.id, cur.id))
+      .returning();
+    const reinstated = await tx
+      .update(projectDecisions)
+      .set({ supersededBy: null, updatedBy: actor, updatedAt: now })
+      .where(eq(projectDecisions.supersededBy, cur.id))
+      .returning({ number: projectDecisions.number });
+    return { decision, reinstated: reinstated.map((r) => r.number) };
+  });
+}
+
 export interface DecisionQuery {
   taskId?: string;
   /** Matched case-insensitively against question, answer and notes. */
@@ -112,6 +148,7 @@ export interface DecisionQuery {
   since?: Date;
   until?: Date;
   includeSuperseded?: boolean;
+  includeDeleted?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -120,6 +157,7 @@ export interface DecisionQuery {
 export async function listDecisions(db: Db, projectId: string, q: DecisionQuery = {}) {
   const where: (SQL | undefined)[] = [eq(projectDecisions.projectId, projectId)];
   if (!q.includeSuperseded) where.push(isNull(projectDecisions.supersededBy));
+  if (!q.includeDeleted) where.push(isNull(projectDecisions.deletedAt));
   if (q.taskId) where.push(arrayContains(projectDecisions.taskIds, [q.taskId]));
   if (q.since) where.push(gte(projectDecisions.decidedAt, q.since));
   if (q.until) where.push(lt(projectDecisions.decidedAt, q.until));
@@ -170,6 +208,7 @@ export async function presentDecisions(db: Db, rows: ProjectDecision[]) {
     ...(d.supersededBy ? { supersededBy: `D${next.get(d.supersededBy) ?? "?"}` } : {}),
     ...(d.source ? { source: d.source } : {}),
     recordedBy: d.createdBy,
+    ...(d.deletedAt ? { deleted: { at: d.deletedAt, by: d.deletedBy } } : {}),
   }));
 }
 

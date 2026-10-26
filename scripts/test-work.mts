@@ -291,7 +291,7 @@ try {
       const listed = (await client.listTools()).tools;
       const names = listed.map((t) => t.name);
       assert.equal(listed.find((t) => t.name === "cycles__delete")?.annotations?.destructiveHint, true, "cycles.delete is marked destructive");
-      for (const n of ["tasks__create", "tasks__relate", "cycles__create", "cycles__delete", "cycles__get", "modules__update", "projects__list", "decisions__record", "decisions__list"]) assert.ok(names.includes(n), `exposes ${n}`);
+      for (const n of ["tasks__create", "tasks__relate", "cycles__create", "cycles__delete", "cycles__get", "modules__update", "projects__list", "decisions__record", "decisions__list", "decisions__delete", "docs__delete"]) assert.ok(names.includes(n), `exposes ${n}`);
       assert.ok(!names.includes("memory__update"), "only the work-tracker surface");
       const call = async (name: string, args: Record<string, unknown>) => {
         const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
@@ -356,6 +356,38 @@ try {
       const upd = (await call("decisions__update", { project: proj.key, decision: "D2", addItems: [b.identifier], notes: "cheap" })).updated;
       assert.deepEqual([upd.items, upd.notes], [[b.identifier], "cheap"]);
       assert.ok((await client.callTool({ name: "decisions__record", arguments: { project: proj.key, question: "x", answer: "y", supersedes: 1 } }) as { isError?: boolean }).isError, "a superseded decision can't be superseded again");
+      const errOf = async (name: string, args: Record<string, unknown>) => {
+        const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+        assert.ok(r.isError, `${name} should fail`);
+        return r.content[0].text;
+      };
+      const del = await call("decisions__delete", { project: proj.key, decision: "D3", confirm: true });
+      assert.deepEqual([del.deleted.ref, del.reinstated], ["D3", ["D1"]], "deleting D3 reinstates the D1 it superseded");
+      assert.match(del.deleted.deleted.by, /^agent:zz-test:/, "records who deleted it");
+      assert.deepEqual((await call("decisions__list", { project: proj.key, item: a.identifier })).decisions.map((d: { ref: string }) => d.ref), ["D1"], "deleted ones are out of default lists");
+      assert.ok((await call("decisions__list", { project: proj.key, includeDeleted: true })).decisions.some((d: { ref: string }) => d.ref === "D3"));
+      const gone = await call("decisions__get", { project: proj.key, decision: 3 });
+      assert.equal(gone.deleted.by, del.deleted.deleted.by, "a deleted decision stays readable, marked");
+      assert.equal((await call("decisions__get", { project: proj.key, decision: 1 })).supersededBy, undefined);
+      assert.match(await errOf("decisions__delete", { project: proj.key, decision: "D3", confirm: true }), /D3 is already deleted/);
+      assert.match(await errOf("decisions__delete", { project: proj.key, decision: 99, confirm: true }), /No decision D99/);
+      await errOf("decisions__update", { project: proj.key, decision: "D3", notes: "x" });
+      await errOf("decisions__record", { project: proj.key, question: "x", answer: "y", supersedes: "D3" });
+      await errOf("decisions__delete", { project: proj.key, decision: "D2" }); // confirm is required
+      const dupSrc = (await call("decisions__record", { project: proj.key, question: "ZZ dup", answer: "dup", source: "zz:dup" })).recorded;
+      await call("decisions__delete", { project: proj.key, decision: dupSrc.ref, confirm: true });
+      const again = await call("decisions__record", { project: proj.key, question: "ZZ dup", answer: "dup", source: "zz:dup" });
+      assert.deepEqual([again.alreadyRecorded?.ref, !!again.alreadyRecorded?.deleted], [dupSrc.ref, true], "re-importing a deleted source doesn't resurrect it");
+      // docs.delete: a soft delete that keeps the whole history; writing the key again restores it
+      assert.equal((await call("docs__put", { project: proj.key, key: "zz-retire", body: "# old\n", expectedVersion: 0 })).written.version, 1);
+      assert.deepEqual((await call("docs__delete", { project: proj.key, key: "zz-retire", confirm: true, expectedVersion: 1 })).deleted, { key: "zz-retire", version: 2 });
+      assert.ok(!(await call("docs__list", { project: proj.key })).some((d: { key: string }) => d.key === "zz-retire"), "gone from docs.list");
+      const hist = await call("docs__history", { project: proj.key, key: "zz-retire" });
+      assert.deepEqual([hist[0].change, hist.length], ["deleted", 2], "the delete is a version");
+      assert.match(hist[0].updatedBy, /^agent:zz-test:/, "with its actor");
+      assert.equal((await call("docs__get", { project: proj.key, key: "zz-retire", version: 1 })).body, "# old\n", "old versions stay readable");
+      assert.equal((await call("docs__put", { project: proj.key, key: "zz-retire", body: "# back\n" })).written.version, 3);
+      assert.ok((await call("docs__list", { project: proj.key })).some((d: { key: string }) => d.key === "zz-retire"), "rewriting restores it");
       const bad = (await client.callTool({ name: "tasks__update", arguments: { ref: "ZZMCP-9999", title: "x" } })) as { isError?: boolean };
       assert.ok(bad.isError, "unknown identifier is an error, not a silent no-op");
     } finally {
@@ -399,6 +431,9 @@ try {
     const d = cli(["decisions.record", "project=ZZCLI", "question=ZZ ship it?", "answer=Yes", `items:=["${item.identifier}"]`, "source=zz-cli:1"]);
     assert.deepEqual([d.code, d.out], [0, "D1\n"]);
     assert.equal(cli(["decisions.record", "project=ZZCLI", "question=dup", "answer=dup", "source=zz-cli:1"]).out, "D1\n", "same source → the existing decision");
+    assert.equal(JSON.parse(cli(["decisions.delete", "project=ZZCLI", "decision=D1", "confirm=true"]).out).deleted.ref, "D1", "confirm=true is the literal true");
+    assert.equal(cli(["docs.delete", "project=ZZCLI", "key=zz-resume", "confirm=true"]).code, 0);
+    assert.equal(cli(["docs.delete", "project=ZZCLI", "key=zz-resume", "confirm=false"]).code, 2, "anything but true is a usage error");
 
     const bad = cli(["docs.put", "project=ZZCLI", "key=zz-resume", "body=x", "expectedVersion=two"]);
     assert.deepEqual([bad.code, bad.out], [2, ""], "a value that doesn't fit the field is a usage error");

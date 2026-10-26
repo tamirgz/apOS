@@ -298,6 +298,9 @@ export const projectDecisions = pgTable(
     taskIds: uuid("task_ids").array().notNull().default(sql`'{}'::uuid[]`),
     source: text("source"),
     supersededBy: uuid("superseded_by"),
+    /** Soft delete: out of every list, still readable by number, keeps its source. */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: text("deleted_by"),
     createdBy: text("created_by").notNull(),
     updatedBy: text("updated_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

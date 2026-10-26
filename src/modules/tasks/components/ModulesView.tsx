@@ -390,7 +390,10 @@ export function ModuleHeader({
     start(async () => {
       setError(null);
       try {
-        after?.(await fn());
+        // Not `after?.(await fn())`: an optional call skips its arguments when
+        // `after` is absent, so the action itself would never run.
+        const r = await fn();
+        after?.(r);
         router.refresh();
       } catch (e) {
         setError(errorText(e));

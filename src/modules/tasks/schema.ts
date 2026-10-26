@@ -80,6 +80,9 @@ export const tasks = pgTable(
     /** A creator's retry key: a second tasks.create with the same key in the
      *  same project returns this item instead of making a duplicate. */
     idempotencyKey: text("idempotency_key"),
+    /** Who is responsible for the item — a person or an agent, free text.
+     *  Unlike a claim it doesn't lock or expire; it's ownership, not activity. */
+    assignee: text("assignee"),
     /** Who is working this item (an actor, e.g. "agent:claude-code/2.1#3f9a1c")
      *  and until when. A claim past its expiry is free to take; the worker
      *  clears expired ones (work_backfill). */
@@ -209,6 +212,8 @@ export const cycles = pgTable(
     name: text("name").notNull(),
     startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
     endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    /** What the cycle is for — the outcome it commits to (markdown). */
+    goal: text("goal"),
     externalRef: text("external_ref"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

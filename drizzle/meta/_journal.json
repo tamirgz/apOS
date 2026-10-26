@@ -547,6 +547,13 @@
       "when": 1793002916468,
       "tag": "0077_decision_soft_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1793019670768,
+      "tag": "0078_cycle_goal_task_assignee",
+      "breakpoints": true
     }
   ]
 }

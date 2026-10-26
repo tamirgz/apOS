@@ -149,6 +149,41 @@ async function requiresIds(ctx: AiToolContext, projectId: string, self: string |
   return { ids };
 }
 
+/** Content rows as people name them: ES-12, module "Auth". */
+async function contentNames(ctx: AiToolContext, projectId: string, rows: { kind: Target["kind"]; targetId: string }[]) {
+  const { byKey } = await projectItems(ctx, projectId);
+  const feats = await ctx.db.select({ id: features.id, name: features.name }).from(features).where(eq(features.projectId, projectId));
+  const fName = new Map(feats.map((x) => [x.id, x.name]));
+  return rows.map((r) =>
+    r.kind === "item" ? (byKey.get(r.targetId)?.identifier ?? r.targetId) : r.kind === "module" ? `module "${fName.get(r.targetId) ?? r.targetId}"` : `${r.kind} ${r.targetId}`,
+  );
+}
+
+/**
+ * The milestone's exclusion rows that take something out of its scope: an
+ * excluded item the rest of its content would bring in, an excluded module
+ * with an item it would bring in. The others exclude nothing.
+ */
+function liveExclusions(bundle: MilestoneBundle, milestoneId: string, items: WorkItem[]): Set<string> {
+  const ex = bundle.content.filter((c) => c.milestoneId === milestoneId && c.exclude);
+  if (!ex.length) return new Set();
+  const open = { ...bundle, content: bundle.content.filter((c) => !(c.milestoneId === milestoneId && c.exclude)) };
+  const reach = milestoneResolver(open, items.map((t) => ({ ...t, status: "todo" as const })))(milestoneId).items.map((x) => x.item);
+  const ids = new Set(reach.map((t) => t.id));
+  const mods = new Set(reach.map((t) => t.featureRef?.slice(9)));
+  return new Set(ex.filter((c) => (c.kind === "item" ? ids.has(c.targetId) : mods.has(c.targetId))).map((c) => c.id));
+}
+
+/** Milestones this one contains, directly or through others. */
+function nestedIn(bundle: MilestoneBundle, id: string, seen = new Set<string>()): Set<string> {
+  for (const c of bundle.content)
+    if (c.milestoneId === id && c.kind === "milestone" && !c.exclude && !seen.has(c.targetId)) {
+      seen.add(c.targetId);
+      nestedIn(bundle, c.targetId, seen);
+    }
+  return seen;
+}
+
 const contentLists = {
   modules: z.array(z.string()).optional().describe("Whole modules, by ref ('m2') or NAME — every item filed in them counts, now and later"),
   items: z.array(z.string()).optional().describe("Single work items (tasks, bugs, phases…), by identifier ('ETHOS-12') or ref ('t3') — use for modules only partly in scope"),
@@ -200,7 +235,8 @@ export const milestoneTools: AiToolDef[] = [
   {
     name: "milestones.get",
     description:
-      "One milestone in full: goal, target and forecast, exit criteria, each capability with its progress and content (modules, items, nested milestones, entities, exclusions), and the open work still left.",
+      "One milestone in full: goal, target and forecast, exit criteria, each capability with its progress and content (modules, items, nested milestones, entities, exclusions), the open work still left, " +
+      "and `sharedWith` — items this milestone counts that another milestone (neither containing the other) counts too; exclude them from one side with milestones.addContent exclude: true if they belong to only one.",
     input: z.object({
       milestone: z.string().describe("Milestone ref ('ms1') or NAME"),
       project: z.string().optional().describe("Its project NAME or key (needed with a NAME used in several projects)"),
@@ -234,6 +270,12 @@ export const milestoneTools: AiToolDef[] = [
       };
       const [me] = registerRefs(ctx, "milestone", "ms", [{ id: m.id, name: m.name }]);
       const open = resolve(m.id).items.filter((x) => x.item.status !== "done").map((x) => x.item);
+      const mine = new Set(resolve(m.id).items.map((x) => x.item.id));
+      const inside = nestedIn(bundle, m.id);
+      const sharedWith = orderMilestones(bundle.milestones)
+        .filter((o) => o.id !== m.id && !inside.has(o.id) && !nestedIn(bundle, o.id).has(m.id))
+        .map((o) => ({ milestone: o.name, items: resolve(o.id).items.filter((x) => mine.has(x.item.id)).map((x) => x.item.identifier ?? x.item.id) }))
+        .filter((o) => o.items.length);
       return {
         ref: me.ref,
         name: m.name,
@@ -255,6 +297,7 @@ export const milestoneTools: AiToolDef[] = [
           content: rows.filter((r) => !r.exclude && (c.id ? r.capabilityId === c.id : !r.capabilityId || !capIds.has(r.capabilityId))).map(describe),
         })),
         excluded: rows.filter((r) => r.exclude).map(describe),
+        ...(sharedWith.length ? { sharedWith } : {}),
         remaining: open
           .sort((a, b) => ["review", "doing", "todo", "backlog"].indexOf(a.status) - ["review", "doing", "todo", "backlog"].indexOf(b.status))
           .slice(0, input.remaining)
@@ -360,13 +403,14 @@ export const milestoneTools: AiToolDef[] = [
   {
     name: "milestones.addContent",
     description:
-      "Add delivery content to a milestone — whole modules, single work items (for a module only partly in scope, add its items instead of the module), other milestones, or any other apOS entity — optionally under a named capability (created if new). Re-adding existing content updates it: moves it to `capability`, or sets `exclude` / `done`. `exclude: true` takes modules or items OUT of scope (e.g. a whole module except one item).",
+      "Add delivery content to a milestone — whole modules, single work items (for a module only partly in scope, add its items instead of the module), other milestones, or any other apOS entity — optionally under a named capability (created if new). Re-adding existing content updates it: moves it to `capability`, or sets `done`. " +
+      "Adding puts content IN scope — a module or item excluded here becomes included again (reported as `included`). `exclude: true` takes modules or items OUT of scope instead (e.g. a whole module except one item).",
     input: z.object({
       milestone: z.string().describe("Milestone ref ('ms1') or NAME"),
       project: z.string().optional(),
       capability: z.string().optional().describe("Capability NAME to file the content under; created when new"),
       ...contentLists,
-      exclude: z.boolean().optional().describe("true = these modules/items are excluded from scope"),
+      exclude: z.boolean().default(false).describe("true = these modules/items are excluded from scope; default false = in scope"),
       done: z.boolean().optional().describe("For entities: mark the deliverable done (work items and modules track their own state)"),
     }),
     async execute(input, ctx) {
@@ -378,20 +422,38 @@ export const milestoneTools: AiToolDef[] = [
       if (input.exclude && r.targets.some((t) => t.kind === "milestone" || t.kind === "entity"))
         return { error: "only modules and items can be excluded — remove a milestone or entity with milestones.removeContent" };
       const capabilityId = input.capability?.trim() ? await ensureCapability(ctx.db, f.m.id, input.capability) : undefined;
+      const rows = f.bundle.content.filter((c) => c.milestoneId === f.m.id);
+      const flipped = r.targets.filter((t) => rows.some((c) => c.kind === t.kind && c.targetId === t.targetId && c.exclude !== input.exclude));
       const n = await upsertContent(ctx.db, f.m.id, r.targets, { capabilityId, exclude: input.exclude, done: input.done });
-      return { added: n, milestone: f.m.name, ...(input.capability?.trim() ? { capability: input.capability.trim() } : {}) };
+      const names = flipped.length ? await contentNames(ctx, f.m.projectId, flipped) : [];
+      return {
+        added: n,
+        milestone: f.m.name,
+        ...(input.capability?.trim() ? { capability: input.capability.trim() } : {}),
+        ...(names.length ? { [input.exclude ? "excluded" : "included"]: names } : {}),
+      };
     },
   },
   {
     name: "milestones.removeContent",
-    description: "Remove content rows (modules, items, milestones, entities — including exclusions) from a milestone. The work itself is untouched.",
+    description:
+      "Remove content rows (modules, items, milestones, entities — including exclusions) from a milestone. The work itself is untouched. " +
+      "Exclusions that only mattered because of what was removed (e.g. an excluded item of a removed module) go with it and come back as `droppedExclusions`.",
     input: z.object({ milestone: z.string().describe("Milestone ref ('ms1') or NAME"), project: z.string().optional(), ...contentLists }),
     async execute(input, ctx) {
       const f = await findMilestone(ctx, input.project, input.milestone);
       if ("error" in f) return f;
       const r = await resolveTargets(ctx, f, input);
       if ("error" in r) return r;
-      return { removed: await removeContent(ctx.db, f.m.id, r.targets) };
+      const { items } = await projectItems(ctx, f.m.projectId);
+      const before = liveExclusions(f.bundle, f.m.id, items);
+      const removed = await removeContent(ctx.db, f.m.id, r.targets);
+      const after = await loadMilestoneBundle(ctx.db, f.m.projectId);
+      const live = liveExclusions(after, f.m.id, items);
+      const orphans = after.content.filter((c) => c.milestoneId === f.m.id && c.exclude && before.has(c.id) && !live.has(c.id));
+      if (orphans.length) await removeContent(ctx.db, f.m.id, orphans);
+      const names = orphans.length ? await contentNames(ctx, f.m.projectId, orphans) : [];
+      return { removed, ...(names.length ? { droppedExclusions: names } : {}) };
     },
   },
   {
@@ -444,14 +506,22 @@ export const milestoneTools: AiToolDef[] = [
   {
     name: "milestones.criteria",
     description:
-      "Edit a milestone's exit criteria — the conditions besides its content that must hold to call it reached. Add new ones, check / uncheck / remove existing ones by number (1-based, as milestones.get lists them) or exact text.",
+      "Edit a milestone's exit criteria — the conditions besides its content that must hold to call it reached. Add new ones (appended, unchecked), reword / check / uncheck / remove existing ones by number (1-based, as milestones.get lists them) or exact text. " +
+      "Every number in one call means the list as it was BEFORE the call (renumbering happens once, at the end), so remove: ['2','4'] is safe. " +
+      "`move` + `to` moves criteria to another milestone of the project — appended there in order, text and checked state kept.",
     input: z.object({
       milestone: z.string().describe("Milestone ref ('ms1') or NAME"),
       project: z.string().optional(),
       add: z.array(z.string().min(1)).optional(),
+      edit: z
+        .array(z.object({ criterion: z.string().describe("Its number or exact text"), text: z.string().min(1) }))
+        .optional()
+        .describe("Reword in place — keeps its number and checked state"),
       check: z.array(z.string()).optional(),
       uncheck: z.array(z.string()).optional(),
-      remove: z.array(z.string()).optional(),
+      remove: z.array(z.string()).optional().describe("One entry per criterion: ['2','3'], not '2,3'"),
+      move: z.array(z.string()).optional().describe("Criteria (number or exact text) to move to the `to` milestone"),
+      to: z.string().optional().describe("With move: the milestone (ref or NAME) they move to"),
     }),
     async execute(input, ctx) {
       const f = await findMilestone(ctx, input.project, input.milestone);
@@ -469,10 +539,39 @@ export const milestoneTools: AiToolDef[] = [
       mark(input.check, true);
       mark(input.uncheck, false);
       const drop = new Set((input.remove ?? []).map((k: string) => find(k)?.id ?? (missing.push(k), "")));
+      const moving = (input.move ?? []).map((k: string) => find(k) ?? (missing.push(k), null)).filter((c: MilestoneCriterion | null): c is MilestoneCriterion => !!c);
+      // Resolve every edit before rewording any, so a text key never sees a new text.
+      const edits = (input.edit ?? []).map((e: { criterion: string; text: string }) => ({ c: find(e.criterion) ?? (missing.push(e.criterion), null), text: e.text.trim() }));
       if (missing.length) return { error: `No criterion ${missing.map((k) => `"${k}"`).join(", ")}` };
-      const next = [...list.filter((c) => !drop.has(c.id)), ...(input.add ?? []).map((text: string) => ({ id: randomUUID(), text: text.trim(), done: false }))];
-      await ctx.db.update(milestones).set({ criteria: next, updatedAt: new Date() }).where(eq(milestones.id, f.m.id));
-      return { criteria: next.map((c, i) => `${i + 1}. [${c.done ? "x" : " "}] ${c.text}`) };
+      if (moving.length && !input.to) return { error: "move needs `to` — the milestone they move to" };
+      if (input.to && !moving.length) return { error: "`to` needs move — the criteria to move" };
+      let dest: MilestoneInfo | undefined;
+      if (input.to) {
+        const d = await findMilestone(ctx, input.project, input.to);
+        if ("error" in d) return d;
+        if (d.m.projectId !== f.m.projectId) return { error: `"${d.m.name}" is in another project` };
+        if (d.m.id === f.m.id) return { error: "`to` is this milestone" };
+        dest = d.m;
+      }
+      for (const e of edits) if (e.c) e.c.text = e.text;
+      const moved = new Set(moving.map((c: MilestoneCriterion) => c.id));
+      const render = (l: MilestoneCriterion[]) => l.map((c, i) => `${i + 1}. [${c.done ? "x" : " "}] ${c.text}`);
+      const next = [
+        ...list.filter((c) => !drop.has(c.id) && !moved.has(c.id)),
+        ...(input.add ?? []).map((text: string) => ({ id: randomUUID(), text: text.trim(), done: false })),
+      ];
+      const now = new Date();
+      if (!dest) {
+        await ctx.db.update(milestones).set({ criteria: next, updatedAt: now }).where(eq(milestones.id, f.m.id));
+        return { criteria: render(next) };
+      }
+      // In list order, whatever order they were named in; both lists change together or not at all.
+      const there = [...dest.criteria, ...list.filter((c) => moved.has(c.id))];
+      await ctx.db.transaction(async (tx) => {
+        await tx.update(milestones).set({ criteria: next, updatedAt: now }).where(eq(milestones.id, f.m.id));
+        await tx.update(milestones).set({ criteria: there, updatedAt: now }).where(eq(milestones.id, dest.id));
+      });
+      return { criteria: render(next), movedTo: { milestone: dest.name, criteria: render(there) } };
     },
   },
 ];

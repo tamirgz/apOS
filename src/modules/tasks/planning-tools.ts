@@ -77,6 +77,7 @@ export const planningTools: AiToolDef[] = [
           id: c.id,
           name: c.name,
           status: c.status,
+          goal: c.goal,
           startsAt: c.startsAt,
           endsAt: c.endsAt,
           crossProject: !c.projectId,
@@ -90,7 +91,7 @@ export const planningTools: AiToolDef[] = [
   {
     name: "cycles.get",
     description:
-      "One cycle in full: dates, status, progress, items per state, and its ghosts — the members its counts mislead about, each bucket with a count and the item identifiers: `cancelled` (members counted nowhere), `doneOutside` (done on a date outside the window that no cycle holds — a done item is otherwise filed under the cycle of its done date automatically), `undated` (open, no due date) and `dueOutside` (open, due before the cycle starts or after it ends).",
+      "One cycle in full: goal, dates, status, progress, items per state, and its ghosts — the members its counts mislead about, each bucket with a count and the item identifiers: `cancelled` (members counted nowhere), `doneOutside` (done on a date outside the window that no cycle holds — a done item is otherwise filed under the cycle of its done date automatically), `undated` (open, no due date) and `dueOutside` (open, due before the cycle starts or after it ends).",
     input: z.object({
       cycle: z.string().describe("Cycle ref ('c1'), NAME, or 'current'"),
       project: z.string().optional().describe("Project NAME or key — picks among same-named or 'current' cycles"),
@@ -117,6 +118,7 @@ export const planningTools: AiToolDef[] = [
         ...row,
         project: project?.name ?? null,
         status: cycleStatus(c),
+        goal: c.goal,
         startsAt: c.startsAt,
         endsAt: c.endsAt,
         items: counted.length,
@@ -142,6 +144,7 @@ export const planningTools: AiToolDef[] = [
       name: z.string().min(1),
       startsAt: z.string().describe("Start date, ISO 8601 — a Sunday"),
       endsAt: z.string().describe("End date, ISO 8601"),
+      goal: z.string().optional().describe("What the cycle commits to — its outcome (markdown)"),
       project: z.string().optional().describe("Project NAME or key; omit for the focused project, or a cross-project cycle"),
     }),
     async execute(input, ctx) {
@@ -150,9 +153,9 @@ export const planningTools: AiToolDef[] = [
       const p = await resolveProject(ctx, input.project);
       if (p && "error" in p) return p;
       try {
-        const c = await createCycle(ctx.db, { name: input.name, startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), projectId: p?.id ?? null });
+        const c = await createCycle(ctx.db, { name: input.name, startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), goal: input.goal, projectId: p?.id ?? null });
         const [row] = registerRefs(ctx, "cycle", "c", [{ id: c.id, name: c.name, status: cycleStatus(c) }]);
-        return { created: row };
+        return { created: { ...row, ...(c.goal ? { goal: c.goal } : {}) } };
       } catch (e) {
         return errorOf(e);
       }
@@ -160,23 +163,28 @@ export const planningTools: AiToolDef[] = [
   },
   {
     name: "cycles.update",
-    description: "Rename a cycle or change its dates (a cycle starts on a Sunday). Pass only what changes.",
+    description: "Rename a cycle, set its goal or change its dates (a cycle starts on a Sunday). Pass only what changes.",
     input: z.object({
       cycle: z.string().describe("Cycle ref ('c1'), NAME, or 'current'"),
       name: z.string().min(1).optional(),
       startsAt: z.string().optional().describe("ISO 8601"),
       endsAt: z.string().optional().describe("ISO 8601"),
+      goal: z.string().optional().describe("What the cycle commits to (markdown); empty string clears it"),
+      project: z.string().optional().describe("Project NAME or key — picks among same-named or 'current' cycles"),
     }),
     async execute(input, ctx) {
       const wrongDay = input.startsAt ? offWeekStart(input.startsAt) : null;
       if (wrongDay) return wrongDay;
-      const c = await resolveCycle(ctx, null, input.cycle);
+      const p = await resolveProject(ctx, input.project);
+      if (p && "error" in p) return p;
+      const c = await resolveCycle(ctx, p?.id ?? null, input.cycle);
       if ("error" in c) return c;
       try {
         await updateCycle(ctx.db, c.id, {
           name: input.name,
           startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
           endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
+          goal: input.goal,
         });
         return { updated: true };
       } catch (e) {
@@ -227,10 +235,11 @@ export const planningTools: AiToolDef[] = [
   {
     name: "modules.list",
     description:
-      "List a project's modules (features): status (planned / active / paused / shipped / cancelled), start → target dates and progress (done / total items). Each comes back with a `ref` (m1…) for tasks.create / tasks.update / modules.update.",
+      "List a project's modules (features): status (planned / active / paused / shipped / cancelled), start → target dates and progress (done / total items). Each comes back with a `ref` (m1…) for tasks.create / tasks.update / modules.update. A description longer than 280 characters is cut (descriptionTruncated: true) unless fullDescriptions: true — modules.get also returns it whole.",
     input: z.object({
       project: z.string().optional().describe("Project NAME or key; omit for the focused project (or all projects)"),
       status: z.enum([...FEATURE_STATUSES, "live", "all"]).default("live").describe("'live' (default) = planned, active and paused"),
+      fullDescriptions: z.boolean().default(false).describe("Return every description whole instead of cut at 280 characters"),
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
@@ -258,7 +267,8 @@ export const planningTools: AiToolDef[] = [
         "m",
         rows.map((r) => ({
           ...r,
-          description: r.description ? r.description.slice(0, 280) : null,
+          description: r.description && !input.fullDescriptions ? r.description.slice(0, 280) : r.description,
+          ...(!input.fullDescriptions && (r.description?.length ?? 0) > 280 ? { descriptionTruncated: true } : {}),
           items: progress.get(r.id)?.total ?? 0,
           done: progress.get(r.id)?.done ?? 0,
         })),
@@ -266,15 +276,55 @@ export const planningTools: AiToolDef[] = [
     },
   },
   {
+    name: "modules.get",
+    description: "One module (feature) in full: its whole description, status, start → target dates and progress (done / total items, by state).",
+    input: z.object({
+      module: z.string().describe("Module ref ('m2') or NAME"),
+      project: z.string().optional().describe("Its project NAME or key (needed with a NAME, unless you're focused on the project)"),
+    }),
+    async execute(input, ctx) {
+      const p = await resolveProject(ctx, input.project);
+      if (p && "error" in p) return p;
+      const f = await resolveFeature(ctx, p?.id ?? null, input.module);
+      if ("error" in f) return f;
+      const id = f.ref.slice(9);
+      const [row] = await ctx.db
+        .select({
+          id: features.id,
+          name: features.name,
+          project: projects.name,
+          status: features.status,
+          description: features.description,
+          startAt: features.startAt,
+          targetAt: features.targetAt,
+          shippedAt: features.shippedAt,
+          updatedAt: features.updatedAt,
+        })
+        .from(features)
+        .innerJoin(projects, eq(projects.id, features.projectId))
+        .where(eq(features.id, id));
+      if (!row) return { error: "module not found" };
+      const members = await ctx.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.featureRef, f.ref));
+      const [out] = registerRefs(ctx, "module", "m", [row]);
+      return {
+        ...out,
+        items: members.filter((m) => m.status !== "cancelled").length,
+        done: members.filter((m) => m.status === "done").length,
+        byStatus: Object.fromEntries(TASK_STATUSES.map((s) => [s, members.filter((m) => m.status === s).length]).filter(([, n]) => n)),
+      };
+    },
+  },
+  {
     name: "modules.create",
     description:
-      "Create a module (feature) in a project — a deliverable that groups work items, with an optional start → target span. Starts 'planned'; it turns active on its own when an item moves.",
+      "Create a module (feature) in a project — a deliverable that groups work items, with an optional start → target span. Starts 'planned' unless you pass status: 'active'; a planned module turns active on its own when an item moves. The description is stored whole.",
     input: z.object({
       name: z.string().min(1),
       project: z.string().optional().describe("Project NAME or key; omit for the focused project"),
       description: z.string().optional(),
       startAt: z.string().optional().describe("ISO 8601"),
       targetAt: z.string().optional().describe("Target date, ISO 8601"),
+      status: z.enum(["planned", "active"]).default("planned"),
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
@@ -295,7 +345,7 @@ export const planningTools: AiToolDef[] = [
           projectId: p.id,
           name: input.name.trim(),
           description: input.description?.trim() || null,
-          status: "planned",
+          status: input.status,
           sortOrder: Number(next),
           startAt: dateOrNull(input.startAt) ?? null,
           targetAt: dateOrNull(input.targetAt) ?? null,
@@ -308,12 +358,15 @@ export const planningTools: AiToolDef[] = [
   {
     name: "modules.update",
     description:
-      "Edit a module (feature): name, description, dates, or status. A manual status (e.g. paused, cancelled, shipped) holds until its items move again. Pass only what changes; an empty string clears a date.",
+      "Edit a module (feature): name, description, dates, or status. A manual status (e.g. paused, cancelled, shipped) holds until its items move again. Pass only what changes; an empty string clears a date. " +
+      "`description` replaces the whole text; `prependDescription` / `appendDescription` add to it verbatim (include your own separator, e.g. a trailing space or newline).",
     input: z.object({
       module: z.string().describe("Module ref ('m2') or NAME"),
       project: z.string().optional().describe("Its project NAME or key (needed with a NAME, unless you're focused on the project)"),
       name: z.string().min(1).optional(),
-      description: z.string().optional(),
+      description: z.string().optional().describe("The new description, replacing the old; empty string clears"),
+      prependDescription: z.string().min(1).optional().describe("Text put before the current description, verbatim"),
+      appendDescription: z.string().min(1).optional().describe("Text put after the current description, verbatim"),
       status: z.enum(FEATURE_STATUSES).optional(),
       startAt: z.string().optional().describe("ISO 8601; empty string clears"),
       targetAt: z.string().optional().describe("ISO 8601; empty string clears"),
@@ -324,16 +377,23 @@ export const planningTools: AiToolDef[] = [
       const f = await resolveFeature(ctx, p?.id ?? null, input.module);
       if ("error" in f) return f;
       const id = f.ref.slice(9);
+      const edits = input.prependDescription !== undefined || input.appendDescription !== undefined;
+      if (edits && input.description !== undefined) return { error: "pass description (replace) or prepend/appendDescription, not both" };
       const set = {
         ...(input.name?.trim() ? { name: input.name.trim() } : {}),
         ...(input.description !== undefined ? { description: input.description.trim() || null } : {}),
+        // In the database, so a write that landed in between is kept, never overwritten blind.
+        ...(edits
+          ? { description: sql`nullif(btrim(${input.prependDescription ?? ""} || coalesce(${features.description}, '') || ${input.appendDescription ?? ""}), '')` }
+          : {}),
         ...(input.status ? { status: input.status, shippedAt: input.status === "shipped" ? new Date() : null } : {}),
         ...(input.startAt !== undefined ? { startAt: dateOrNull(input.startAt) } : {}),
         ...(input.targetAt !== undefined ? { targetAt: dateOrNull(input.targetAt) } : {}),
       };
       if (!Object.keys(set).length) return { error: "nothing to update" };
-      const [row] = await ctx.db.update(features).set({ ...set, updatedAt: new Date() }).where(eq(features.id, id)).returning({ name: features.name, status: features.status });
-      return row ? { updated: row } : { error: "module not found" };
+      const [row] = await ctx.db.update(features).set({ ...set, updatedAt: new Date() }).where(eq(features.id, id)).returning({ name: features.name, status: features.status, description: features.description });
+      if (!row) return { error: "module not found" };
+      return { updated: edits ? row : { name: row.name, status: row.status } };
     },
   },
 ];

@@ -153,6 +153,7 @@ const summary = (t: Task & { identifier: string | null }) => ({
   priority: t.priority,
   estimate: t.estimate,
   labels: t.labels,
+  assignee: t.assignee,
   startAt: t.startAt,
   dueAt: t.dueAt,
   completedAt: t.completedAt,
@@ -225,6 +226,35 @@ async function milestonesOf(ctx: AiToolContext, item: Task) {
   return registerRefs(ctx, "milestone", "ms", hits);
 }
 
+/**
+ * The ids of every item a milestone counts — named on their own, through a
+ * module or a nested milestone — whatever their state (cancelled ones too:
+ * tasks.list's own status filter decides what shows).
+ */
+async function milestoneScope(ctx: AiToolContext, projectId: string | null, key: string): Promise<string[] | { error: string }> {
+  const k = key.trim();
+  const ref = /^ms\d+$/i.test(k) ? ctx.refs?.[k.toLowerCase()] : undefined;
+  if (/^ms\d+$/i.test(k) && ref?.kind !== "milestone") return { error: `Unknown milestone ref "${k}" — list milestones first` };
+  const bundle = await loadMilestoneBundle(ctx.db, ref ? undefined : (projectId ?? undefined));
+  const hits = bundle.milestones.filter((m) => (ref ? m.id === ref.id : m.name.trim().toLowerCase() === k.toLowerCase()));
+  if (!hits.length) return { error: `No milestone "${k}"` };
+  if (hits.length > 1) return { error: `"${k}" names milestones in several projects — pass project` };
+  const rows = await ctx.db.select().from(tasks).where(eq(tasks.projectRef, `projects:${hits[0].projectId}`));
+  const resolve = milestoneResolver(bundle, rows.map((t) => ({ ...t, status: "todo" as const })));
+  return resolve(hits[0].id).items.map((x) => x.item.id);
+}
+
+/** Per item, the names of the milestones it counts toward, in roadmap order. */
+async function milestoneNames(ctx: AiToolContext, items: Task[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>(items.map((t) => [t.id, []]));
+  const bundle = await loadMilestoneBundle(ctx.db);
+  if (!bundle.milestones.length || !items.length) return out;
+  // Membership of one item never depends on the others, so the listed items are enough.
+  const resolve = milestoneResolver(bundle, items.map((t) => ({ ...t, status: "todo" as const })));
+  for (const m of orderMilestones(bundle.milestones)) for (const x of resolve(m.id).items) out.get(x.item.id)?.push(m.name);
+  return out;
+}
+
 export const taskTools: AiToolDef[] = [
   {
     name: "tasks.create",
@@ -237,6 +267,7 @@ export const taskTools: AiToolDef[] = [
       priority: z.enum(TASK_PRIORITIES).default("medium"),
       estimate: z.number().int().min(0).max(100).optional().describe("Size in points (1,2,3,5,8)"),
       labels: z.array(z.string()).optional(),
+      assignee: z.string().optional().describe("Who is responsible — a person or agent name (free text)"),
       dueAt: z.string().optional().describe("Due date-time in ISO 8601, if known"),
       startAt: z.string().optional().describe("Start date in ISO 8601 (with dueAt, its bar on the timeline)"),
       project: z
@@ -284,6 +315,7 @@ export const taskTools: AiToolDef[] = [
           priority: input.priority,
           estimate: input.estimate,
           labels: input.labels,
+          assignee: input.assignee,
           dueAt: input.dueAt ? new Date(input.dueAt) : null,
           startAt: input.startAt ? new Date(input.startAt) : null,
           projectRef: p ? `projects:${p.id}` : null,
@@ -296,7 +328,7 @@ export const taskTools: AiToolDef[] = [
         actorOf(ctx),
       );
       return {
-        created: { identifier: item.identifier, title: item.title, status: item.status, version: item.version },
+        created: { identifier: item.identifier, title: item.title, status: item.status, version: item.version, ...(item.assignee ? { assignee: item.assignee } : {}) },
         ...(item.deduplicated ? { deduplicated: true } : {}),
       };
     },
@@ -304,7 +336,8 @@ export const taskTools: AiToolDef[] = [
   {
     name: "tasks.list",
     description:
-      "List work items. Defaults to OPEN items (backlog/todo/doing/review) of the named project, or the focused project, or all. Each comes back with a `ref` (t1…) and an `identifier` (KEY-N) — use either to target it.",
+      "List work items. Defaults to OPEN items (backlog/todo/doing/review) of the named project, or the focused project, or all. Each comes back with a `ref` (t1…) and an `identifier` (KEY-N) — use either to target it. " +
+      "Filter by module, cycle, milestone (every item it counts: its own, its modules', its nested milestones'), label or assignee; withMilestones adds the milestones each item counts toward.",
     input: z.object({
       status: z
         .enum([...TASK_STATUSES, "open", "all"])
@@ -315,6 +348,9 @@ export const taskTools: AiToolDef[] = [
       label: z.string().optional(),
       module: z.string().optional().describe("Only items in this module (NAME or 'm2'); 'none' = items in no module"),
       cycle: z.string().optional().describe("Only items in this cycle (NAME, 'c1' or 'current'); 'none' = unplanned"),
+      milestone: z.string().optional().describe("Only items this milestone counts (ref 'ms1' or NAME)"),
+      assignee: z.string().optional().describe("Only items assigned to this person or agent (case-insensitive); 'none' = unassigned"),
+      withMilestones: z.boolean().default(false).describe("Also return each item's `milestones` (names, roadmap order)"),
       completedSince: z
         .string()
         .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -347,6 +383,18 @@ export const taskTools: AiToolDef[] = [
           cycleFilter = eq(tasks.cycleId, c.id);
         }
       }
+      let milestoneFilter;
+      if (input.milestone) {
+        const ids = await milestoneScope(ctx, p?.id ?? null, input.milestone);
+        if (!Array.isArray(ids)) return ids;
+        milestoneFilter = ids.length ? inArray(tasks.id, ids) : sql`false`;
+      }
+      const assignee = input.assignee?.trim();
+      const assigneeFilter = !assignee
+        ? undefined
+        : assignee.toLowerCase() === "none"
+          ? isNull(tasks.assignee)
+          : sql`lower(${tasks.assignee}) = ${assignee.toLowerCase()}`;
       const statusFilter =
         input.status === "all"
           ? undefined
@@ -360,6 +408,8 @@ export const taskTools: AiToolDef[] = [
         input.label ? sql`${input.label.toLowerCase()} = any(${tasks.labels})` : undefined,
         moduleFilter,
         cycleFilter,
+        milestoneFilter,
+        assigneeFilter,
         input.completedSince ? gte(tasks.completedAt, new Date(input.completedSince)) : undefined,
       ].filter((f) => f !== undefined);
       const rows = await ctx.db
@@ -375,7 +425,10 @@ export const taskTools: AiToolDef[] = [
       ]);
       const fName = new Map(featureNames.map((f) => [`features:${f.id}`, f.name]));
       const cName = new Map(cycleNames.map((c) => [c.id, c.name]));
-      const rels = input.relations ? await blockingRelations(ctx.db, items.map((t) => t.id)) : null;
+      const [rels, inMilestones] = await Promise.all([
+        input.relations ? blockingRelations(ctx.db, items.map((t) => t.id)) : null,
+        input.withMilestones ? milestoneNames(ctx, items) : null,
+      ]);
       return registerRefs(
         ctx,
         "task",
@@ -384,6 +437,7 @@ export const taskTools: AiToolDef[] = [
           ...summary(t),
           module: t.featureRef ? (fName.get(t.featureRef) ?? null) : null,
           cycle: t.cycleId ? (cName.get(t.cycleId) ?? null) : null,
+          ...(inMilestones ? { milestones: inMilestones.get(t.id) ?? [] } : {}),
           ...(rels ? rels.get(t.id) : {}),
         })),
       );
@@ -502,6 +556,7 @@ export const taskTools: AiToolDef[] = [
       priority: z.enum(TASK_PRIORITIES).optional(),
       estimate: z.number().int().min(0).max(100).nullable().optional(),
       labels: z.array(z.string()).optional().describe("Replaces the label set"),
+      assignee: z.string().optional().describe("Who is responsible — a person or agent name; empty string unassigns"),
       acceptance: ACCEPTANCE.describe("Replaces the acceptance criteria (see tasks.create)"),
       dueAt: z.string().optional().describe("ISO 8601; empty string clears it"),
       startAt: z.string().optional().describe("ISO 8601; empty string clears it"),
@@ -524,6 +579,7 @@ export const taskTools: AiToolDef[] = [
         priority: input.priority,
         estimate: input.estimate,
         labels: input.labels,
+        assignee: input.assignee === undefined ? undefined : input.assignee.trim() || null,
         acceptance: toAcceptance(input.acceptance, cur?.acceptance),
         dueAt: isoOrNull(input.dueAt),
         startAt: isoOrNull(input.startAt),
@@ -579,7 +635,7 @@ export const taskTools: AiToolDef[] = [
       if (row && "error" in row) return conflictResult(ctx, row.current);
       if (!row) return { error: "work item not found" };
       return {
-        updated: { identifier: row.identifier, title: row.title, version: row.version },
+        updated: { identifier: row.identifier, title: row.title, version: row.version, ...(patch.assignee !== undefined ? { assignee: row.assignee } : {}) },
         ...(await refiled(ctx, row, patch.cycleId !== undefined ? patch.cycleId : before)),
       };
     },

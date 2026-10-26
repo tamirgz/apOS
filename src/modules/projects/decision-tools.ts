@@ -77,13 +77,17 @@ export const decisionTools: AiToolDef[] = [
   {
     name: "decisions.list",
     description:
-      "Query a project's decisions, newest first: all of them, or those on one work item, matching text (question, answer or notes), or decided in a date range. Superseded decisions are left out unless includeSuperseded, deleted ones unless includeDeleted. Returns {total, decisions}.",
+      "Query a project's decisions, newest first: all of them, or those on one work item, matching text (question, answer or notes), decided in a date range, or in a number range (from: 233, to: 239 = D233–D239). Superseded decisions are left out unless includeSuperseded, deleted ones unless includeDeleted. " +
+      "Returns {total, more?, decisions}; page with limit/offset. brief: true returns only ref, date, question and answer per decision.",
     input: z.object({
       project: PROJECT,
       item: z.string().min(1).optional().describe("Only decisions on this work item (identifier or ref)"),
       q: z.string().min(1).optional().describe("Text to find in the question, answer or notes"),
       since: WHEN.optional().describe("Decided at or after (ISO date or date-time)"),
       until: WHEN.optional().describe("Decided before (ISO date or date-time)"),
+      from: NUMBER.optional().describe("Lowest decision number, inclusive: 233 or 'D233'"),
+      to: NUMBER.optional().describe("Highest decision number, inclusive: 239 or 'D239'"),
+      brief: z.boolean().default(false).describe("Only ref, decidedAt, question and answer — no notes, items or provenance"),
       includeSuperseded: z.boolean().default(false),
       includeDeleted: z.boolean().default(false),
       limit: z.number().int().min(1).max(500).default(100),
@@ -103,12 +107,17 @@ export const decisionTools: AiToolDef[] = [
         text: input.q,
         since: input.since ? date(input.since) : undefined,
         until: input.until ? date(input.until) : undefined,
+        from: input.from === undefined ? undefined : num(input.from),
+        to: input.to === undefined ? undefined : num(input.to),
         includeSuperseded: input.includeSuperseded,
         includeDeleted: input.includeDeleted,
         limit: input.limit,
         offset: input.offset,
       });
-      return { total, ...(input.offset + rows.length < total ? { more: true } : {}), decisions: await presentDecisions(ctx.db, rows) };
+      const decisions = input.brief
+        ? rows.map((d) => ({ ref: `D${d.number}`, decidedAt: d.decidedAt, question: d.question, answer: d.answer }))
+        : await presentDecisions(ctx.db, rows);
+      return { total, ...(input.offset + rows.length < total ? { more: true } : {}), decisions };
     },
   },
   {

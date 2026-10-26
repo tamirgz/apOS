@@ -39,14 +39,16 @@ export const dateInput = (d: Date | string | number) => {
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 };
 
+type CycleFields = { name: string; startsAt: string; endsAt: string; goal: string };
+
 function CycleForm({
   initial,
   onSubmit,
   onCancel,
   pending,
 }: {
-  initial: { name: string; startsAt: string; endsAt: string };
-  onSubmit: (v: { name: string; startsAt: string; endsAt: string }) => void;
+  initial: CycleFields;
+  onSubmit: (v: CycleFields) => void;
   onCancel: () => void;
   pending: boolean;
 }) {
@@ -83,6 +85,15 @@ function CycleForm({
         onChange={(e) => setV({ ...v, endsAt: e.target.value })}
         aria-label="Ends"
         className="rounded-lg border border-ion/12 bg-transparent px-2 py-1.5 text-xs text-ink-dim outline-none"
+      />
+      <input
+        dir="auto"
+        value={v.goal}
+        onChange={(e) => setV({ ...v, goal: e.target.value })}
+        onKeyDown={(e) => e.key === "Escape" && onCancel()}
+        placeholder="Goal — what this cycle commits to"
+        aria-label="Cycle goal"
+        className="h-8 w-full basis-full rounded-lg bg-ink/5 px-2.5 text-sm text-ink outline-none placeholder:text-ink-faint"
       />
       <button
         type="submit"
@@ -193,7 +204,10 @@ function useCycleOps(c: CycleSummary, next: CycleSummary | null, onDeleted?: () 
     start(async () => {
       setError(null);
       try {
-        after?.(await fn());
+        // Not `after?.(await fn())`: an optional call skips its arguments when
+        // `after` is absent, so the action itself would never run.
+        const r = await fn();
+        after?.(r);
         router.refresh();
       } catch (e) {
         setError(errorText(e));
@@ -218,7 +232,7 @@ function useCycleOps(c: CycleSummary, next: CycleSummary | null, onDeleted?: () 
     error,
     form: (
       <CycleForm
-        initial={{ name: c.name, startsAt: dateInput(c.startsAt), endsAt: dateInput(c.endsAt) }}
+        initial={{ name: c.name, startsAt: dateInput(c.startsAt), endsAt: dateInput(c.endsAt), goal: c.goal ?? "" }}
         pending={pending}
         onCancel={() => setEditing(false)}
         onSubmit={(v) => run(async () => (await updateCycleAction(c.id, v), setEditing(false)))}
@@ -318,7 +332,13 @@ function CycleHero({
         </span>
       </header>
 
-      {ops.editing && ops.form}
+      {ops.editing
+        ? ops.form
+        : c.goal && (
+            <p dir="auto" className="whitespace-pre-line text-sm text-ink-dim">
+              <b className="text-ink">Goal</b> · {c.goal}
+            </p>
+          )}
 
       <div className="grid gap-x-8 gap-y-5 lg:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.6fr)]">
         <div className="flex min-w-0 flex-col gap-4">
@@ -395,7 +415,13 @@ function CycleCard({
   const now = useNow();
   const ops = useCycleOps(c, next);
   const m = cycleMetrics(c, items, [], now);
-  if (ops.editing) return ops.form;
+  if (ops.editing)
+    return (
+      <div className="flex flex-col gap-1">
+        {ops.form}
+        {ops.error && <p className="text-xs text-flare">{ops.error}</p>}
+      </div>
+    );
   const startsIn = Math.max(1, Math.ceil((+new Date(c.startsAt) - now) / DAY));
 
   return (
@@ -525,7 +551,7 @@ export function CyclesView({
       </div>
       {adding && (
         <CycleForm
-          initial={{ name: `Cycle ${n}`, startsAt: dateInput(startDefault), endsAt: dateInput(startDefault + 13 * DAY) }}
+          initial={{ name: `Cycle ${n}`, startsAt: dateInput(startDefault), endsAt: dateInput(startDefault + 13 * DAY), goal: "" }}
           pending={pending}
           onCancel={() => setAdding(false)}
           onSubmit={(v) =>

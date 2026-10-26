@@ -2,7 +2,7 @@
  * Project decisions (schema: projectDecisions) — the user's decisions as typed
  * records, queryable by item, text and date instead of read out of a doc.
  */
-import { and, arrayContains, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, arrayContains, desc, eq, gte, inArray, isNull, lt, lte, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "@/core/db/client";
 import { identifierOf, nextNumber, projectKeyMap } from "@/modules/tasks/core";
 import { tasks } from "@/modules/tasks/schema";
@@ -147,6 +147,9 @@ export interface DecisionQuery {
   text?: string;
   since?: Date;
   until?: Date;
+  /** Decision numbers, inclusive: from 233 to 239 = D233–D239. */
+  from?: number;
+  to?: number;
   includeSuperseded?: boolean;
   includeDeleted?: boolean;
   limit?: number;
@@ -161,6 +164,8 @@ export async function listDecisions(db: Db, projectId: string, q: DecisionQuery 
   if (q.taskId) where.push(arrayContains(projectDecisions.taskIds, [q.taskId]));
   if (q.since) where.push(gte(projectDecisions.decidedAt, q.since));
   if (q.until) where.push(lt(projectDecisions.decidedAt, q.until));
+  if (q.from !== undefined) where.push(gte(projectDecisions.number, q.from));
+  if (q.to !== undefined) where.push(lte(projectDecisions.number, q.to));
   if (q.text?.trim()) {
     const like = `%${q.text.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     where.push(

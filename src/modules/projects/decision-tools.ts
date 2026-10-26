@@ -6,7 +6,7 @@
 import { z } from "zod";
 import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
 import { actorOf, resolveProject, resolveTask } from "@/modules/tasks/tools";
-import { findDecision, listDecisions, presentDecisions, recordDecision, updateDecision } from "./decisions";
+import { deleteDecision, findDecision, listDecisions, presentDecisions, recordDecision, updateDecision } from "./decisions";
 
 const PROJECT = z.string().min(1).describe("Project NAME or key (e.g. ETHOS-Sec or ES) — never an id");
 const NUMBER = z
@@ -77,7 +77,7 @@ export const decisionTools: AiToolDef[] = [
   {
     name: "decisions.list",
     description:
-      "Query a project's decisions, newest first: all of them, or those on one work item, matching text (question, answer or notes), or decided in a date range. Superseded decisions are left out unless includeSuperseded. Returns {total, decisions}.",
+      "Query a project's decisions, newest first: all of them, or those on one work item, matching text (question, answer or notes), or decided in a date range. Superseded decisions are left out unless includeSuperseded, deleted ones unless includeDeleted. Returns {total, decisions}.",
     input: z.object({
       project: PROJECT,
       item: z.string().min(1).optional().describe("Only decisions on this work item (identifier or ref)"),
@@ -85,6 +85,7 @@ export const decisionTools: AiToolDef[] = [
       since: WHEN.optional().describe("Decided at or after (ISO date or date-time)"),
       until: WHEN.optional().describe("Decided before (ISO date or date-time)"),
       includeSuperseded: z.boolean().default(false),
+      includeDeleted: z.boolean().default(false),
       limit: z.number().int().min(1).max(500).default(100),
       offset: z.number().int().min(0).default(0),
     }),
@@ -103,6 +104,7 @@ export const decisionTools: AiToolDef[] = [
         since: input.since ? date(input.since) : undefined,
         until: input.until ? date(input.until) : undefined,
         includeSuperseded: input.includeSuperseded,
+        includeDeleted: input.includeDeleted,
         limit: input.limit,
         offset: input.offset,
       });
@@ -111,7 +113,7 @@ export const decisionTools: AiToolDef[] = [
   },
   {
     name: "decisions.get",
-    description: "Read one project decision by number (12 or 'D12'), including which decision superseded it, if any.",
+    description: "Read one project decision by number (12 or 'D12'), including which decision superseded it and who deleted it and when, if either.",
     input: z.object({ project: PROJECT, decision: NUMBER }),
     async execute(input, ctx) {
       const p = await projectOf(ctx, input.project);
@@ -156,8 +158,28 @@ export const decisionTools: AiToolDef[] = [
         },
         actorOf(ctx),
       );
-      if (!row) return { error: `No decision D${num(input.decision)} in that project` };
+      if (!row) return { error: `No decision D${num(input.decision)} in that project, or it is deleted` };
       return { updated: (await presentDecisions(ctx.db, [row]))[0] };
+    },
+  },
+  {
+    name: "decisions.delete",
+    description:
+      "Soft-delete a decision recorded by mistake or twice: it leaves decisions.list but stays readable with decisions.get (and list includeDeleted), marked with who deleted it and when. " +
+      "It keeps its source, so re-recording the same source returns it instead of a new copy. A decision it superseded becomes current again (`reinstated`). " +
+      "Not for a changed decision — record the new one with `supersedes`. Needs confirm: true.",
+    input: z.object({ project: PROJECT, decision: NUMBER, confirm: z.literal(true).describe("Must be true") }),
+    async execute(input, ctx) {
+      const p = await projectOf(ctx, input.project);
+      if ("error" in p) return p;
+      const n = num(input.decision);
+      const r = await deleteDecision(ctx.db, p.id, n, actorOf(ctx));
+      if (!r) return { error: `No decision D${n} in project ${input.project}` };
+      if ("error" in r) return r;
+      return {
+        deleted: (await presentDecisions(ctx.db, [r.decision]))[0],
+        ...(r.reinstated.length ? { reinstated: r.reinstated.map((x) => `D${x}`) } : {}),
+      };
     },
   },
 ];

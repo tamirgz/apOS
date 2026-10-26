@@ -73,6 +73,10 @@ function coerce(field: string, raw: string, s: ZodType): unknown {
   const types = t.type === "union" ? (t.options ?? []).map((o) => bare(o).type) : [t.type];
   if (types.includes("number") && /^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
   if (types.includes("boolean") && (raw === "true" || raw === "false")) return raw === "true";
+  // A literal takes its own value's type: confirm=true is the boolean true, not "true".
+  const literals = (t.type === "union" ? (t.options ?? []).map(bare) : [t]).flatMap((d) => (d.type === "literal" ? ((d as { values?: unknown[] }).values ?? []) : []));
+  const lit = literals.find((v) => String(v) === raw);
+  if (lit !== undefined) return lit;
   if (types.includes("string") || types.includes("enum") || types.includes("literal")) return raw;
   if (types.some((x) => ["array", "object", "record"].includes(x))) {
     try {

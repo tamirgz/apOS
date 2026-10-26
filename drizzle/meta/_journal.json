@@ -540,6 +540,13 @@
       "when": 1792943740210,
       "tag": "0076_project_decisions",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1793002916468,
+      "tag": "0077_decision_soft_delete",
+      "breakpoints": true
     }
   ]
 }

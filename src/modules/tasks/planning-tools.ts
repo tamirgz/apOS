@@ -235,10 +235,11 @@ export const planningTools: AiToolDef[] = [
   {
     name: "modules.list",
     description:
-      "List a project's modules (features): status (planned / active / paused / shipped / cancelled), start → target dates and progress (done / total items). Each comes back with a `ref` (m1…) for tasks.create / tasks.update / modules.update. A description longer than 280 characters is cut (descriptionTruncated: true) — modules.get returns it whole.",
+      "List a project's modules (features): status (planned / active / paused / shipped / cancelled), start → target dates and progress (done / total items). Each comes back with a `ref` (m1…) for tasks.create / tasks.update / modules.update. A description longer than 280 characters is cut (descriptionTruncated: true) unless fullDescriptions: true — modules.get also returns it whole.",
     input: z.object({
       project: z.string().optional().describe("Project NAME or key; omit for the focused project (or all projects)"),
       status: z.enum([...FEATURE_STATUSES, "live", "all"]).default("live").describe("'live' (default) = planned, active and paused"),
+      fullDescriptions: z.boolean().default(false).describe("Return every description whole instead of cut at 280 characters"),
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
@@ -266,8 +267,8 @@ export const planningTools: AiToolDef[] = [
         "m",
         rows.map((r) => ({
           ...r,
-          description: r.description ? r.description.slice(0, 280) : null,
-          ...((r.description?.length ?? 0) > 280 ? { descriptionTruncated: true } : {}),
+          description: r.description && !input.fullDescriptions ? r.description.slice(0, 280) : r.description,
+          ...(!input.fullDescriptions && (r.description?.length ?? 0) > 280 ? { descriptionTruncated: true } : {}),
           items: progress.get(r.id)?.total ?? 0,
           done: progress.get(r.id)?.done ?? 0,
         })),
@@ -316,13 +317,14 @@ export const planningTools: AiToolDef[] = [
   {
     name: "modules.create",
     description:
-      "Create a module (feature) in a project — a deliverable that groups work items, with an optional start → target span. Starts 'planned'; it turns active on its own when an item moves.",
+      "Create a module (feature) in a project — a deliverable that groups work items, with an optional start → target span. Starts 'planned' unless you pass status: 'active'; a planned module turns active on its own when an item moves. The description is stored whole.",
     input: z.object({
       name: z.string().min(1),
       project: z.string().optional().describe("Project NAME or key; omit for the focused project"),
       description: z.string().optional(),
       startAt: z.string().optional().describe("ISO 8601"),
       targetAt: z.string().optional().describe("Target date, ISO 8601"),
+      status: z.enum(["planned", "active"]).default("planned"),
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
@@ -343,7 +345,7 @@ export const planningTools: AiToolDef[] = [
           projectId: p.id,
           name: input.name.trim(),
           description: input.description?.trim() || null,
-          status: "planned",
+          status: input.status,
           sortOrder: Number(next),
           startAt: dateOrNull(input.startAt) ?? null,
           targetAt: dateOrNull(input.targetAt) ?? null,

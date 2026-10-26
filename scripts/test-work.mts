@@ -417,10 +417,14 @@ try {
 
       // modules: the whole description, truncation flag, prepend/append
       const long = `ZZ ${"long description ".repeat(25)}(ADR end)`;
-      await call("modules__create", { project: P, name: "ZZ Core", description: long });
+      assert.equal((await call("modules__create", { project: P, name: "ZZ Core", description: long })).created.status, "planned", "planned by default");
       await call("modules__create", { project: P, name: "ZZ Extra" });
+      assert.equal((await call("modules__create", { project: P, name: "ZZ Live", status: "active" })).created.status, "active", "created active on request");
       const [listed] = (await call("modules__list", { project: P, status: "all" })).filter((m: { name: string }) => m.name === "ZZ Core");
       assert.equal(listed.descriptionTruncated, true, "modules.list says when it cut a description");
+      const [whole] = (await call("modules__list", { project: P, status: "all", fullDescriptions: true })).filter((m: { name: string }) => m.name === "ZZ Core");
+      assert.equal(whole.description, long, "modules.list fullDescriptions returns it whole");
+      assert.equal(whole.descriptionTruncated, undefined);
       const full = await call("modules__get", { module: "ZZ Core", project: P });
       assert.equal(full.description, long, "modules.get returns the whole description");
       const pre = (await call("modules__update", { module: "ZZ Core", project: P, prependDescription: "DEFERRED. " })).updated;
@@ -478,6 +482,16 @@ try {
       assert.match(await errOf("milestones__criteria", { milestone: "ZZ MVP", project: P, move: ["1"], to: "ZZ MVP" }), /this milestone/);
       await call("milestones__update", { milestone: "ZZ MVP", project: P, description: "MVP-1: the re-scoped cut" });
       assert.equal((await call("milestones__get", { milestone: "ZZ MVP", project: P })).goal, "MVP-1: the re-scoped cut");
+
+      // a module created active takes items moved in with tasks.update, and goes whole into a capability
+      const i4 = (await call("tasks__create", { project: P, title: "ZZ r4" })).created;
+      await call("tasks__update", { ref: i4.identifier, feature: "ZZ Live" });
+      assert.equal((await call("modules__get", { module: "ZZ Live", project: P })).items, 1, "moved in");
+      await call("milestones__addContent", { milestone: "ZZ Next", project: P, capability: "Estate", modules: ["ZZ Live"] });
+      const next = await call("milestones__get", { milestone: "ZZ Next", project: P });
+      const estate = next.capabilities.find((c: { name: string }) => c.name === "Estate");
+      assert.deepEqual([estate.content, estate.progress], [['module "ZZ Live"'], "0/1"], "the whole module counts, no item excluded");
+      assert.deepEqual(next.excluded, []);
 
       // decisions: a number range, paging, brief rows
       for (let n = 1; n <= 6; n++) await call("decisions__record", { project: P, question: `ZZ q${n}`, answer: `a${n}`, notes: "long notes" });

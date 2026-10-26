@@ -124,8 +124,10 @@ export async function enrichItem(
     maxTurns: 10,
     // Bound the call — without this a hung/looping model leaves the item stuck
     // in "enriching" forever. On timeout the provider aborts → the item errors
-    // (visible + retryable) rather than hanging.
-    signal: AbortSignal.timeout(120_000),
+    // (visible + retryable) rather than hanging. A background job, so the
+    // budget is generous: a cold load of the 35B model alone is ~25s, and the
+    // shared local-model slot may be held by an agent run when this starts.
+    signal: AbortSignal.timeout(300_000),
   })) {
     if (event.type === "done") finalText = event.text;
     if (event.type === "error") throw new Error(event.message);

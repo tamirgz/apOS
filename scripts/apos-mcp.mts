@@ -24,26 +24,14 @@ const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/
 const { getAllTools } = await import("@/core/ai/tool-registry");
 const { invokeTool } = await import("@/core/ai/invoke-tool");
 const { randomUUID } = await import("node:crypto");
+const { EXPOSED, actorFor } = await import("@/core/ai/tool-surface");
 const { toWireName } = await import("@/core/ai/provider");
 const { db, sql } = await import("@/core/db/client");
 type AiToolContext = import("@/core/modules/types.server").AiToolContext;
 type ZodObject = import("zod").ZodObject<import("zod").ZodRawShape>;
 
-/** The work-tracker surface: everything under tasks./cycles./modules./milestones./attachments./docs./decisions., plus project basics. */
-const EXPOSED = (name: string) =>
-  /^(tasks|cycles|modules|milestones|attachments|docs|decisions)\./.test(name) || ["projects.list", "projects.create", "projects.setStatus"].includes(name);
-
 const prefix = process.env.APOS_ACTOR?.trim() || "";
 const sessionId = randomUUID();
-const clean = (s: string | undefined) => (s ?? "").trim().replace(/[^\w.@/-]+/g, "-").slice(0, 40);
-
-/** Who this session's writes are credited to; see the header. */
-export function actorFor(prefix: string, client: { name?: string; version?: string } | undefined, sid: string) {
-  const name = clean(client?.name);
-  const who = name ? `${name}${client?.version ? `/${clean(client.version)}` : ""}` : "";
-  const head = [prefix, who].filter(Boolean).join(":") || "mcp";
-  return `${head}#${sid.slice(0, 6)}`;
-}
 
 // One context for the whole session, so list refs (t1, c1, m1) stay valid across calls.
 // No user is assumed present: approval-tier calls are parked and return

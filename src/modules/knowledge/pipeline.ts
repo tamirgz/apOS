@@ -17,12 +17,32 @@ async function setStatus(
   await sql.notify("knowledge_changed", id);
 }
 
+/** Items queued or running in THIS worker — a re-delivery (reconcile, a second
+ *  Retry click) of one of these is dropped instead of enriching it twice. */
+const inFlight = new Set<string>();
+/** Enrichment runs one item at a time. The local model serves one call at a
+ *  time anyway (local-queue), and enrichItem's time budget starts when the call
+ *  is made — so six items retried together each burned their whole budget
+ *  queued behind the others and all timed out. Serializing here starts each
+ *  item's budget only when its turn comes. */
+let enrichTail: Promise<unknown> = Promise.resolve();
+
 /**
  * Staged pipeline: captured → fetching → enriching → ready | error.
  * Runs in the worker (LISTEN "knowledge_ingest", payload = item id).
  * Each stage persists its output, so a retry resumes with what exists.
  */
 export async function processKnowledgeItem(itemId: string): Promise<void> {
+  if (inFlight.has(itemId)) return;
+  inFlight.add(itemId);
+  try {
+    await runPipeline(itemId);
+  } finally {
+    inFlight.delete(itemId);
+  }
+}
+
+async function runPipeline(itemId: string): Promise<void> {
   const [item] = await db
     .select()
     .from(knowledgeItems)
@@ -38,8 +58,12 @@ export async function processKnowledgeItem(itemId: string): Promise<void> {
       await setStatus(itemId, "fetching", { raw });
     }
 
-    await setStatus(itemId, "enriching");
-    const insight = await enrichItem({ ...item, raw });
+    const turn = enrichTail.then(async () => {
+      await setStatus(itemId, "enriching");
+      return enrichItem({ ...item, raw });
+    });
+    enrichTail = turn.catch(() => {});
+    const insight = await turn;
 
     const title =
       (raw?.title as string | undefined) ??

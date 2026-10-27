@@ -15,6 +15,25 @@ AIOS_HOME="$HOME"
 BREW_BIN="$(dirname "$(command -v brew 2>/dev/null || echo /opt/homebrew/bin/brew)")"
 LMS_BIN="$HOME/.lmstudio/bin"
 
+# Stable launcher for agents that need macOS privacy grants (Google Drive):
+# TCC ties a grant to the launched binary, and Homebrew's ad-hoc-signed node
+# changes identity on every upgrade. Rebuilt only when its source changes, since
+# a rebuild is a new identity that needs the grant again. No compiler → the
+# agent runs pnpm directly, as before.
+LAUNCHER="$HOME/.aios/bin/aios-launch"
+launcher_src="$AIOS_DIR/launchd/aios-launch.c"
+src_sha="$(shasum -a 256 "$launcher_src" | cut -d' ' -f1)"
+if [ ! -x "$LAUNCHER" ] || [ "$(cat "$LAUNCHER.sha" 2>/dev/null)" != "$src_sha" ]; then
+  mkdir -p "$(dirname "$LAUNCHER")"
+  if command -v clang >/dev/null 2>&1 && clang -O2 -o "$LAUNCHER" "$launcher_src"; then
+    echo "$src_sha" > "$LAUNCHER.sha"
+    echo "built $LAUNCHER — grant it Full Disk Access (System Settings → Privacy & Security)"
+  else
+    echo "warning: could not build $LAUNCHER; agents start without it" >&2
+    LAUNCHER=""
+  fi
+fi
+
 AGENTS=("$@"); [ ${#AGENTS[@]} -eq 0 ] && AGENTS=(web worker orbstack)
 LA="$HOME/Library/LaunchAgents"; mkdir -p "$LA" "$HOME/Library/Logs"
 UID_NUM="$(id -u)"
@@ -23,7 +42,9 @@ for name in "${AGENTS[@]}"; do
   tmpl="$AIOS_DIR/launchd/com.aios.$name.plist.tmpl"
   [ -f "$tmpl" ] || { echo "no template for '$name' ($tmpl)"; exit 1; }
   label="com.aios.$name"; dest="$LA/$label.plist"
-  sed -e "s|{{AIOS_DIR}}|$AIOS_DIR|g" \
+  if [ -n "$LAUNCHER" ]; then launcher_expr="s|{{LAUNCHER}}|$LAUNCHER|g"; else launcher_expr="/{{LAUNCHER}}/d"; fi
+  sed -e "$launcher_expr" \
+      -e "s|{{AIOS_DIR}}|$AIOS_DIR|g" \
       -e "s|{{AIOS_HOME}}|$AIOS_HOME|g" \
       -e "s|{{BREW_BIN}}|$BREW_BIN|g" \
       -e "s|{{LMS_BIN}}|$LMS_BIN|g" \

@@ -180,6 +180,7 @@ export async function resolveRoute(taskKey: string): Promise<ResolvedRoute> {
 const ROUTE_FALLBACK: Record<string, { provider: AIProviderId; model: string }> = {
   ask: { provider: "ollama", model: "qwen3-coder:30b" },
   "project.advisor": { provider: "ollama", model: "qwen3-coder:30b" },
+  "knowledge.enrich": { provider: "mlx", model: "qwen3-coder-30b-a3b-instruct" },
 };
 
 /**

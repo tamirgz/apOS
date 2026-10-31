@@ -1,25 +1,39 @@
 import { z } from "zod";
-import { resolveRoute } from "@/core/ai/routing";
+import { runTask } from "@/core/ai/routing";
 import { db } from "@/core/db/client";
 import type { KnowledgeInsight, KnowledgeItem } from "./schema";
+
+// Some local models (qwen3-coder) send list arguments as one string, either
+// JSON-encoded ("[\"a\",\"b\"]") or one item per line, instead of an array,
+// which failed every submit until the turn budget ran out. Accept those too;
+// the schema the model sees stays an array.
+const stringList = () =>
+  z.preprocess((v) => {
+    if (typeof v !== "string") return v;
+    try {
+      const parsed = JSON.parse(v);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+    return v
+      .split("\n")
+      .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+      .map((line) => line.replace(/^"(.*)"$/, "$1"))
+      .filter(Boolean);
+  }, z.array(z.string()));
 
 const InsightSchema = z.object({
   summary: z
     .string()
     .describe("2-4 sentence summary of what this is and why it matters"),
-  keyIdeas: z
-    .array(z.string())
+  keyIdeas: stringList()
     .describe("The most interesting ideas/insights, each one sentence"),
-  useCases: z
-    .array(z.string())
+  useCases: stringList()
     .describe(
       "Concrete ways the user could apply this for their own projects/business",
     ),
-  quotes: z
-    .array(z.string())
+  quotes: stringList()
     .describe("Notable verbatim quotes or phrases worth keeping (may be empty)"),
-  tags: z
-    .array(z.string())
+  tags: stringList()
     .describe("3-6 short lowercase topic tags"),
   relevance: z
     .string()
@@ -80,8 +94,6 @@ const PATTERNS: Record<string, string> = {
 export async function enrichItem(
   item: KnowledgeItem,
 ): Promise<KnowledgeInsight> {
-  const route = await resolveRoute("knowledge.enrich");
-
   let captured: KnowledgeInsight | null = null;
   const submitTool = {
     name: "knowledge.submit",
@@ -114,13 +126,14 @@ export async function enrichItem(
     .join("\n");
 
   let finalText = "";
-  for await (const event of route.provider.run({
+  // runTask, not the bare provider: a failed primary (free-tier quota spent
+  // → 429) reruns on the route's local fallback instead of erroring the item.
+  for await (const event of runTask("knowledge.enrich", {
     system:
       "You are the knowledge-enrichment engine of apOS, the user's Agentic Personalized Operating System. You turn saved links, repos and snippets into structured, actionable insight. Be specific and concrete; no filler.",
     messages: [{ role: "user", content: material }],
     tools: [submitTool],
     toolCtx: { db },
-    model: route.model,
     maxTurns: 10,
     // Bound the call — without this a hung/looping model leaves the item stuck
     // in "enriching" forever. On timeout the provider aborts → the item errors

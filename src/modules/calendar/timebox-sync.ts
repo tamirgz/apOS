@@ -117,19 +117,34 @@ async function ensureCalendar(token: string, log: (m: string) => void): Promise<
     );
     return null;
   }
-  // Boxes are local-time; give the calendar the user's primary time zone.
-  const primary = await gfetch(token, "/calendars/primary");
-  const timeZone = primary.ok ? ((await primary.json()) as { timeZone?: string }).timeZone : undefined;
-  const res = await gfetch(token, "/calendars", {
-    method: "POST",
-    body: JSON.stringify({ summary: CALENDAR_NAME, ...(timeZone ? { timeZone } : {}) }),
+  return createCalendar(token, log);
+}
+
+/**
+ * Create the calendar under a DB-wide lock. The worker's 5-minute run and any
+ * other process (a nudge, a script) can reach this at the same moment; without
+ * the lock both create one and the user gets two "Timeboxes" calendars.
+ */
+async function createCalendar(token: string, log: (m: string) => void): Promise<string> {
+  return sql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(hashtext('timebox_calendar_create'))`;
+    // Another process may have created it while we waited for the lock.
+    const existing = await getSetting(GOOGLE_KEYS.timeboxCalendarId);
+    if (existing) return existing;
+    // Boxes are local-time; give the calendar the user's primary time zone.
+    const primary = await gfetch(token, "/calendars/primary");
+    const timeZone = primary.ok ? ((await primary.json()) as { timeZone?: string }).timeZone : undefined;
+    const res = await gfetch(token, "/calendars", {
+      method: "POST",
+      body: JSON.stringify({ summary: CALENDAR_NAME, ...(timeZone ? { timeZone } : {}) }),
+    });
+    if (!res.ok) throw new Error(`create Timeboxes calendar → ${res.status}`);
+    const created = (await res.json()) as { id: string };
+    await setSetting(GOOGLE_KEYS.timeboxCalendarId, created.id);
+    await setSetting(KEYS.syncToken, "");
+    log("timebox sync: created the Timeboxes calendar");
+    return created.id;
   });
-  if (!res.ok) throw new Error(`create Timeboxes calendar → ${res.status}`);
-  const created = (await res.json()) as { id: string };
-  await setSetting(GOOGLE_KEYS.timeboxCalendarId, created.id);
-  await setSetting(KEYS.syncToken, "");
-  log("timebox sync: created the Timeboxes calendar");
-  return created.id;
 }
 
 function eventBody(b: Timebox) {

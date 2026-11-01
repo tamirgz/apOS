@@ -25,7 +25,10 @@ const google = {
   seq: 0,
   calls: [] as string[],
   failInsert: false,
+  /** Hold a calendar create until a second one arrives (or 1.5s) — makes the race deterministic. */
+  holdCreate: false,
 };
+let releaseCreate: (() => void) | null = null;
 let n = 0;
 const stamp = (ev: Record<string, any> & { id: string; status: string }): Ev => ({
   ...ev,
@@ -44,10 +47,17 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.host === "oauth2.googleapis.com") return json({ access_token: "fake", scope: SCOPES });
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
   if (url.host !== "www.googleapis.com") return realFetch(input, init);
+  // Google takes time to answer; an instant fake would hide races.
+  await new Promise((r) => setTimeout(r, 25));
   const path = url.pathname.replace("/calendar/v3", "");
   google.calls.push(`${method} ${path}`);
   if (path === "/calendars/primary") return json({ timeZone: "Asia/Jerusalem" });
   if (path === "/calendars" && method === "POST") {
+    if (google.holdCreate) {
+      if (releaseCreate) releaseCreate();
+      else await new Promise<void>((r) => { releaseCreate = r; setTimeout(r, 1500); });
+      releaseCreate = null;
+    }
     google.calendars.add("cal-1");
     return json({ id: "cal-1", summary: body.summary });
   }
@@ -193,11 +203,25 @@ try {
   await sync();
   check("the next sync retries it", (await box(flaky.id)).syncState === "synced");
 
-  // 10. The calendar deleted in Google: a card, and no silent re-create.
+  // 10. Two processes reaching an empty setting at once create ONE calendar.
+  // A second module instance has its own in-process mutex, like another process.
+  // The query string makes a fresh instance; a variable keeps tsc from resolving it.
+  const racePath = "../src/modules/calendar/timebox-sync.ts?race";
+  const other = (await import(racePath)) as typeof import("../src/modules/calendar/timebox-sync");
+  const creates = () => google.calls.filter((c) => c === "POST /calendars").length;
+  const createsBefore = creates();
+  await setSetting("timebox_calendar_id", "");
+  google.calendars.clear();
+  google.holdCreate = true;
+  await Promise.all([sync(), other.syncTimeboxes(() => {})]);
+  google.holdCreate = false;
+  check("two racing syncs create one calendar", creates() - createsBefore === 1, creates() - createsBefore);
+
+  // 11. The calendar deleted in Google: a card, and no silent re-create.
   google.calendars.clear();
   await sync();
   await sync();
-  check("a deleted calendar is not re-created", google.calls.filter((c) => c === "POST /calendars").length === 1 && (await getSetting("timebox_calendar_gone")) === "cal-1");
+  check("a deleted calendar is not re-created", creates() - createsBefore === 1 && (await getSetting("timebox_calendar_gone")) === "cal-1");
   const cards = await db.select().from(attentionItems).where(and(eq(attentionItems.title, "Timeboxes calendar was deleted in Google"), eq(attentionItems.status, "open")));
   check("…and one card asks the user", cards.length === 1);
 } finally {

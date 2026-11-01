@@ -50,9 +50,11 @@ the moment you have the RAM/GPU — switch any route back to Ollama/MLX/Claude i
 | Investments daily report (a Runs task) | `investments.report` | `qwen3-coder:30b` |
 | Workbench judge (verifies delegated work) | `workbench.judge` | `qwen3-coder:30b` |
 | Workbench executors (opencode/pi routines) | `modules/workbench/engine.ts` | `qwen3-coder:30b` |
-| Periodic agents — today / projects / people templates | `manifest.server.ts` `defaultModel` | `qwen3-coder:30b` ×5, `qwen3-coder:30b-32k` ×1 (Weekly reviewer: a 32K window, created by install.sh) |
+| Periodic agents — Task triage, Project pulse, Repo watcher, Follow-up tracker, Loose-ends chaser, Weekly reviewer, Investment insight | template `defaultModel` (per agent in Agents) | `qwen3.5:35b-a3b-coding-nvfp4-32k` (a 32K tag install.sh creates on Apple Silicon), run at light reasoning; falls back to `qwen3-coder:30b` (Weekly reviewer: `-32k`) when it fails before any tool lands, e.g. the tag isn't installed |
 
 Every one of these is a route, editable in **Settings → AI Routing**. They are seeded local-and-free because they fire constantly; one-shot text jobs go through `completeText()` in `core/ai/routing.ts` (no tools, temperature 0, reasoning off). `decide` only works on Ollama (it uses Ollama's `/v1/systemone` endpoint); pointing it at another provider turns the decision tier off and area classify falls through to `area.classify`.
+
+Agents run qwen3.5 with `reasoning_effort: "low"` (the executor sets it for every Ollama run; non-thinking models ignore it): at full reasoning it invented tool results in the 2026-11 agent eval, at low it read its tools before writing.
 
 `workbench.judge` stays on the Ollama coder (not the MLX coder) on purpose: it always runs right after the Workbench **executor**, which uses the Ollama coder — so both share one resident copy instead of spinning up a second copy in LM Studio.
 

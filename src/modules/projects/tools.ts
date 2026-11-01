@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { and, eq, isNotNull, ne } from "drizzle-orm";
-import type { AiToolDef } from "@/core/modules/types.server";
+import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
 import { sql } from "@/core/db/client";
 import { getProjectCockpit, getProjectTasks } from "./queries";
 import { boundProjectId, resolveProjectByName } from "./subject";
@@ -68,6 +68,68 @@ async function verifyBriefGrounded(
   } catch {
     return null;
   }
+}
+
+/**
+ * A project's recent commits as dated lines, for readRepo and for a
+ * repo-focused focusNext. Surfaces a git failure instead of swallowing it into
+ * an empty string: a license gate ("agree to the Xcode license"), a bad
+ * network, or dubious ownership makes `git log` throw, and a silent "" is
+ * indistinguishable from "repo has no commits" — which sends the agent down the
+ * "nothing to digest" path and only shows up later as an opaque "no digest
+ * recorded" run failure. Reporting the error lets the agent (and the run
+ * transcript) name the real cause on the spot.
+ */
+async function readRepoLog(
+  db: AiToolContext["db"],
+  projectId: string,
+): Promise<
+  | { attached: false }
+  | { attached: true; dir: string; recentCommits: string; gitError: string | null }
+> {
+  const [p] = await db
+    .select({ repoUrl: projects.repoUrl })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const dir = usableRepoPath(projectId, p?.repoUrl ?? null);
+  if (!dir) return { attached: false };
+  const exec = promisify(execFile);
+  let recentCommits = "";
+  let gitError: string | null = null;
+  try {
+    // Dated lines, so "nothing new" is a fact the model reads, not a guess.
+    // A commit that names ANOTHER project (its key, e.g. "ETHOS-578") was
+    // done here for that project — tagged so its work isn't mistaken for
+    // this project's own roadmap.
+    const raw = (
+      await exec("git", ["-C", dir, "log", "-20", "--format=%h %as %s%x00%b%x1e"], {
+        maxBuffer: 4 * 1024 * 1024,
+      })
+    ).stdout;
+    const others = await db
+      .select({ key: projects.key, name: projects.name })
+      .from(projects)
+      .where(and(ne(projects.id, projectId), isNotNull(projects.key)));
+    const keyRes = others
+      .filter((o) => o.key && o.key.length >= 3)
+      .map((o) => ({ name: o.name, re: new RegExp(`\\b${o.key!.replace(/[^A-Z0-9]/gi, "")}(-\\d+)?\\b`) }));
+    recentCommits = raw
+      .split("\x1e")
+      .map((c) => c.trim())
+      .filter(Boolean)
+      .map((c) => {
+        const [line, body = ""] = c.split("\x00");
+        const hit = keyRes.filter((k) => k.re.test(`${line}\n${body}`)).map((k) => k.name);
+        return hit.length ? `${line}  [names ${hit.join(", ")} — work for that project]` : line;
+      })
+      .join("\n");
+  } catch (e) {
+    gitError = (e instanceof Error ? e.message : String(e))
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300);
+  }
+  return { attached: true, dir, recentCommits, gitError };
 }
 
 export const projectTools: AiToolDef[] = [
@@ -227,7 +289,7 @@ export const projectTools: AiToolDef[] = [
             } as Record<string, unknown>,
           };
         });
-        ctx.subjectCursor = { kind: "project", items, index: 0 };
+        ctx.subjectCursor = { kind: "project", items, index: 0, withRepo: !!input.withRepo };
       }
       const cur = ctx.subjectCursor;
       // Health-write guard: an agent that iterates projects AND writes health
@@ -305,6 +367,25 @@ export const projectTools: AiToolDef[] = [
       } catch {
         // best-effort — recall must never break iteration
       }
+      // A repo-focused run gets the commits with the focus. Left to a separate
+      // readRepo call, local models skipped it and wrote digests from the
+      // project's description (2026-11 agent eval: 2 of 7 digests, none read).
+      let repo: Record<string, unknown> | undefined;
+      if (cur.withRepo) {
+        const log = await readRepoLog(ctx.db, it.id);
+        repo = !log.attached
+          ? { attached: false, note: "repo not cloned yet — no digest for this one" }
+          : log.gitError
+            ? { recentCommits: log.recentCommits, error: `git log failed: ${log.gitError}` }
+            : {
+                recentCommits: log.recentCommits || "(no commits)",
+                // Counted here: the model's own date arithmetic put Ripple's
+                // 66-day gap at 24 days.
+                daysSinceLastCommit: ((d) => (d ? daysAgo(new Date(d)) : null))(
+                  log.recentCommits.match(/^\S+ (\d{4}-\d{2}-\d{2})/)?.[1],
+                ),
+              };
+      }
       return {
         focused: it.name,
         project: {
@@ -317,6 +398,7 @@ export const projectTools: AiToolDef[] = [
               "Background the user saved (bookmarks, notes, past memory). NOT their plans, goals, deadlines or commitments — never state one that isn't in this project's own fields or tasks.",
           }),
         },
+        ...(repo && { repo }),
         remaining: cur.items.length - cur.index,
       };
     },
@@ -494,56 +576,10 @@ export const projectTools: AiToolDef[] = [
       const projectId = ctx.subject?.kind === "project" ? ctx.subject.id : input.projectId;
       if (!projectId)
         return { error: "No project focused. Call projects.focusNext first." };
-      const [p] = await ctx.db
-        .select({ repoUrl: projects.repoUrl })
-        .from(projects)
-        .where(eq(projects.id, projectId));
-      const dir = usableRepoPath(projectId, p?.repoUrl ?? null);
-      if (!dir) return { attached: false, note: "no repo attached or not cloned yet" };
-      const exec = promisify(execFile);
-      let recentCommits = "";
+      const log = await readRepoLog(ctx.db, projectId);
+      if (!log.attached) return { attached: false, note: "no repo attached or not cloned yet" };
+      const { dir, recentCommits, gitError } = log;
       let readme = "";
-      // Surface a git failure instead of swallowing it into an empty string: a
-      // license gate ("agree to the Xcode license"), a bad network, or dubious
-      // ownership makes `git log` throw, and a silent "" is indistinguishable
-      // from "repo has no commits" — which sends the agent down the "nothing to
-      // digest" path and only shows up later as an opaque "no digest recorded"
-      // run failure. Reporting the error lets the agent (and the run transcript)
-      // name the real cause on the spot.
-      let gitError: string | null = null;
-      try {
-        // Dated lines, so "nothing new" is a fact the model reads, not a guess.
-        // A commit that names ANOTHER project (its key, e.g. "ETHOS-578") was
-        // done here for that project — tagged so its work isn't mistaken for
-        // this project's own roadmap.
-        const raw = (
-          await exec("git", ["-C", dir, "log", "-20", "--format=%h %as %s%x00%b%x1e"], {
-            maxBuffer: 4 * 1024 * 1024,
-          })
-        ).stdout;
-        const others = await ctx.db
-          .select({ key: projects.key, name: projects.name })
-          .from(projects)
-          .where(and(ne(projects.id, projectId), isNotNull(projects.key)));
-        const keyRes = others
-          .filter((o) => o.key && o.key.length >= 3)
-          .map((o) => ({ name: o.name, re: new RegExp(`\\b${o.key!.replace(/[^A-Z0-9]/gi, "")}(-\\d+)?\\b`) }));
-        recentCommits = raw
-          .split("\x1e")
-          .map((c) => c.trim())
-          .filter(Boolean)
-          .map((c) => {
-            const [line, body = ""] = c.split("\x00");
-            const hit = keyRes.filter((k) => k.re.test(`${line}\n${body}`)).map((k) => k.name);
-            return hit.length ? `${line}  [names ${hit.join(", ")} — work for that project]` : line;
-          })
-          .join("\n");
-      } catch (e) {
-        gitError = (e instanceof Error ? e.message : String(e))
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, 300);
-      }
       try {
         const name = readdirSync(dir).find((n) => /^readme(\.md|\.rst|\.txt)?$/i.test(n));
         if (name) readme = readFileSync(join(dir, name), "utf8").slice(0, 4000);

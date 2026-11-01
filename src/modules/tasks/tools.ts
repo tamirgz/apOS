@@ -83,6 +83,36 @@ export async function resolveTask(ctx: AiToolContext, ref: string): Promise<{ id
   return resolveRef(ctx, "task", ref);
 }
 
+/**
+ * A scheduled background agent (ctx.agentRunId) may demote or re-prioritise
+ * work, never close it or pull it out from under whoever is working on it. Task
+ * triage on local models marked six ETHOS doing/review items done and cancelled
+ * two others (2026-11 agent eval). Chat, MCP sessions and inbox triage carry no
+ * agentRunId and are unaffected.
+ */
+export async function agentStatusRefusal(
+  ctx: AiToolContext,
+  taskId: string,
+  target: string,
+): Promise<{ error: string } | null> {
+  if (!ctx.agentRunId) return null;
+  if (target === "done" || target === "cancelled") {
+    return { error: `Not changed: a background agent never sets an item ${target} — closing work is the user's call. Mention it in your report instead.` };
+  }
+  const [row] = await ctx.db
+    .select({ status: tasks.status, projectStatus: projects.status })
+    .from(tasks)
+    .leftJoin(projects, sql`${tasks.projectRef} = 'projects:' || ${projects.id}`)
+    .where(eq(tasks.id, taskId));
+  if (row?.status === "doing" || row?.status === "review") {
+    return { error: `Not changed: the item is in ${row.status} — someone is working on it, so a background agent leaves it as it is.` };
+  }
+  if (row?.projectStatus && row.projectStatus !== "active") {
+    return { error: `Not changed: the item's project is ${row.projectStatus}, so a background agent leaves its items as they are.` };
+  }
+  return null;
+}
+
 /** Project by name, by key (ETHOS), or — when omitted — the focused subject. */
 export async function resolveProject(
   ctx: AiToolContext,
@@ -361,6 +391,10 @@ export const taskTools: AiToolDef[] = [
         .boolean()
         .default(false)
         .describe("Also return each item's blockedBy / blocks (identifier + status), in one round"),
+      slipping: z
+        .boolean()
+        .default(false)
+        .describe("Only OPEN items that are slipping: untouched for 7+ days AND either past their due date or sitting in doing/review (status is ignored)"),
     }),
     async execute(input, ctx) {
       const p = await resolveProject(ctx, input.project);
@@ -395,12 +429,15 @@ export const taskTools: AiToolDef[] = [
         : assignee.toLowerCase() === "none"
           ? isNull(tasks.assignee)
           : sql`lower(${tasks.assignee}) = ${assignee.toLowerCase()}`;
+      // Only open work can slip; a model that asked for slipping + "all" got a
+      // page of done items and reported nothing slipping.
+      const status = input.slipping ? "open" : input.status;
       const statusFilter =
-        input.status === "all"
+        status === "all"
           ? undefined
-          : input.status === "open"
+          : status === "open"
             ? inArray(tasks.status, [...OPEN_STATUSES])
-            : eq(tasks.status, input.status);
+            : eq(tasks.status, status);
       const filters = [
         statusFilter,
         p ? eq(tasks.projectRef, `projects:${p.id}`) : undefined,
@@ -411,6 +448,16 @@ export const taskTools: AiToolDef[] = [
         milestoneFilter,
         assigneeFilter,
         input.completedSince ? gte(tasks.completedAt, new Date(input.completedSince)) : undefined,
+        input.slipping
+          ? sql`(${tasks.updatedAt} < now() - interval '7 days' and (${tasks.dueAt} < now() or ${tasks.status} in ('doing', 'review')))`
+          : undefined,
+        // A background agent sweeping "all my work" reads active projects only:
+        // a paused project's hundreds of stale items buried the real ones and
+        // drew status changes nobody asked for (2026-11 agent eval). Naming the
+        // project still reads it.
+        !p && ctx.agentRunId
+          ? sql`(${tasks.projectRef} is null or ${tasks.projectRef} in (select 'projects:' || id from projects where status = 'active'))`
+          : undefined,
       ].filter((f) => f !== undefined);
       const rows = await ctx.db
         .select()
@@ -537,6 +584,8 @@ export const taskTools: AiToolDef[] = [
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
       if ("error" in t) return t;
+      const refused = await agentStatusRefusal(ctx, t.id, input.status);
+      if (refused) return refused;
       const before = await cycleOf(ctx, t.id);
       const row = await updateWorkItem(ctx.db, t.id, { status: input.status }, actorOf(ctx), { ifVersion: input.ifVersion });
       if (row && "error" in row) return conflictResult(ctx, row.current);
@@ -569,6 +618,10 @@ export const taskTools: AiToolDef[] = [
     async execute(input, ctx) {
       const t = await resolveTask(ctx, input.ref);
       if ("error" in t) return t;
+      if (input.status) {
+        const refused = await agentStatusRefusal(ctx, t.id, input.status);
+        if (refused) return refused;
+      }
       const [cur] = input.acceptance
         ? await ctx.db.select({ acceptance: tasks.acceptance }).from(tasks).where(eq(tasks.id, t.id))
         : [];

@@ -396,6 +396,11 @@ async function runClaimed(
               !agent.tools.includes("projects.setHealth"),
           },
           model: mdl,
+          // Ollama runs a thinking model (qwen3.5) at full reasoning unless told
+          // otherwise, and at full it invented tool results in the 2026-11 agent
+          // eval; "low" kept it on its tools. Non-thinking models ignore it. MLX
+          // already picks light reasoning for tool runs on its own.
+          ...(prov.id === "ollama" && { reasoning: "low" as const }),
           // Per-agent tool-loop budget; undefined falls back to the provider
           // default. Lets a many-item agent finish the list instead of
           // truncating at the default cap.
@@ -479,15 +484,21 @@ async function runClaimed(
     // Fallback → Ollama: if the primary fails (connectivity, timeout, rate-limit,
     // LM Studio down, any error) and the agent has a local fallback, retry once
     // on Ollama — so a periodic heartbeat survives a flaky cloud OR a stopped
-    // LM Studio (the MLX host). Ollama is the always-on local baseline.
+    // LM Studio (the MLX host). Ollama is the always-on local baseline. An
+    // Ollama primary falls back too, to a different model, but only if it
+    // failed before any tool landed (the qwen3.5 agent tag isn't on every
+    // install; the coder fallback is) — a run that timed out mid-sweep is not
+    // re-run from the start.
     if (
       res.errored &&
-      (provider.id === "nvidia" || provider.id === "mlx") &&
-      agent.fallbackModel
+      agent.fallbackModel &&
+      (provider.id === "nvidia" ||
+        provider.id === "mlx" ||
+        (provider.id === "ollama" && agent.fallbackModel !== model && res.okTools.size === 0))
     ) {
       await transcript.push({
         type: "error",
-        message: `⚠︎ Cloud model "${model}" failed (${res.errored.slice(0, 120)}). Falling back to local ollama/${agent.fallbackModel}.`,
+        message: `⚠︎ Model "${model}" failed (${res.errored.slice(0, 120)}). Falling back to local ollama/${agent.fallbackModel}.`,
       });
       await auditAgent({
         agentId: agent.id,

@@ -61,6 +61,8 @@ export interface AiToolContext {
     kind: string;
     items: Array<{ id: string; name: string; read: Record<string, unknown> }>;
     index: number;
+    /** Set by focusNext({withRepo}): each focus also returns the repo's commits. */
+    withRepo?: boolean;
     /**
      * Subject ids that received a health write (projects.setHealth) this run.
      * Backs the focusNext health-write guard (see `focusRequireHealth`): the
@@ -147,9 +149,9 @@ export interface AgentTemplate {
   defaultProvider?: "anthropic" | "ollama" | "nvidia" | "mlx";
   defaultModel?: string;
   /**
-   * Local Ollama model to retry on if `defaultProvider` is a cloud provider and
-   * it fails on connectivity — keeps the heartbeat alive offline / when the
-   * cloud is rate-limited. Only meaningful with a cloud `defaultProvider`.
+   * Local Ollama model to retry on if the primary run fails — keeps the
+   * heartbeat alive offline, when the cloud is rate-limited, LM Studio is down,
+   * or an Ollama primary model isn't installed.
    */
   defaultFallbackModel?: string;
   /**

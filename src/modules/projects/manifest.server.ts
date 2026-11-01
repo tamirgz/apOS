@@ -62,9 +62,11 @@ export const projectsServerManifest: ModuleServerManifest = {
       // 12-model bench of this exact task (2026-07-23): qwen3-coder:30b was the
       // only model that, across repeated runs, set correct health on every
       // project AND reliably raised stall/blocker cards — score 94 vs 42 for
-      // qwen3:8b. See docs/EXECUTION-PLAN.md.
+      // qwen3:8b. See docs/EXECUTION-PLAN.md. Moved to qwen3.5 (32K, light
+      // reasoning) by the 2026-11 agent eval, with the coder as the fallback.
       defaultProvider: "ollama",
-      defaultModel: "qwen3-coder:30b",
+      defaultModel: "qwen3.5:35b-a3b-coding-nvfp4-32k",
+      defaultFallbackModel: "qwen3-coder:30b",
       // Iterating every active project via focusNext costs ~2-3 turns each, so
       // the default (8) truncated coverage at ~4 projects. Budget for the full
       // list plus margin.
@@ -111,21 +113,18 @@ export const projectsServerManifest: ModuleServerManifest = {
         "Per project with an attached code repo, summarizes what the recent commits actually did into a short digest on the cockpit — so the advisor and you can see code momentum without reading the log. Read-only, free local model; a run only counts as done if it recorded a digest.",
       defaultPrompt: [
         "You watch each project's code so the user doesn't have to read git logs. Produce a short, concrete digest of what's actually moving in the code.",
-        "1. Iterate with projects.focusNext({withRepo:true}) until it returns done:true. This focuses ONLY projects that HAVE a code repo (the backbone picks each; you never type an id), so every focused project has commits to read.",
-        "2. On the focused project call projects.readRepo for its recentCommits (each line is dated), then write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id): what the commits of the last 14 days actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'. Describe ONLY the commits: no tasks, no advice, no next steps. If nothing was committed in 14 days, say so with the last commit's date. (If readRepo ever returns attached:false because the repo hasn't cloned yet, just call projects.focusNext for the next one.)",
+        "1. Iterate with projects.focusNext({withRepo:true}) until it returns done:true. This focuses ONLY projects that HAVE a code repo (the backbone picks each; you never type an id), and each result carries that project's commits in `repo.recentCommits` (dated lines, newest first).",
+        "2. Write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id) from those commit lines ONLY: what the commits of the last 14 days actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'. Never use the project's description or goal as the source. Describe ONLY the commits: no tasks, no advice, no next steps. If no line is dated within 14 days, record exactly that, with the newest line's date and `daysSinceLastCommit` as given (never compute it yourself). If `repo` has an `error` or attached:false, record nothing for it and call projects.focusNext.",
         "3. Do not raise cards or send anything. The digests are the only output. Call projects.focusNext until done.",
       ].join("\n"),
-      defaultTools: [
-        "projects.focusNext",
-        "projects.readRepo",
-        "projects.recordRepoDigest",
-      ],
+      defaultTools: ["projects.focusNext", "projects.recordRepoDigest"],
       // A2: the run fails unless it actually recorded at least one digest.
       defaultSuccessTool: "projects.recordRepoDigest",
       defaultSchedule: "45 7 * * 0-4", // workday 07:45, after pulse/advisor
-      // Read + summarize on the free bench-winner; never bills.
+      // Read + summarize on the free local agent model; never bills.
       defaultProvider: "ollama",
-      defaultModel: "qwen3-coder:30b",
+      defaultModel: "qwen3.5:35b-a3b-coding-nvfp4-32k",
+      defaultFallbackModel: "qwen3-coder:30b",
       // Visit every active project via focusNext (readRepo + recordRepoDigest
       // per repo project). ~2-3 turns each; budget for the full list plus margin.
       defaultTurnBudget: 60,

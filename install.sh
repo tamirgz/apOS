@@ -110,6 +110,9 @@ else
     standard) MODELS="nomic-embed-text qwen3:8b qwen3-coder:30b" ;;
     full)     MODELS="nomic-embed-text qwen3:8b qwen3-coder:30b gemma4:31b-it-qat" ;;
   esac
+  # The background agents run qwen3.5 (NVFP4 weights, Apple Silicon); they
+  # fall back to qwen3-coder:30b where it's absent.
+  case "$TIER" in standard|full) [ "$OS" = Darwin ] && MODELS="$MODELS qwen3.5:35b-a3b-coding-nvfp4" ;; esac
 fi
 
 say "apOS installer — $(c '1' "$MODE") edition on $(c '1' "$OS")"
@@ -257,6 +260,13 @@ case " $MODELS " in *" qwen3-coder:30b "*)
     say "creating qwen3-coder:30b-32k …"
     printf 'FROM qwen3-coder:30b\nPARAMETER num_ctx 32768\n' > "${TMPDIR:-/tmp}/apos-32k.Modelfile"
     run ollama create qwen3-coder:30b-32k -f "${TMPDIR:-/tmp}/apos-32k.Modelfile"
+  fi ;;
+esac
+case " $MODELS " in *" qwen3.5:35b-a3b-coding-nvfp4 "*)
+  if ! printf '%s\n' "$have_models" | grep -qxF "qwen3.5:35b-a3b-coding-nvfp4-32k"; then
+    say "creating qwen3.5:35b-a3b-coding-nvfp4-32k …"
+    printf 'FROM qwen3.5:35b-a3b-coding-nvfp4\nPARAMETER num_ctx 32768\n' > "${TMPDIR:-/tmp}/apos-q35-32k.Modelfile"
+    run ollama create qwen3.5:35b-a3b-coding-nvfp4-32k -f "${TMPDIR:-/tmp}/apos-q35-32k.Modelfile"
   fi ;;
 esac
 

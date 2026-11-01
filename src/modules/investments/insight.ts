@@ -40,6 +40,7 @@ export const investmentInsightTemplate: AgentTemplate = {
   // factual transcription); qwen3-coder:30b reads the real numbers correctly.
   defaultIsolated: true,
   defaultProvider: "ollama",
-  defaultModel: "qwen3-coder:30b",
+  defaultModel: "qwen3.5:35b-a3b-coding-nvfp4-32k",
+  defaultFallbackModel: "qwen3-coder:30b",
   defaultTurnBudget: 14,
 };

@@ -38,7 +38,7 @@ _After your meetings, proposes the follow-ups worth doing — one card per perso
 
 - **Module:** `people`
 - **Schedule:** `0 18 * * 0-4` (Sun–Thu 18:00)
-- **Model:** ollama · `qwen3-coder:30b`
+- **Model:** ollama · `qwen3.5:35b-a3b-coding-nvfp4-32k`
 
 **Reads (inputs it works from):**
 
@@ -89,7 +89,7 @@ _Reviews your iSentry portfolio (positions + recent transactions) and writes a c
 
 - **Module:** `investments`
 - **Schedule:** manual only
-- **Model:** ollama · `qwen3-coder:30b`
+- **Model:** ollama · `qwen3.5:35b-a3b-coding-nvfp4-32k`
 
 **Reads (inputs it works from):**
 
@@ -144,7 +144,7 @@ _Twice a week, scans projects, tasks and people for things quietly slipping and 
 
 - **Module:** `people`
 - **Schedule:** `20 8 * * 0,3` (Sun & Wed 08:20)
-- **Model:** ollama · `qwen3-coder:30b`
+- **Model:** ollama · `qwen3.5:35b-a3b-coding-nvfp4-32k`
 
 **Reads (inputs it works from):**
 
@@ -161,7 +161,7 @@ _Twice a week, scans projects, tasks and people for things quietly slipping and 
 **Decides (its instructions):**
 
 > You are the user's chief-of-staff catching loose ends before they become problems. Be selective — surface the vital few, not everything.
-> 1. Read the world: projects.list (health, days since activity), tasks.list (overdue / stale), people.list (whom you haven't met in a while but usually do). Call attention.list to avoid duplicating open cards.
+> 1. Read the world, small and targeted: projects.list (health, days since activity), tasks.list {slipping: true, limit: 20} (only items untouched for a week that are past due or stuck in doing/review — never list all tasks), people.list {limit: 15} (whom you haven't met in a while but usually do), attention.list {limit: 15} to avoid duplicating open cards.
 > 2. Identify genuine loose ends: an overdue task with no movement, a project quietly stalling, a key person gone quiet. 
 > 3. Raise at most 2-3 cards with attention.raise: type 'do' with a concrete next step, or 'notify' for an FYI. To anchor a card to a project, pass its NAME (attention.raise's `project` field — validated server-side; never an id). Dedupe per ISO week: dedupeKey 'looseend:<slug>:<YYYY-Wxx>'.
 > 4. Do not repeat what the project-pulse already flags (stalled projects) unless you're adding a concrete action. Keep it minimal. If attention.list shows a loose-end card YOU raised whose situation has since resolved (the task moved, the person replied), close it with attention.resolve (status 'dismissed') by its ref.
@@ -205,7 +205,7 @@ _Workday (Sun–Thu) heartbeat over your active projects: derives each one's hea
 
 - **Module:** `projects`
 - **Schedule:** `10 7 * * 0-4` (Sun–Thu 07:10)
-- **Model:** ollama · `qwen3-coder:30b`
+- **Model:** ollama · `qwen3.5:35b-a3b-coding-nvfp4-32k`
 
 **Reads (inputs it works from):**
 
@@ -236,13 +236,12 @@ _Per project with an attached code repo, summarizes what the recent commits actu
 
 - **Module:** `projects`
 - **Schedule:** `45 7 * * 0-4` (Sun–Thu 07:45)
-- **Model:** ollama · `qwen3-coder:30b`
+- **Model:** ollama · `qwen3.5:35b-a3b-coding-nvfp4-32k`
 - **Counts as done only if it calls:** `projects.recordRepoDigest`
 
 **Reads (inputs it works from):**
 
 - `projects.focusNext` — Iterate your active projects ONE at a time.
-- `projects.readRepo` — Read the FOCUSED project's attached code repo — recent commits + its README — so your advice is grounded in the actual code, not a guess (targets the project from projects.focusNext; you pass no id).
 
 **Suggests / acts (outputs):**
 
@@ -251,8 +250,8 @@ _Per project with an attached code repo, summarizes what the recent commits actu
 **Decides (its instructions):**
 
 > You watch each project's code so the user doesn't have to read git logs. Produce a short, concrete digest of what's actually moving in the code.
-> 1. Iterate with projects.focusNext({withRepo:true}) until it returns done:true. This focuses ONLY projects that HAVE a code repo (the backbone picks each; you never type an id), so every focused project has commits to read.
-> 2. On the focused project call projects.readRepo for its recentCommits (each line is dated), then write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id): what the commits of the last 14 days actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'. Describe ONLY the commits: no tasks, no advice, no next steps. If nothing was committed in 14 days, say so with the last commit's date. (If readRepo ever returns attached:false because the repo hasn't cloned yet, just call projects.focusNext for the next one.)
+> 1. Iterate with projects.focusNext({withRepo:true}) until it returns done:true. This focuses ONLY projects that HAVE a code repo (the backbone picks each; you never type an id), and each result carries that project's commits in `repo.recentCommits` (dated lines, newest first).
+> 2. Write a 2-3 sentence digest via projects.recordRepoDigest (it targets the focused project — no id) from those commit lines ONLY: what the commits of the last 14 days actually did (themes, notable changes, momentum). Be specific — name the real work, not 'various updates'. Never use the project's description or goal as the source. Describe ONLY the commits: no tasks, no advice, no next steps. If no line is dated within 14 days, record exactly that, with the newest line's date and `daysSinceLastCommit` as given (never compute it yourself). If `repo` has an `error` or attached:false, record nothing for it and call projects.focusNext.
 > 3. Do not raise cards or send anything. The digests are the only output. Call projects.focusNext until done.
 
 ---
@@ -263,7 +262,7 @@ _Reviews open tasks daily, flags stale or overdue ones by raising their priority
 
 - **Module:** `tasks`
 - **Schedule:** `0 8 * * *` (daily 08:00)
-- **Model:** account default
+- **Model:** ollama · `qwen3.5:35b-a3b-coding-nvfp4-32k`
 
 **Reads (inputs it works from):**
 
@@ -277,7 +276,10 @@ _Reviews open tasks daily, flags stale or overdue ones by raising their priority
 
 **Decides (its instructions):**
 
-> Review my open work items with tasks.list — each comes back with a short `ref` (e.g. 't3') and an identifier (e.g. ETHOS-12). States are backlog → todo → doing → review → done (or cancelled). For an item that is clearly stale or overdue, raise its priority with tasks.update or move it with tasks.setStatus (backlog if it is not really committed), and leave a one-line tasks.comment saying why. Identify items by `ref` or identifier, never an id. Then summarize what most needs attention today. Use ledger.has / ledger.mark to avoid re-flagging an item you already flagged.
+> Review my slipping work with tasks.list {slipping: true, limit: 30} — items untouched for 7+ days that are past due or sitting in doing/review. Each has a short `ref` ('t3') and an identifier (KEY-12); use either, never an id. Use ledger.has / ledger.mark so you never re-flag an item you already flagged.
+> For a past-due item in backlog or todo, choose ONE: if it still matters, raise its priority with tasks.update {priority: 'high'}; if it is clearly not committed any more, move it with tasks.setStatus {status: 'backlog'}. 'backlog' is the ONLY status you may set. Leave a one-line tasks.comment saying why.
+> Never set an item done or cancelled, and never change an item in doing or review — someone is working on it. Name those in your summary instead.
+> Then summarize in a few lines what most needs attention today. If nothing is slipping, say so — that is a good result.
 
 ---
 
@@ -287,7 +289,7 @@ _End-of-week (Thursday) synthesis: what moved this week, what's slipping, and 2-
 
 - **Module:** `people`
 - **Schedule:** `0 16 * * 4` (Thu 16:00)
-- **Model:** ollama · `qwen3-coder:30b-32k`
+- **Model:** ollama · `qwen3.5:35b-a3b-coding-nvfp4-32k`
 - **Counts as done only if it calls:** `attention.raise`
 
 **Reads (inputs it works from):**

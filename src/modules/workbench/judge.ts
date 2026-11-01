@@ -78,7 +78,7 @@ function criteriaAsk(criteria: { text: string }[]): { block: string; shape: stri
   };
 }
 
-function buildPrompt(input: JudgeInput): { system: string; user: string } {
+export function buildPrompt(input: JudgeInput): { system: string; user: string } {
   const written = isWritten(input.taskType);
   const system = written ? WRITTEN_SYSTEM : CODE_SYSTEM;
   const { block, shape } = criteriaAsk(input.criteria ?? []);

@@ -39,7 +39,8 @@ export const peopleServerManifest: ModuleServerManifest = {
       ],
       defaultSchedule: "0 18 * * 0-4", // 18:00 workdays (Sun–Thu), after the day's meetings
       defaultProvider: "ollama",
-      defaultModel: "qwen3-coder:30b",
+      defaultModel: "qwen3.5:35b-a3b-coding-nvfp4-32k",
+      defaultFallbackModel: "qwen3-coder:30b",
     },
     {
       id: "loose-ends-chaser",
@@ -48,7 +49,7 @@ export const peopleServerManifest: ModuleServerManifest = {
         "Twice a week, scans projects, tasks and people for things quietly slipping and surfaces the few worth catching. Free local model.",
       defaultPrompt: [
         "You are the user's chief-of-staff catching loose ends before they become problems. Be selective — surface the vital few, not everything.",
-        "1. Read the world: projects.list (health, days since activity), tasks.list (overdue / stale), people.list (whom you haven't met in a while but usually do). Call attention.list to avoid duplicating open cards.",
+        "1. Read the world, small and targeted: projects.list (health, days since activity), tasks.list {slipping: true, limit: 20} (only items untouched for a week that are past due or stuck in doing/review — never list all tasks), people.list {limit: 15} (whom you haven't met in a while but usually do), attention.list {limit: 15} to avoid duplicating open cards.",
         "2. Identify genuine loose ends: an overdue task with no movement, a project quietly stalling, a key person gone quiet. ",
         "3. Raise at most 2-3 cards with attention.raise: type 'do' with a concrete next step, or 'notify' for an FYI. To anchor a card to a project, pass its NAME (attention.raise's `project` field — validated server-side; never an id). Dedupe per ISO week: dedupeKey 'looseend:<slug>:<YYYY-Wxx>'.",
         "4. Do not repeat what the project-pulse already flags (stalled projects) unless you're adding a concrete action. Keep it minimal. If attention.list shows a loose-end card YOU raised whose situation has since resolved (the task moved, the person replied), close it with attention.resolve (status 'dismissed') by its ref.",
@@ -63,7 +64,8 @@ export const peopleServerManifest: ModuleServerManifest = {
       ],
       defaultSchedule: "20 8 * * 0,3", // Sun & Wed 08:20 — staggered off Task triage (08:00)
       defaultProvider: "ollama",
-      defaultModel: "qwen3-coder:30b",
+      defaultModel: "qwen3.5:35b-a3b-coding-nvfp4-32k",
+      defaultFallbackModel: "qwen3-coder:30b",
     },
     {
       id: "weekly-reviewer",
@@ -95,7 +97,8 @@ export const peopleServerManifest: ModuleServerManifest = {
       // tag (install.sh creates it) because a week of projects + tasks + people
       // overflows Ollama's 8K default, which silently drops the prompt's start.
       defaultProvider: "ollama",
-      defaultModel: "qwen3-coder:30b-32k",
+      defaultModel: "qwen3.5:35b-a3b-coding-nvfp4-32k",
+      defaultFallbackModel: "qwen3-coder:30b-32k",
     },
   ],
 };

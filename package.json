@@ -15,7 +15,8 @@
     "test:memory": "tsx scripts/test-memory.mts",
     "test:work": "tsx --env-file=.env.local scripts/test-work.mts",
     "test:stats": "tsx scripts/test-stats.mts",
-    "test:approvals": "tsx --env-file=.env.local scripts/test-approvals.mts"
+    "test:approvals": "tsx --env-file=.env.local scripts/test-approvals.mts",
+    "test:timebox": "tsx --env-file=.env.local scripts/test-timebox-sync.mts"
   },
   "dependencies": {
     "3d-force-graph": "^1.80.0",

@@ -4,6 +4,7 @@ import { getSetting, setSetting } from "@/core/app-settings";
 import type { ModuleJob } from "@/core/modules/types.server";
 import { attentionItems } from "@/modules/today/schema";
 import { firstConferenceUrl } from "./meeting-url";
+import { syncTimeboxes } from "./timebox-sync";
 import { calendarEvents } from "./schema";
 
 export const GOOGLE_KEYS = {
@@ -15,11 +16,15 @@ export const GOOGLE_KEYS = {
 } as const;
 
 export const GOOGLE_REDIRECT_PATH = "/api/google/callback";
-// Calendar + Gmail, both read-only. Adding gmail here means the next Connect
-// Google re-consent grants Gmail too (existing tokens keep working for
-// calendar; the Gmail sync degrades gracefully until re-consent).
-const SCOPE =
-  "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly";
+// Calendar + Gmail, both read-only, plus calendar.app.created: write access to
+// ONLY the calendars apOS creates (the Timeboxes calendar). A new scope here
+// means the next Connect Google re-consent grants it; older tokens keep working
+// for everything else, and each feature degrades gracefully until re-consent.
+const SCOPE = [
+  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/calendar.app.created",
+].join(" ");
 const WINDOW_PAST_DAYS = 30;
 const WINDOW_FUTURE_DAYS = 180;
 
@@ -90,11 +95,19 @@ export async function exchangeCode(
     );
   }
   await setSetting(GOOGLE_KEYS.refreshToken, data.refresh_token);
+  // A fresh connect is the user's go-ahead for a new Timeboxes calendar if they
+  // deleted the old one (see timebox-sync.ts).
+  await setSetting("timebox_calendar_gone", "");
   await sql.notify("google_sync", "connected");
 }
 
 /** Fresh Google access token from the stored refresh token — reused by Gmail. */
 export async function accessToken(): Promise<string> {
+  return (await googleToken()).token;
+}
+
+/** A fresh access token plus the scopes the user actually granted. */
+export async function googleToken(): Promise<{ token: string; scopes: Set<string> }> {
   const [clientId, clientSecret, refreshToken] = await Promise.all([
     getSetting(GOOGLE_KEYS.clientId),
     getSetting(GOOGLE_KEYS.clientSecret),
@@ -115,12 +128,13 @@ export async function accessToken(): Promise<string> {
   });
   const data = (await res.json()) as {
     access_token?: string;
+    scope?: string;
     error?: string;
   };
   if (!res.ok || !data.access_token) {
     throw new Error(`token refresh failed: ${data.error ?? res.status}`);
   }
-  return data.access_token;
+  return { token: data.access_token, scopes: new Set((data.scope ?? "").split(" ").filter(Boolean)) };
 }
 
 interface GoogleEvent {
@@ -396,6 +410,8 @@ export const googleJobs: ModuleJob[] = [
     handle: async () => {
       try {
         await syncGoogle(console.log);
+        // Its own failures must not read as a broken calendar sync.
+        await syncTimeboxes(console.log).catch((e) => console.log(`timebox sync failed: ${e}`));
         // Recovered — clear any standing "reconnect" nag.
         await db
           .update(attentionItems)
@@ -436,6 +452,14 @@ export const googleJobs: ModuleJob[] = [
         }
         throw e; // other failures surface as before
       }
+    },
+  },
+  {
+    // Nudged after a box is locked, moved or dropped, so it reaches the phone
+    // without waiting for the 5-minute run.
+    channel: "timebox_sync",
+    handle: async () => {
+      await syncTimeboxes(console.log);
     },
   },
 ];

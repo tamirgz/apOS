@@ -258,6 +258,10 @@ try {
       await db.execute(sql`update cycle_membership set joined_at = ${new Date(now + 8 * DAY).toISOString()} where task_id = ${late.id}`);
       const nx = (await listCycles(db, { projectId: p.id })).find((x) => x.id === next.id)!.plan!;
       assert.deepEqual([nx.planned, nx.added, nx.addedDone], [2, 1, 0]);
+      // A planned item cancelled during the cycle leaves the plan (de-scoped, not failed) and is shown apart.
+      await db.update(tasks).set({ status: "cancelled", completedAt: new Date(now + 9 * DAY) }).where(eq(tasks.id, its[2].id));
+      const cx = (await listCycles(db, { projectId: p.id })).find((x) => x.id === next.id)!.plan!;
+      assert.deepEqual([cx.planned, cx.plannedDone, cx.plannedCancelled, cx.ratio], [1, 1, 1, 1], "cancelled in the cycle is out of the plan");
     } finally {
       await deleteCycle(db, next.id);
       await deleteCycle(db, cur.id);

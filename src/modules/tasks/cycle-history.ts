@@ -25,11 +25,11 @@ export type Stay = { taskId: string; cycleId: string; joinedAt: Date; leftAt: Da
 type Item = { status: TaskStatus; completedAt: Date | null };
 
 export interface CyclePlan {
-  /** Items the cycle held at its lock (before then: what it holds now). */
+  /** Items the cycle held at its lock (before then: what it holds now), less those cancelled by its end. */
   planned: number;
   /** Planned items done inside the cycle's window. */
   plannedDone: number;
-  /** Planned items since cancelled — not done, and shown apart. */
+  /** Planned items cancelled by the cycle's end — de-scoped, so out of `planned`, and shown apart. */
   plannedCancelled: number;
   /** Items that joined after the lock. */
   added: number;
@@ -58,15 +58,17 @@ export function cyclePlan(
     const item = items.get(taskId);
     if (!item) continue;
     const doneHere = item.status === "done" && !!item.completedAt && holds(c, item.completedAt);
+    // Cancelled by the end of the window: de-scoped, not failed. Cancelled later still counts as a miss.
+    const cancelledHere = item.status === "cancelled" && !!item.completedAt && item.completedAt.getTime() < c.endsAt.getTime() + DAY;
     // Rolled over before the lock: the roll-over froze the plan with the item in it.
     const planned = mine.some(
       (s) => s.joinedAt.getTime() <= at && (!s.leftAt || s.leftAt.getTime() > at || s.leftReason === "carried"),
     );
-    if (planned) {
+    if (planned && cancelledHere) p.plannedCancelled++;
+    else if (planned) {
       p.planned++;
       if (doneHere) p.plannedDone++;
-      else if (item.status === "cancelled") p.plannedCancelled++;
-      else {
+      else if (item.status !== "cancelled") {
         const last = mine.reduce((a, b) => (b.joinedAt > a.joinedAt ? b : a));
         const next = last.leftAt && last.leftTo ? cycleById.get(last.leftTo) : undefined;
         if (next && next.startsAt > c.startsAt) {

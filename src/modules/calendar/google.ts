@@ -15,6 +15,9 @@ export const GOOGLE_KEYS = {
   timeboxCalendarId: "timebox_calendar_id",
 } as const;
 
+/** When the last Google sync finished (ISO) — the Calendar footer's "synced N min ago". */
+export const GOOGLE_SYNCED_AT = "google_synced_at";
+
 export const GOOGLE_REDIRECT_PATH = "/api/google/callback";
 // Calendar + Gmail, both read-only, plus calendar.app.created: write access to
 // ONLY the calendars apOS creates (the Timeboxes calendar). A new scope here
@@ -395,6 +398,7 @@ export async function syncGoogle(
       );
   }
 
+  await setSetting(GOOGLE_SYNCED_AT, new Date().toISOString());
   await sql.notify("calendar_changed", "google-synced");
   log(`google sync: ${synced} events from ${calendars.length - failed}/${calendars.length} calendars`);
   return { synced };

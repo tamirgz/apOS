@@ -79,6 +79,8 @@ export async function deleteEvent(id: string) {
   revalidatePath("/");
 }
 
-export async function requestIcsSync() {
+/** Sync now: the ICS feed and the Google calendars, whichever are linked (each job no-ops when its source isn't). */
+export async function requestCalendarSync() {
   await sql.notify("calendar_sync", "manual");
+  await sql.notify("google_sync", "manual");
 }

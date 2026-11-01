@@ -72,6 +72,8 @@ export function BoxBlock({
   kind,
   endMode,
   draft,
+  done,
+  noChip,
   meta,
   tall = true,
   selected,
@@ -86,6 +88,10 @@ export function BoxBlock({
   kind: TimeboxKind;
   endMode: "soft" | "hard";
   draft?: boolean;
+  /** A box the user finished: the chip says so instead of its kind. */
+  done?: boolean;
+  /** Hide the kind/end chip where the block is too narrow for it (the color still says the kind). */
+  noChip?: boolean;
   /** Shown after the times on the second line, e.g. the project. */
   meta?: string | null;
   tall?: boolean;
@@ -93,14 +99,14 @@ export function BoxBlock({
   children?: ReactNode;
 } & Omit<HTMLAttributes<HTMLDivElement>, "title">) {
   const color = KIND_META[kind].color;
-  const chip = chipFor(kind, endMode);
+  const chip = done ? "done" : noChip ? null : chipFor(kind, endMode);
   const time = `${hhmm(start)}–${hhmm(end)}`;
   const chips = (
     <>
       {chip && (
         <span
           className={cn(
-            "shrink-0 rounded-[4px] border px-1.5 font-mono text-[9px] uppercase leading-[14px] tracking-wider",
+            "shrink-0 whitespace-nowrap rounded-[4px] border px-1.5 font-mono text-[9px] uppercase leading-[14px] tracking-wider",
             tall && "float-right mt-px ml-2",
           )}
           style={{ color, borderColor: `color-mix(in oklab, ${color} 70%, transparent)` }}
@@ -133,10 +139,11 @@ export function BoxBlock({
       }}
     >
       {tall && chips}
-      <span dir="auto" className={cn("truncate font-medium", tall ? "block" : "min-w-0 flex-1")}>
+      <span dir="auto" className={cn("truncate font-medium", tall ? "block" : "min-w-0 flex-auto")}>
         {title}
       </span>
-      <span className={cn("shrink-0 truncate font-mono text-[10px] text-ink-dim", tall && "block")}>
+      {/* On one line the title wins: the time gives way first. */}
+      <span className={cn("truncate font-mono text-[10px] text-ink-dim", tall ? "block" : "min-w-0 shrink-[100]")}>
         {time}
         {meta ? ` · ${meta}` : ""}
       </span>

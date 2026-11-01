@@ -13,6 +13,7 @@ import { WorkbenchPage } from "./pages/WorkbenchPage";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
 import { ExecutorsPage } from "./pages/ExecutorsPage";
 import { WorkbenchWidget } from "./widgets/WorkbenchWidget";
+import { countActiveTasks } from "./queries";
 
 export const workbenchServerManifest: ModuleServerManifest = {
   id: "workbench",
@@ -27,6 +28,11 @@ export const workbenchServerManifest: ModuleServerManifest = {
       title: "Runs",
       size: "sm",
       component: WorkbenchWidget,
+      // An empty Runs card only said "nothing delegated".
+      hideWhen: async () => {
+        const c = await countActiveTasks();
+        return c.running + c.queued + c.review === 0;
+      },
     },
   ],
   schema: { workbenchTasks, taskAttempts, attemptEvents, executors, routines },

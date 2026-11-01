@@ -19,8 +19,6 @@ import { taskTools } from "./tools";
 import { workJobs } from "./jobs";
 import { TasksPage } from "./pages/TasksPage";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
-import { OpenTasksWidget } from "./widgets/OpenTasksWidget";
-import { TaskLoadStat } from "./widgets/TaskLoadStat";
 
 export const tasksServerManifest: ModuleServerManifest = {
   id: "tasks",
@@ -28,16 +26,7 @@ export const tasksServerManifest: ModuleServerManifest = {
     "": TasksPage,
     "[id]": TaskDetailPage,
   },
-  widgets: [
-    {
-      id: "open-tasks",
-      title: "Task load",
-      size: "sm",
-      component: OpenTasksWidget,
-      priority: 3,
-      stat: TaskLoadStat,
-    },
-  ],
+  widgets: [],
   schema: { tasks, workCounters, taskActivity, taskAttachments, cycles, taskRelations, taskLinks, workViews, milestones, milestoneCapabilities, milestoneContent },
   aiTools: [...taskTools, ...attachmentTools, ...planningTools, ...milestoneTools],
   jobs: workJobs,

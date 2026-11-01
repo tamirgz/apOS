@@ -4,7 +4,7 @@ import { calendarTools } from "./tools";
 import { calendarJobs } from "./sync";
 import { googleJobs } from "./google";
 import { CalendarPage } from "./pages/CalendarPage";
-import { TodayWidget } from "./widgets/TodayWidget";
+import { NowWidget } from "./widgets/NowWidget";
 
 export const calendarServerManifest: ModuleServerManifest = {
   id: "calendar",
@@ -13,12 +13,13 @@ export const calendarServerManifest: ModuleServerManifest = {
   },
   widgets: [
     {
-      id: "today",
-      title: "Agenda",
-      size: "sm",
-      component: TodayWidget,
+      id: "now",
+      title: "Now",
+      size: "lg",
+      component: NowWidget,
       priority: 1,
-      span: 2,
+      span: 4,
+      bare: true,
     },
   ],
   schema: { calendarEvents },

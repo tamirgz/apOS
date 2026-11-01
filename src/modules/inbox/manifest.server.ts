@@ -12,7 +12,7 @@ export const inboxServerManifest: ModuleServerManifest = {
     "": InboxPage,
   },
   widgets: [
-    { id: "inbox", title: "Inbox", size: "sm", component: InboxWidget },
+    { id: "inbox", title: "Inbox", size: "sm", component: InboxWidget, priority: 1, span: 2 },
   ],
   schema: { inboxItems },
   aiTools: inboxTools,

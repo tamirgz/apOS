@@ -179,20 +179,25 @@ export interface ModuleWidget {
    * Dashboard value tier, controlling prominence:
    *   1 = "Now" — what needs the user + today's agenda + what to work on next
    *   2 = "In motion" — active work & automation state (default)
-   *   3 = "Ambient" — passive counts, rendered as a compact stat in the pulse
-   *       strip rather than a full card (requires `stat`).
    */
-  priority?: 1 | 2 | 3;
+  priority?: 1 | 2;
   /** Column span within its tier's grid (tier 1 emphasis). Default 1. */
   span?: number;
   /** Where the card header links. Default: the module root (/m/<id>). */
   href?: string;
   /**
-   * Compact single-stat form for the tier-3 pulse strip. When a priority-3
-   * widget provides this, the dashboard renders it in the strip instead of
-   * the full `component`.
+   * The widget draws its own chrome: no card frame, full width at the top of
+   * its tier (the Now strip).
    */
-  stat?: ComponentType;
+  bare?: boolean;
+  /** Leave the card off the dashboard while this says so (e.g. nothing to show). */
+  hideWhen?: () => Promise<boolean>;
+  /**
+   * A one-line form for when the card has nothing to act on (e.g. every agent
+   * is OK). While `when` says so, the dashboard shows `component` as a slim
+   * line instead of the card.
+   */
+  compact?: { when: () => Promise<boolean>; component: ComponentType };
 }
 
 export interface ModuleRouteProps {

@@ -4,8 +4,6 @@ import { ideaTools } from "./tools";
 import { ideaJobs } from "./analyze";
 import { IdeasPage } from "./pages/IdeasPage";
 import { IdeaDetailPage } from "./pages/IdeaDetailPage";
-import { IdeasPipelineWidget } from "./widgets/IdeasPipelineWidget";
-import { IdeasStat } from "./widgets/IdeasStat";
 
 export const ideasServerManifest: ModuleServerManifest = {
   id: "ideas",
@@ -13,16 +11,7 @@ export const ideasServerManifest: ModuleServerManifest = {
     "": IdeasPage,
     "[id]": IdeaDetailPage,
   },
-  widgets: [
-    {
-      id: "ideas-pipeline",
-      title: "Idea pipeline",
-      size: "sm",
-      component: IdeasPipelineWidget,
-      priority: 3,
-      stat: IdeasStat,
-    },
-  ],
+  widgets: [],
   schema: { ideas },
   aiTools: ideaTools,
   agentTemplates: [

@@ -132,6 +132,17 @@ async function readRepoLog(
   return { attached: true, dir, recentCommits, gitError };
 }
 
+/**
+ * Projects a health sweep (focusRequireHealth) has not judged yet: never
+ * focused, or focused without a setHealth. The executor resumes a sweep that
+ * ended with any left, so a model that stops early can't leave them stale.
+ */
+export function unjudgedProjects(ctx: AiToolContext): string[] {
+  const cur = ctx.subjectCursor;
+  if (!ctx.focusRequireHealth || cur?.kind !== "project") return [];
+  return cur.items.filter((i) => !cur.healthWritten?.has(i.id)).map((i) => i.name);
+}
+
 export const projectTools: AiToolDef[] = [
   {
     name: "projects.create",
@@ -400,6 +411,14 @@ export const projectTools: AiToolDef[] = [
         },
         ...(repo && { repo }),
         remaining: cur.items.length - cur.index,
+        // "remaining: 0" alone read as "sweep done": local models skipped the
+        // last project's health (2026-11 eval, 4 of 6 runs). Say the next step.
+        ...(ctx.focusRequireHealth && {
+          next:
+            cur.index >= cur.items.length
+              ? `This is the LAST project. Record projects.setHealth for '${it.name}' now, then call projects.focusNext once more to close the sweep.`
+              : `Record projects.setHealth for '${it.name}', then call projects.focusNext.`,
+        }),
       };
     },
   },

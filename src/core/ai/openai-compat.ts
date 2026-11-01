@@ -32,6 +32,45 @@ async function waitForServer(openai: OpenAI, signal: AbortSignal | undefined) {
   }
 }
 
+/**
+ * Tool calls a model wrote into its answer text instead of the tool_calls field.
+ * Qwen models sometimes emit them as plain content, in their native form
+ * (`<function=projects__focusNext>\n<parameter=id>\n42\n</parameter>\n</function>`)
+ * or the `<invoke name="…"><parameter name="…">` form, and without this the run
+ * ends with that markup as its "answer". Only names of offered tools count; the
+ * markup is stripped from the text either way.
+ */
+const TEXT_CALL_FORMS = [
+  { block: /<function=([\w.\-]+)>([\s\S]*?)(?:<\/function>|$)/g, param: /<parameter=([\w.\-]+)>([\s\S]*?)<\/parameter>/g },
+  { block: /<invoke name="([\w.\-]+)">([\s\S]*?)(?:<\/invoke>|$)/g, param: /<parameter name="([\w.\-]+)">([\s\S]*?)<\/parameter>/g },
+];
+export const hasTextToolCall = (text: string) => /<function=[\w.\-]+>|<invoke name="[\w.\-]+">/.test(text);
+
+export function recoverTextToolCalls(text: string, toolNames: string[]) {
+  const calls: { name: string; args: string }[] = [];
+  if (!hasTextToolCall(text)) return { calls, text };
+  let rest = text;
+  for (const { block, param } of TEXT_CALL_FORMS) {
+    for (const m of text.matchAll(block)) {
+      const name = fromWireName(m[1]);
+      if (!toolNames.includes(name)) continue;
+      const params: Record<string, unknown> = {};
+      for (const p of m[2].matchAll(param)) {
+        const raw = p[2].trim();
+        try {
+          params[p[1]] = JSON.parse(raw);
+        } catch {
+          params[p[1]] = raw;
+        }
+      }
+      calls.push({ name: toWireName(name), args: JSON.stringify(params) });
+    }
+    rest = rest.replace(block, "");
+  }
+  rest = rest.replace(/<\/?(tool_call|function_calls)>/g, "").trim();
+  return { calls, text: rest };
+}
+
 export async function* runOpenAICompatible(
   baseURL: string,
   apiKey: string,
@@ -76,6 +115,9 @@ export async function* runOpenAICompatible(
   // is hit, force a final tool-free turn so the model MUST produce its answer.
   const toolMemo = new Map<string, unknown>();
   let totalToolCalls = 0;
+  // Last result of each repeatable tool: a call that returns the same thing
+  // again did not advance, so it counts toward the cap.
+  const lastRepeatable = new Map<string, string>();
   let nudged = false;
   const TOOL_CALL_CAP = 10;
   // The run's required write (opts.finishTool) survives the forced answer
@@ -86,6 +128,7 @@ export async function* runOpenAICompatible(
   // True when every turn ended in tool calls — i.e. the loop stopped because
   // the budget ran out, not because the model finished its answer.
   let exhausted = true;
+  let emptyNudged = false;
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       const forceAnswer = totalToolCalls >= TOOL_CALL_CAP;
@@ -194,10 +237,38 @@ export async function* runOpenAICompatible(
       await waitForServer(openai, opts.signal);
       }
 
-      if (turnText) finalText = turnText;
-
-      const calls = [...toolCallAcc.values()].filter((c) => c.name);
+      const calls: { id: string; name: string; args: string }[] = [...toolCallAcc.values()].filter((c) => c.name);
+      // No structured calls but tools were on offer: the model may have written
+      // them into its text (or, with an empty answer, into its reasoning). Run
+      // those, and keep the markup out of the answer.
+      const offered = finishOnly ?? (forceAnswer ? [] : tools);
       if (calls.length === 0) {
+        const offeredNames = offered.map((t) => fromWireName(t.function.name));
+        if (hasTextToolCall(turnText)) {
+          const recovered = recoverTextToolCalls(turnText, offeredNames);
+          turnText = recovered.text;
+          recovered.calls.forEach((c, i) => calls.push({ id: `call_text_${turn}_${i}`, ...c }));
+        } else if (!turnText.trim() && hasTextToolCall(turnReasoning)) {
+          recoverTextToolCalls(turnReasoning, offeredNames).calls.forEach((c, i) =>
+            calls.push({ id: `call_text_${turn}_${i}`, ...c }),
+          );
+        }
+      }
+
+      if (turnText) finalText = turnText;
+      if (calls.length === 0) {
+        // A turn with no call that is empty, or only announces a next step
+        // ("Let me try once more:"), is not an answer — seen with qwen3.5 on
+        // Ollama mid-sweep. Ask once for the next step before finishing.
+        const stalled = !turnText.trim() || /:\s*$/.test(turnText);
+        if (stalled && offered.length && !emptyNudged && turn < maxTurns - 1) {
+          emptyNudged = true;
+          messages.push({
+            role: "system",
+            content: "Your last reply had no tool call and no answer. Continue the task: call the next tool you need, or write your final answer.",
+          });
+          continue;
+        }
         exhausted = false;
         break;
       }
@@ -217,16 +288,12 @@ export async function* runOpenAICompatible(
         const sig = `${name}(${call.args || "{}"})`;
         // Iterator tools (projects.focusNext) return a DIFFERENT result on each
         // identical call — memoizing them freezes their cursor and capping them
-        // truncates a legitimate multi-item sweep. Exempt from both guards, and
-        // treat an advance as PROGRESS: reset the runaway budget so each item
-        // gets a fresh cap. A model that loops WITHOUT advancing still trips it.
+        // truncates a legitimate multi-item sweep. Exempt from the memo, and
+        // treat an advance (a new result) as PROGRESS: reset the runaway budget
+        // so each item gets a fresh cap. A call that returns the same result
+        // again did not advance and counts toward the cap.
         const repeatable = def?.repeatable === true;
-        if (repeatable) {
-          totalToolCalls = 0;
-          nudged = false;
-        } else {
-          totalToolCalls++;
-        }
+        totalToolCalls++;
         let result: unknown;
         if (!def) {
           result = { error: `unknown tool ${name}` };
@@ -251,6 +318,14 @@ export async function* runOpenAICompatible(
           } catch (e) {
             result = { error: String(e) };
           }
+        }
+        if (repeatable) {
+          const seen = JSON.stringify(result ?? null);
+          if (seen !== lastRepeatable.get(name)) {
+            totalToolCalls = 0;
+            nudged = false;
+          }
+          lastRepeatable.set(name, seen);
         }
         yield { type: "tool_result", name, result };
         messages.push({

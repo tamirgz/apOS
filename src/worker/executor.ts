@@ -9,13 +9,14 @@ import {
   agents,
   type Agent,
 } from "@/core/db/schema/agents";
-import type { AIEvent, AIProvider } from "@/core/ai/provider";
+import type { AIEvent, AIProvider, ChatMessage } from "@/core/ai/provider";
 import { providers, resolveRoute } from "@/core/ai/routing";
 import type { AIProviderId } from "@/core/db/schema/ai-routes";
 import { getToolsByNames } from "@/core/ai/tool-registry";
 import { invokeTool, withApprovalNotes } from "@/core/ai/invoke-tool";
 import { reportAgentRunOutcome } from "@/core/alerts";
-import type { AiToolDef } from "@/core/modules/types.server";
+import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
+import { unjudgedProjects } from "@/modules/projects/tools";
 import { withRunSlot } from "./run-queue";
 import { waitForLocalIdle, freeIdleLocalResidents } from "@/core/ai/local-queue";
 
@@ -366,69 +367,91 @@ async function runClaimed(
       let tokensOut = 0;
       let errored: string | null = null;
       const okTools = new Set<string>(); // tools that returned a non-error result
+      let messages: ChatMessage[] = [{ role: "user", content: agent.prompt }];
+      const toolCtx: AiToolContext = {
+        db,
+        agentRunId: runId,
+        agentName: agent.name,
+        approvalOrigin: { agentId: agent.id, runId, agentName: agent.name },
+        ledger,
+        subject: null,
+        subjectCursor: null,
+        focusRequireHealth:
+          agent.tools.includes("projects.focusNext") &&
+          agent.tools.includes("projects.setHealth"),
+        // Incremental advisor sweep: a brief-writing iterator that is NOT a
+        // health-writer re-briefs only projects changed since their last
+        // brief. A health sweep (setHealth) must visit all, so it's excluded.
+        focusChangedOnly:
+          agent.tools.includes("projects.focusNext") &&
+          agent.tools.includes("projects.setAdvisorBrief") &&
+          !agent.tools.includes("projects.setHealth"),
+      };
       try {
-        for await (const event of prov.run({
-          system,
-          messages: [{ role: "user", content: agent.prompt }],
-          tools,
-          // subject/subjectCursor start empty; a cursor tool (projects.focusNext)
-          // binds the subject so per-subject writes never carry a model id.
-          // focusRequireHealth: a project-iterating agent that can write health
-          // (Project pulse) must write it for every focused project — the
-          // focusNext guard enforces it so none is skipped and left stale.
-          toolCtx: {
-            db,
-            agentRunId: runId,
-            agentName: agent.name,
-            approvalOrigin: { agentId: agent.id, runId, agentName: agent.name },
-            ledger,
-            subject: null,
-            subjectCursor: null,
-            focusRequireHealth:
-              agent.tools.includes("projects.focusNext") &&
-              agent.tools.includes("projects.setHealth"),
-            // Incremental advisor sweep: a brief-writing iterator that is NOT a
-            // health-writer re-briefs only projects changed since their last
-            // brief. A health sweep (setHealth) must visit all, so it's excluded.
-            focusChangedOnly:
-              agent.tools.includes("projects.focusNext") &&
-              agent.tools.includes("projects.setAdvisorBrief") &&
-              !agent.tools.includes("projects.setHealth"),
-          },
-          model: mdl,
-          // Ollama runs a thinking model (qwen3.5) at full reasoning unless told
-          // otherwise, and at full it invented tool results in the 2026-11 agent
-          // eval; "low" kept it on its tools. Non-thinking models ignore it. MLX
-          // already picks light reasoning for tool runs on its own.
-          ...(prov.id === "ollama" && { reasoning: "low" as const }),
-          // Per-agent tool-loop budget; undefined falls back to the provider
-          // default. Lets a many-item agent finish the list instead of
-          // truncating at the default cap.
-          maxTurns: agent.turnBudget ?? undefined,
-          finishTool: agent.successTool ?? undefined,
-          signal: controller.signal,
-          // Queue visibility: fold this run's model calls into the agent_run row.
-          track: {
-            source: "agent",
-            label: agent.name,
-            parentKind: "agent",
-            parentId: runId,
-            agentId: agent.id,
-          },
-        })) {
-          await transcript.push(event);
-          if (event.type === "done") finalText = event.text;
-          if (event.type === "error") errored = event.message;
-          if (
-            event.type === "tool_result" &&
-            !(event.result as { error?: unknown } | null)?.error
-          ) {
-            okTools.add(event.name);
+        // A second pass only resumes a health sweep that stopped with projects
+        // left unjudged (local models ended early or skipped the last one in
+        // the 2026-11 eval). The cursor lives in toolCtx, so it picks up where
+        // the first pass stopped.
+        for (let pass = 0; pass < 2; pass++) {
+          for await (const event of prov.run({
+            system,
+            messages,
+            tools,
+            // subject/subjectCursor start empty; a cursor tool (projects.focusNext)
+            // binds the subject so per-subject writes never carry a model id.
+            // focusRequireHealth: a project-iterating agent that can write health
+            // (Project pulse) must write it for every focused project — the
+            // focusNext guard enforces it so none is skipped and left stale.
+            toolCtx,
+            model: mdl,
+            // Ollama runs a thinking model (qwen3.5) at full reasoning unless told
+            // otherwise, and at full it invented tool results in the 2026-11 agent
+            // eval; "low" kept it on its tools. Non-thinking models ignore it. MLX
+            // already picks light reasoning for tool runs on its own.
+            ...(prov.id === "ollama" && { reasoning: "low" as const }),
+            // Per-agent tool-loop budget; undefined falls back to the provider
+            // default. Lets a many-item agent finish the list instead of
+            // truncating at the default cap.
+            maxTurns: agent.turnBudget ?? undefined,
+            finishTool: agent.successTool ?? undefined,
+            signal: controller.signal,
+            // Queue visibility: fold this run's model calls into the agent_run row.
+            track: {
+              source: "agent",
+              label: agent.name,
+              parentKind: "agent",
+              parentId: runId,
+              agentId: agent.id,
+            },
+          })) {
+            await transcript.push(event);
+            if (event.type === "done") finalText = event.text;
+            if (event.type === "error") errored = event.message;
+            if (
+              event.type === "tool_result" &&
+              !(event.result as { error?: unknown } | null)?.error
+            ) {
+              okTools.add(event.name);
+            }
+            if (event.type === "usage") {
+              tokensIn += event.inputTokens;
+              tokensOut += event.outputTokens;
+            }
           }
-          if (event.type === "usage") {
-            tokensIn += event.inputTokens;
-            tokensOut += event.outputTokens;
-          }
+          const left = errored || controller.signal.aborted ? [] : unjudgedProjects(toolCtx);
+          if (!left.length || pass > 0) break;
+          await transcript.push({
+            type: "error",
+            message: `↻ Sweep ended with no health recorded for ${left.join(", ")} — resuming the run for them.`,
+          });
+          messages = [
+            ...messages,
+            { role: "assistant", content: finalText || "(no answer)" },
+            {
+              role: "user",
+              content: `The sweep is not finished: no health was recorded for ${left.join(", ")}. Call projects.focusNext and record projects.setHealth for each of them, then write your final summary covering every project.`,
+            },
+          ];
         }
       } catch (e) {
         errored = String(e);

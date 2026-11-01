@@ -37,12 +37,13 @@ async function waitForServer(openai: OpenAI, signal: AbortSignal | undefined) {
  * Qwen models sometimes emit them as plain content, in their native form
  * (`<function=projects__focusNext>\n<parameter=id>\n42\n</parameter>\n</function>`)
  * or the `<invoke name="…"><parameter name="…">` form, and without this the run
- * ends with that markup as its "answer". Only names of offered tools count; the
- * markup is stripped from the text either way.
+ * ends with that markup as its "answer". Only closed blocks naming an offered
+ * tool count, and the markup is stripped only when one did — so an answer that
+ * quotes the syntax is left whole.
  */
 const TEXT_CALL_FORMS = [
-  { block: /<function=([\w.\-]+)>([\s\S]*?)(?:<\/function>|$)/g, param: /<parameter=([\w.\-]+)>([\s\S]*?)<\/parameter>/g },
-  { block: /<invoke name="([\w.\-]+)">([\s\S]*?)(?:<\/invoke>|$)/g, param: /<parameter name="([\w.\-]+)">([\s\S]*?)<\/parameter>/g },
+  { block: /<function=([\w.\-]+)>([\s\S]*?)<\/function>/g, param: /<parameter=([\w.\-]+)>([\s\S]*?)<\/parameter>/g },
+  { block: /<invoke name="([\w.\-]+)">([\s\S]*?)<\/invoke>/g, param: /<parameter name="([\w.\-]+)">([\s\S]*?)<\/parameter>/g },
 ];
 export const hasTextToolCall = (text: string) => /<function=[\w.\-]+>|<invoke name="[\w.\-]+">/.test(text);
 
@@ -67,6 +68,7 @@ export function recoverTextToolCalls(text: string, toolNames: string[]) {
     }
     rest = rest.replace(block, "");
   }
+  if (!calls.length) return { calls, text };
   rest = rest.replace(/<\/?(tool_call|function_calls)>/g, "").trim();
   return { calls, text: rest };
 }
@@ -240,9 +242,12 @@ export async function* runOpenAICompatible(
       const calls: { id: string; name: string; args: string }[] = [...toolCallAcc.values()].filter((c) => c.name);
       // No structured calls but tools were on offer: the model may have written
       // them into its text (or, with an empty answer, into its reasoning). Run
-      // those, and keep the markup out of the answer.
+      // those, and keep the markup out of the answer. Background agent runs
+      // only: in a chat the text may quote markup from a note, page or email,
+      // and running it there would act on words nobody asked to execute.
       const offered = finishOnly ?? (forceAnswer ? [] : tools);
-      if (calls.length === 0) {
+      const background = !!opts.toolCtx?.agentRunId;
+      if (calls.length === 0 && background) {
         const offeredNames = offered.map((t) => fromWireName(t.function.name));
         if (hasTextToolCall(turnText)) {
           const recovered = recoverTextToolCalls(turnText, offeredNames);
@@ -259,12 +264,14 @@ export async function* runOpenAICompatible(
       if (calls.length === 0) {
         // A turn with no call that is empty, or only announces a next step
         // ("Let me try once more:"), is not an answer — seen with qwen3.5 on
-        // Ollama mid-sweep. Ask once for the next step before finishing.
-        const stalled = !turnText.trim() || /:\s*$/.test(turnText);
-        if (stalled && offered.length && !emptyNudged && turn < maxTurns - 1) {
+        // Ollama mid-sweep. Ask once for the next step before finishing. Only a
+        // short line counts as an announcement: a full answer may end in ":".
+        const text = turnText.trim();
+        const stalled = !text || (text.length < 200 && text.endsWith(":"));
+        if (stalled && background && offered.length && !emptyNudged && turn < maxTurns - 1) {
           emptyNudged = true;
           messages.push({
-            role: "system",
+            role: "user",
             content: "Your last reply had no tool call and no answer. Continue the task: call the next tool you need, or write your final answer.",
           });
           continue;

@@ -316,6 +316,9 @@ export const projectTools: AiToolDef[] = [
             needsHealth: true,
             focused: prev.name,
             message: `Record projects.setHealth for '${prev.name}' before advancing — every project you focus must get a health judgement. The focused project is still '${prev.name}'.`,
+            // The evidence again: a resumed run starts a fresh context, and
+            // without it the model judged a project it had not seen.
+            ...(cur.lastFocus && { project: cur.lastFocus }),
           };
         }
       }
@@ -397,18 +400,20 @@ export const projectTools: AiToolDef[] = [
                 ),
               };
       }
+      const project = {
+        ...it.read,
+        openTasks,
+        recentlyCompleted,
+        relevantMemory,
+        ...(relevantMemory.length && {
+          relevantMemoryNote:
+            "Background the user saved (bookmarks, notes, past memory). NOT their plans, goals, deadlines or commitments — never state one that isn't in this project's own fields or tasks.",
+        }),
+      };
+      cur.lastFocus = { ...project, ...(repo && { repo }) };
       return {
         focused: it.name,
-        project: {
-          ...it.read,
-          openTasks,
-          recentlyCompleted,
-          relevantMemory,
-          ...(relevantMemory.length && {
-            relevantMemoryNote:
-              "Background the user saved (bookmarks, notes, past memory). NOT their plans, goals, deadlines or commitments — never state one that isn't in this project's own fields or tasks.",
-          }),
-        },
+        project,
         ...(repo && { repo }),
         remaining: cur.items.length - cur.index,
         // "remaining: 0" alone read as "sweep done": local models skipped the

@@ -387,6 +387,7 @@ async function runClaimed(
           agent.tools.includes("projects.setAdvisorBrief") &&
           !agent.tools.includes("projects.setHealth"),
       };
+      let pass1Text: string | null = null; // set once a resume pass starts
       try {
         // A second pass only resumes a health sweep that stopped with projects
         // left unjudged (local models ended early or skipped the last one in
@@ -440,6 +441,7 @@ async function runClaimed(
           }
           const left = errored || controller.signal.aborted ? [] : unjudgedProjects(toolCtx);
           if (!left.length || pass > 0) break;
+          pass1Text = finalText;
           await transcript.push({
             type: "error",
             message: `↻ Sweep ended with no health recorded for ${left.join(", ")} — resuming the run for them.`,
@@ -458,6 +460,15 @@ async function runClaimed(
       } finally {
         clearTimeout(timeout);
         clearInterval(heartbeat);
+        // A resume pass that fails or times out leaves the sweep as the first
+        // pass recorded it — not a failed run that throws that report away.
+        if (pass1Text !== null && errored) {
+          await transcript
+            .push({ type: "error", message: `↻ Resume pass failed (${errored.slice(0, 120)}) — keeping the first pass's report.` })
+            .catch(() => {});
+          finalText = pass1Text;
+          errored = null;
+        }
         await transcript.flush();
       }
       return { finalText, tokensIn, tokensOut, errored, okTools, aborted: controller.signal.aborted };

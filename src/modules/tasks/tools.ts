@@ -85,7 +85,8 @@ export async function resolveTask(ctx: AiToolContext, ref: string): Promise<{ id
 
 /**
  * A scheduled background agent (ctx.agentRunId) may demote or re-prioritise
- * work, never close it or pull it out from under whoever is working on it. Task
+ * open work nobody is on, never close it or pull it out from under whoever is
+ * working on it (doing/review, either way). Task
  * triage on local models marked six ETHOS doing/review items done and cancelled
  * two others (2026-11 agent eval). Chat, MCP sessions and inbox triage carry no
  * agentRunId and are unaffected.
@@ -104,6 +105,7 @@ export async function agentStatusRefusal(
     .from(tasks)
     .leftJoin(projects, sql`${tasks.projectRef} = 'projects:' || ${projects.id}`)
     .where(eq(tasks.id, taskId));
+  if (row?.status === target) return null; // an echo of the current status changes nothing
   if (row?.status === "doing" || row?.status === "review") {
     return { error: `Not changed: the item is in ${row.status} — someone is working on it, so a background agent leaves it as it is.` };
   }

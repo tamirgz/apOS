@@ -69,6 +69,8 @@ export interface AiToolContext {
      * cursor won't advance past a focused project that isn't in here.
      */
     healthWritten?: Set<string>;
+    /** What focusNext last returned about the focused project, for its health-guard reply. */
+    lastFocus?: Record<string, unknown>;
   } | null;
   /**
    * When true, projects.focusNext refuses to advance to the next project until

@@ -91,3 +91,62 @@ export const attentionItems = pgTable(
 );
 
 export type AttentionItem = typeof attentionItems.$inferSelect;
+
+/**
+ * A timebox — a slot of the user's own day (start → end) committed to one
+ * thing. The user's activities only: fleet work lives on the project
+ * timeline, never here. Planned boxes sync two-way with the user's
+ * "Timeboxes" Google calendar; drafts stay local until the plan is locked.
+ */
+export const TIMEBOX_KINDS = ["deep", "shallow", "admin", "inbox", "personal"] as const;
+export type TimeboxKind = (typeof TIMEBOX_KINDS)[number];
+
+export const TIMEBOX_STATUSES = [
+  "draft", // placed on the Plan screen, not yet locked (never pushed to Google)
+  "planned",
+  "done",
+  "pushed", // moved to a later day
+  "dropped", // deliberately not done (or deleted in Google)
+] as const;
+export type TimeboxStatus = (typeof TIMEBOX_STATUSES)[number];
+
+export const timeboxes = pgTable(
+  "timeboxes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: text("title").notNull(),
+    /** The work item this box is for, or null for a free-text box. No FK. */
+    taskId: uuid("task_id"),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+    endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+    kind: text("kind", { enum: TIMEBOX_KINDS }).notNull().default("shallow"),
+    /** soft = may run over into the next box; hard = stop at the end. */
+    endMode: text("end_mode", { enum: ["soft", "hard"] }).notNull().default("soft"),
+    status: text("status", { enum: TIMEBOX_STATUSES }).notNull().default("draft"),
+    /** What really happened — written by the close card (Phase 2). */
+    actualStartAt: timestamp("actual_start_at", { withTimezone: true }),
+    actualEndAt: timestamp("actual_end_at", { withTimezone: true }),
+    outcome: text("outcome"),
+    /** The mirrored event on the Timeboxes Google calendar. */
+    googleEventId: text("google_event_id"),
+    googleEtag: text("google_etag"),
+    syncState: text("sync_state", { enum: ["pending", "synced", "error"] })
+      .notNull()
+      .default("pending"),
+    /** Where the box was made: in apOS, or directly in Google Calendar. */
+    origin: text("origin", { enum: ["apos", "google"] }).notNull().default("apos"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("timeboxes_start").on(t.startAt),
+    index("timeboxes_status_start").on(t.status, t.startAt),
+    uniqueIndex("timeboxes_google_event").on(t.googleEventId),
+  ],
+);
+
+export type Timebox = typeof timeboxes.$inferSelect;

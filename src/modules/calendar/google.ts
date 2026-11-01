@@ -1,4 +1,4 @@
-import { and, eq, gte, notInArray } from "drizzle-orm";
+import { and, eq, gte, isNull, notInArray, or } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
 import { getSetting, setSetting } from "@/core/app-settings";
 import type { ModuleJob } from "@/core/modules/types.server";
@@ -10,6 +10,8 @@ export const GOOGLE_KEYS = {
   clientId: "google_client_id",
   clientSecret: "google_client_secret",
   refreshToken: "google_refresh_token",
+  /** The "Timeboxes" calendar apOS creates (Phase 1 PR 2) — excluded from the event import. */
+  timeboxCalendarId: "timebox_calendar_id",
 } as const;
 
 export const GOOGLE_REDIRECT_PATH = "/api/google/callback";
@@ -128,6 +130,8 @@ interface GoogleEvent {
   description?: string;
   location?: string;
   colorId?: string;
+  /** "transparent" = Show as: Free. */
+  transparency?: "opaque" | "transparent";
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
   /** Legacy Meet field — still populated for Meet calls. */
@@ -167,9 +171,51 @@ function meetingUrlOf(ev: GoogleEvent): string | null {
   );
 }
 
+/** One entry of the user's calendar list (calendarList.list). */
+interface GoogleCalendarEntry {
+  id: string;
+  summary?: string;
+  primary?: boolean;
+  /** Shown in the Google Calendar UI — the calendars the user looks at. */
+  selected?: boolean;
+  backgroundColor?: string;
+}
+
+/** The calendars to import: every calendar visible in Google, primary first. */
+async function listCalendars(headers: HeadersInit): Promise<GoogleCalendarEntry[]> {
+  const out: GoogleCalendarEntry[] = [];
+  let pageToken: string | undefined;
+  do {
+    const params = new URLSearchParams({
+      minAccessRole: "reader",
+      maxResults: "250",
+      ...(pageToken ? { pageToken } : {}),
+    });
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/users/me/calendarList?${params}`,
+      { headers, signal: AbortSignal.timeout(10_000) },
+    );
+    if (!res.ok) throw new Error(`calendarList.list → ${res.status}`);
+    const data = (await res.json()) as {
+      items?: GoogleCalendarEntry[];
+      nextPageToken?: string;
+    };
+    out.push(...(data.items ?? []));
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+  // The Timeboxes calendar syncs into `timeboxes`, never into calendar_events —
+  // otherwise every box would show twice.
+  const timeboxCalendar = await getSetting(GOOGLE_KEYS.timeboxCalendarId);
+  return out
+    .filter((c) => (c.primary || c.selected) && c.id !== timeboxCalendar)
+    .sort((a, b) => Number(!!b.primary) - Number(!!a.primary));
+}
+
 /**
- * API-based sync of the primary calendar. singleEvents=true makes Google
- * expand recurrences server-side; colorId gives the user's real event colors.
+ * API-based sync of every calendar visible in Google. singleEvents=true makes
+ * Google expand recurrences server-side; colorId gives the user's real event
+ * colors. The same meeting can sit on two calendars with one event id — the
+ * first calendar (primary) keeps it.
  */
 export async function syncGoogle(
   log: (m: string) => void = () => {},
@@ -206,86 +252,137 @@ export async function syncGoogle(
     Date.now() + WINDOW_FUTURE_DAYS * 86_400_000,
   ).toISOString();
 
-  const seen: string[] = [];
+  const calendars = await listCalendars(headers);
+  const seenAll = new Set<string>();
   let synced = 0;
-  let pageToken: string | undefined;
+  let failed = 0;
+  const fetched: string[] = [];
 
-  do {
-    const params = new URLSearchParams({
-      singleEvents: "true",
-      orderBy: "startTime",
-      timeMin,
-      timeMax,
-      maxResults: "250",
-      ...(pageToken ? { pageToken } : {}),
-    });
-    const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
-      { headers, signal: AbortSignal.timeout(20_000) },
-    );
-    if (!res.ok) throw new Error(`events.list → ${res.status}`);
-    const data = (await res.json()) as {
-      items?: GoogleEvent[];
-      nextPageToken?: string;
-    };
-
-    for (const ev of data.items ?? []) {
-      if (ev.status === "cancelled") continue;
-      const startRaw = ev.start?.dateTime ?? ev.start?.date;
-      if (!startRaw) continue;
-      const uid = `g:${ev.id}`;
-      seen.push(uid);
-      synced++;
-      const fields = {
-        title: ev.summary ?? "(untitled)",
-        notes: ev.description?.slice(0, 2000) ?? null,
-        location: ev.location ?? null,
-        meetingUrl: meetingUrlOf(ev),
-        sourceUrl: ev.htmlLink ?? null,
-        startAt: new Date(startRaw),
-        endAt: ev.end?.dateTime
-          ? new Date(ev.end.dateTime)
-          : ev.end?.date
-            ? new Date(ev.end.date)
-            : null,
-        allDay: !ev.start?.dateTime,
-        color: ev.colorId ? (palette[ev.colorId] ?? null) : null,
-        attendees: (ev.attendees ?? [])
-          .filter((a) => a.email && !a.resource)
-          .map((a) => ({
-            email: a.email!.toLowerCase(),
-            name: a.displayName,
-            self: a.self,
-            responseStatus: a.responseStatus,
-          })),
-      };
-      await db
-        .insert(calendarEvents)
-        .values({ ...fields, source: "google", icsUid: uid })
-        .onConflictDoUpdate({
-          target: calendarEvents.icsUid,
-          set: { ...fields, updatedAt: new Date() },
+  for (const cal of calendars) {
+    const seen: string[] = [];
+    try {
+      let pageToken: string | undefined;
+      do {
+        const params = new URLSearchParams({
+          singleEvents: "true",
+          orderBy: "startTime",
+          timeMin,
+          timeMax,
+          maxResults: "250",
+          ...(pageToken ? { pageToken } : {}),
         });
-    }
-    pageToken = data.nextPageToken;
-  } while (pageToken);
+        const res = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal.id)}/events?${params}`,
+          { headers, signal: AbortSignal.timeout(20_000) },
+        );
+        if (!res.ok) throw new Error(`events.list → ${res.status}`);
+        const data = (await res.json()) as {
+          items?: GoogleEvent[];
+          nextPageToken?: string;
+        };
 
-  if (seen.length > 0) {
-    // API mode supersedes ICS rows entirely, and prunes vanished events.
+        for (const ev of data.items ?? []) {
+          if (ev.status === "cancelled") continue;
+          const startRaw = ev.start?.dateTime ?? ev.start?.date;
+          if (!startRaw) continue;
+          const uid = `g:${ev.id}`;
+          if (seenAll.has(uid)) continue; // already imported from an earlier calendar
+          seenAll.add(uid);
+          seen.push(uid);
+          synced++;
+          const fields = {
+            title: ev.summary ?? "(untitled)",
+            notes: ev.description?.slice(0, 2000) ?? null,
+            location: ev.location ?? null,
+            meetingUrl: meetingUrlOf(ev),
+            sourceUrl: ev.htmlLink ?? null,
+            startAt: new Date(startRaw),
+            endAt: ev.end?.dateTime
+              ? new Date(ev.end.dateTime)
+              : ev.end?.date
+                ? new Date(ev.end.date)
+                : null,
+            allDay: !ev.start?.dateTime,
+            // Primary keeps the category default; other calendars show in their own color.
+            color: ev.colorId
+              ? (palette[ev.colorId] ?? null)
+              : cal.primary
+                ? null
+                : (cal.backgroundColor ?? null),
+            calendarId: cal.id,
+            transparent: ev.transparency === "transparent",
+            attendees: (ev.attendees ?? [])
+              .filter((a) => a.email && !a.resource)
+              .map((a) => ({
+                email: a.email!.toLowerCase(),
+                name: a.displayName,
+                self: a.self,
+                responseStatus: a.responseStatus,
+              })),
+          };
+          await db
+            .insert(calendarEvents)
+            .values({ ...fields, source: "google", icsUid: uid })
+            .onConflictDoUpdate({
+              target: calendarEvents.icsUid,
+              set: { ...fields, updatedAt: new Date() },
+            });
+        }
+        pageToken = data.nextPageToken;
+      } while (pageToken);
+    } catch (e) {
+      // One unreadable calendar must not stop — or prune — the others.
+      failed++;
+      log(`google sync: calendar ${cal.summary ?? cal.id} failed: ${String(e)}`);
+      continue;
+    }
+
+    if (seen.length > 0) fetched.push(cal.id);
+  }
+
+  // Prune vanished future events per calendar — only calendars whose own fetch
+  // fully succeeded, so a failure elsewhere can never wipe their rows. Runs
+  // after every calendar was read, so an event that moved to another calendar
+  // is re-homed by the upsert above, not deleted and re-created.
+  const all = [...seenAll];
+  for (const calendarId of fetched) {
+    await db
+      .delete(calendarEvents)
+      .where(
+        and(
+          eq(calendarEvents.source, "google"),
+          eq(calendarEvents.calendarId, calendarId),
+          gte(calendarEvents.startAt, new Date()),
+          notInArray(calendarEvents.icsUid, all),
+        ),
+      );
+  }
+
+  if (seenAll.size > 0 && failed === 0) {
+    // API mode supersedes ICS rows entirely.
     await db.delete(calendarEvents).where(eq(calendarEvents.source, "ics"));
+    // Future rows from calendars no longer visible in Google, and rows written
+    // before events remembered their calendar (null calendar_id).
     await db
       .delete(calendarEvents)
       .where(
         and(
           eq(calendarEvents.source, "google"),
           gte(calendarEvents.startAt, new Date()),
-          notInArray(calendarEvents.icsUid, seen),
+          or(
+            isNull(calendarEvents.calendarId),
+            notInArray(
+              calendarEvents.calendarId,
+              calendars.map((c) => c.id),
+            ),
+          ),
+          notInArray(calendarEvents.icsUid, all),
         ),
       );
   }
 
   await sql.notify("calendar_changed", "google-synced");
-  log(`google sync: ${synced} events`);
+  log(`google sync: ${synced} events from ${calendars.length - failed}/${calendars.length} calendars`);
   return { synced };
 }
 

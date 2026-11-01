@@ -42,6 +42,10 @@ export const calendarEvents = pgTable(
     sourceUrl: text("source_url"),
     /** Attendees from the Google API — feeds the L3 people table. */
     attendees: jsonb("attendees").$type<EventAttendee[]>(),
+    /** The Google calendar the event came from (null = ICS / local / pre-multi-calendar rows). */
+    calendarId: text("calendar_id"),
+    /** Google "Show as: Free" — the event doesn't block time when planning. */
+    transparent: boolean("transparent").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

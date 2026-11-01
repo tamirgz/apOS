@@ -9,9 +9,10 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { AiToolDef } from "@/core/modules/types.server";
 import { registerRefs } from "@/core/ai/refs";
 import { FEATURE_STATUSES, features, projects } from "@/modules/projects/schema";
+import { planFields, planOf } from "./cycle-history";
 import { createCycle, cycleGhosts, cycleStatus, ghostCount, deleteCycle, listCycles, rollOverCycle, updateCycle } from "./cycles";
 import { identifierOf, projectKeyMap } from "./core";
-import { resolveCycle, resolveFeature, resolveProject } from "./tools";
+import { actorOf, resolveCycle, resolveFeature, resolveProject } from "./tools";
 import { cycles, isClosed, TASK_STATUSES, tasks } from "./schema";
 import { WEEK_START, WEEKDAY_LABELS } from "@/core/work-week";
 
@@ -58,7 +59,7 @@ export const planningTools: AiToolDef[] = [
   {
     name: "cycles.list",
     description:
-      "List cycles (time-boxed sprints) with their dates, status (upcoming / current / completed), progress and `ghosts` — how many members distort the figures (cycles.get names them). Each comes back with a `ref` (c1…) for cycles.get / tasks.create / tasks.update / cycles.update.",
+      "List cycles (time-boxed sprints) with their dates, status (upcoming / current / completed), progress and `ghosts` — how many members distort the figures (cycles.get names them). Plan figures: `planned` = items the cycle held at the end of its first day, less those cancelled by its end, `plannedDone` = of those, done inside its window, `ratio` = plannedDone ÷ planned (0–1), `plannedCancelled` (planned, cancelled by the cycle's end — de-scoped, so not in `planned`), `added` / `addedDone` = joined after that, `carriedOver` / `carriedTo` = planned, not done, moved on to a later cycle. `historyComplete: false` = the item history can't rebuild what it held at its start; every plan figure is then null. Each comes back with a `ref` (c1…) for cycles.get / tasks.create / tasks.update / cycles.update.",
     input: z.object({
       project: z.string().optional().describe("Project NAME or key: its cycles plus cross-project ones; omit for all"),
       include: z.enum(["open", "all"]).default("open").describe("'open' (default) skips completed cycles"),
@@ -84,6 +85,7 @@ export const planningTools: AiToolDef[] = [
           items: c.total,
           done: c.done,
           ghosts: c.ghosts,
+          ...planFields(c.plan),
         })),
       );
     },
@@ -91,7 +93,7 @@ export const planningTools: AiToolDef[] = [
   {
     name: "cycles.get",
     description:
-      "One cycle in full: goal, dates, status, progress, items per state, and its ghosts — the members its counts mislead about, each bucket with a count and the item identifiers: `cancelled` (members counted nowhere), `doneOutside` (done on a date outside the window that no cycle holds — a done item is otherwise filed under the cycle of its done date automatically), `undated` (open, no due date) and `dueOutside` (open, due before the cycle starts or after it ends).",
+      "One cycle in full: goal, dates, status, progress, items per state, and its ghosts — the members its counts mislead about, each bucket with a count and the item identifiers: `cancelled` (members counted nowhere), `doneOutside` (done on a date outside the window that no cycle holds — a done item is otherwise filed under the cycle of its done date automatically), `undated` (open, no due date) and `dueOutside` (open, due before the cycle starts or after it ends). Plan figures: `planned` = items the cycle held at the end of its first day, less those cancelled by its end, `plannedDone` = of those, done inside its window, `ratio` = plannedDone ÷ planned (0–1), `plannedCancelled` (planned, cancelled by the cycle's end — de-scoped, so not in `planned`), `added` / `addedDone` = joined after that, `carriedOver` / `carriedTo` = planned, not done, moved on to a later cycle. `historyComplete: false` = the item history can't rebuild what it held at its start; every plan figure is then null.",
     input: z.object({
       cycle: z.string().describe("Cycle ref ('c1'), NAME, or 'current'"),
       project: z.string().optional().describe("Project NAME or key — picks among same-named or 'current' cycles"),
@@ -125,6 +127,7 @@ export const planningTools: AiToolDef[] = [
         done: done.length,
         points: counted.reduce((n, m) => n + (m.estimate ?? 0), 0),
         pointsDone: done.reduce((n, m) => n + (m.estimate ?? 0), 0),
+        ...planFields(await planOf(ctx.db, c)),
         byStatus: Object.fromEntries(TASK_STATUSES.map((s) => [s, members.filter((m) => m.status === s).length]).filter(([, n]) => n)),
         ghosts: {
           total: ghostCount(g),
@@ -208,7 +211,7 @@ export const planningTools: AiToolDef[] = [
         if ("error" in t) return t;
         to = t.id;
       }
-      return { moved: await rollOverCycle(ctx.db, from.id, to) };
+      return { moved: await rollOverCycle(ctx.db, from.id, to, actorOf(ctx)) };
     },
   },
   {

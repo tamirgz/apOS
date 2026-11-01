@@ -167,7 +167,7 @@ export async function deleteCycleAction(id: string) {
 }
 
 export async function rollOverCycleAction(fromId: string, toId: string | null) {
-  const n = await rollOverCycle(db, fromId, toId);
+  const n = await rollOverCycle(db, fromId, toId, "user");
   revalidateWork();
   return n;
 }

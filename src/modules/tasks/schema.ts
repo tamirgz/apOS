@@ -216,6 +216,9 @@ export const cycles = pgTable(
     goal: text("goal"),
     externalRef: text("external_ref"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** False when the item history can't rebuild what the cycle held at its
+     *  start (see cycle-history.ts) — its plan figures are then not shown. */
+    historyComplete: boolean("history_complete").notNull().default(true),
   },
   (t) => [
     index("cycles_project").on(t.projectId),
@@ -224,6 +227,32 @@ export const cycles = pgTable(
 );
 
 export type Cycle = typeof cycles.$inferSelect;
+
+/**
+ * One stay of an item in a cycle: when it joined, when it left and where to.
+ * A trigger on tasks.cycle_id writes the "live" rows (migration 0079), so
+ * every writer is recorded; "history" rows are rebuilt from task_activity
+ * for the time before it. Read for a cycle's plan — what it held at its start
+ * — after roll-over and the done-date refile have moved items on.
+ */
+export const cycleMembership = pgTable(
+  "cycle_membership",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    cycleId: uuid("cycle_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull(),
+    leftAt: timestamp("left_at", { withTimezone: true }),
+    /** The cycle it moved to; null = out of any cycle, or still here. */
+    leftTo: uuid("left_to"),
+    /** "carried" = moved on by a roll-over; null = any other move. */
+    leftReason: text("left_reason"),
+    source: text("source", { enum: ["live", "history"] }).notNull().default("live"),
+  },
+  (t) => [index("cycle_membership_cycle").on(t.cycleId), index("cycle_membership_task").on(t.taskId)],
+);
+
+export type CycleStay = typeof cycleMembership.$inferSelect;
 
 /**
  * Item ↔ item relations. Stored once, read from both sides:

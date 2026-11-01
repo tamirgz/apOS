@@ -6,7 +6,8 @@
  */
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "@/core/db/client";
-import { cycles, isClosed, taskActivity, tasks, type Cycle, type TaskStatus } from "./schema";
+import { cyclePlan, loadStays, type CyclePlan } from "./cycle-history";
+import { cycleMembership, cycles, isClosed, taskActivity, tasks, type Cycle, type TaskStatus } from "./schema";
 
 export type CycleStatus = "upcoming" | "current" | "completed";
 
@@ -20,6 +21,8 @@ export interface CycleSummary extends Cycle {
   burndown: { day: string; remaining: number }[];
   /** Members that distort the cycle's figures — see cycleGhosts. */
   ghosts: number;
+  /** What it held at its start and how that went (cycle-history.ts); null when the history can't rebuild it. */
+  plan: CyclePlan | null;
 }
 
 const DAY = 86_400_000;
@@ -154,7 +157,7 @@ export function burndown(
 export async function listCycles(db: Db, opts: { projectId?: string } = {}): Promise<CycleSummary[]> {
   // One round trip: every planned item's few columns come with the cycles
   // rather than after them (the DB is remote — each trip is ~60 ms).
-  const [rows, members] = await Promise.all([
+  const [rows, members, allCycles] = await Promise.all([
     db
       .select()
       .from(cycles)
@@ -172,8 +175,12 @@ export async function listCycles(db: Db, opts: { projectId?: string } = {}): Pro
       })
       .from(tasks)
       .where(isNotNull(tasks.cycleId)),
+    // Every cycle, for the names and dates of where carried items went.
+    db.select({ id: cycles.id, name: cycles.name, startsAt: cycles.startsAt }).from(cycles),
   ]);
   if (!rows.length) return [];
+  const { stays, items: stayItems } = await loadStays(db, rows.filter((c) => c.historyComplete).map((c) => c.id));
+  const cycleById = new Map(allCycles.map((c) => [c.id, c]));
   const now = Date.now();
   return rows.map((c) => {
     const all = members.filter((m) => m.cycleId === c.id);
@@ -188,6 +195,7 @@ export async function listCycles(db: Db, opts: { projectId?: string } = {}): Pro
       pointsDone: done.reduce((n, m) => n + (m.estimate ?? 0), 0),
       burndown: burndown(c, items, now),
       ghosts: ghostCount(cycleGhosts(c, all)),
+      plan: c.historyComplete ? cyclePlan(c, stays, stayItems, cycleById, now) : null,
     };
   });
 }
@@ -235,19 +243,36 @@ export async function updateCycle(db: Db, id: string, patch: { name?: string; st
 /** Deleting a cycle un-plans its items; it never deletes work. */
 export async function deleteCycle(db: Db, id: string) {
   await db.update(tasks).set({ cycleId: null, version: sql`${tasks.version} + 1` }).where(eq(tasks.cycleId, id));
+  await db.delete(cycleMembership).where(eq(cycleMembership.cycleId, id));
   await db.delete(cycles).where(eq(cycles.id, id));
 }
 
-/** Incomplete items of a finished cycle → the next one (or out of any cycle). */
-export async function rollOverCycle(db: Db, fromId: string, toId: string | null) {
-  const open = (await db.select().from(tasks).where(eq(tasks.cycleId, fromId))).filter((t) => !isClosed(t.status));
-  if (open.length) {
-    await db
+/**
+ * Incomplete items of a finished cycle → the next one (or out of any cycle).
+ * Each move is in the item's history as carried over, and its stay is marked
+ * "carried": the old cycle's plan still counts it — as not done.
+ */
+export async function rollOverCycle(db: Db, fromId: string, toId: string | null, actor = "system:cycles") {
+  return db.transaction(async (tx) => {
+    const open = (await tx.select().from(tasks).where(eq(tasks.cycleId, fromId))).filter((t) => !isClosed(t.status));
+    if (!open.length) return 0;
+    const ids = open.map((t) => t.id);
+    const names = await tx.select({ id: cycles.id, name: cycles.name }).from(cycles).where(inArray(cycles.id, toId ? [fromId, toId] : [fromId]));
+    const name = (id: string | null) => names.find((n) => n.id === id)?.name ?? null;
+    await tx
       .update(tasks)
       .set({ cycleId: toId, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
-      .where(inArray(tasks.id, open.map((t) => t.id)));
-  }
-  return open.length;
+      .where(and(inArray(tasks.id, ids), eq(tasks.cycleId, fromId)));
+    // The trigger closed each stay at the transaction's now().
+    await tx
+      .update(cycleMembership)
+      .set({ leftReason: "carried" })
+      .where(and(eq(cycleMembership.cycleId, fromId), inArray(cycleMembership.taskId, ids), sql`${cycleMembership.leftAt} = now()`));
+    await tx.insert(taskActivity).values(
+      ids.map((taskId) => ({ taskId, actor, kind: "changed" as const, field: "cycleId", fromValue: name(fromId), toValue: name(toId), body: "carried over" })),
+    );
+    return ids.length;
+  });
 }
 
 export async function cyclesForPicker(db: Db) {

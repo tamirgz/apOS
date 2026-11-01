@@ -34,6 +34,31 @@ function rolledOver(n: number, next: { name: string } | null) {
   return `${n} item${n === 1 ? "" : "s"} moved to ${next ? next.name : "the backlog"}`;
 }
 
+const s = (n: number) => (n === 1 ? "" : "s");
+const planPct = (p: NonNullable<CycleSummary["plan"]>) => (p.ratio === null ? 0 : Math.round(p.ratio * 100));
+
+/**
+ * What became of the cycle's plan: "+K added, J of them done · C carried over
+ * to <next> · P cancelled". Null plan → the history can't settle it, so it
+ * says so rather than show a ratio.
+ */
+function PlanLine({ c, className }: { c: CycleSummary; className?: string }) {
+  const p = c.plan;
+  if (!p)
+    return (
+      <p className={cn("text-xs text-ink-faint", className)} title="Items moved in or out of this cycle before apOS kept a record, so what it planned can't be rebuilt.">
+        plan history incomplete
+      </p>
+    );
+  const parts = [
+    p.added > 0 && `+${p.added} added, ${p.addedDone} of them done`,
+    p.carriedOver > 0 && `${p.carriedOver} carried over to ${p.carriedTo.map((t) => t.name).join(", ")}`,
+    p.plannedCancelled > 0 && `${p.plannedCancelled} cancelled`,
+  ].filter(Boolean);
+  if (!parts.length) return null;
+  return <p className={cn("text-xs tabular-nums text-ink-faint", className)}>{parts.join(" · ")}</p>;
+}
+
 export const dateInput = (d: Date | string | number) => {
   const x = new Date(d);
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
@@ -143,7 +168,9 @@ function CycleReads({ c, m, onOpenItem }: { c: CycleSummary; m: CycleMetrics; on
           </>
         ) : (
           <>
-            finished {m.pct}% ({m.by.done} of {m.total} {m.unit}){m.open > 0 && `, ${m.open} left over`}.
+            {c.plan
+              ? `finished ${c.plan.plannedDone} of ${c.plan.planned} planned item${s(c.plan.planned)} (${planPct(c.plan)}%).`
+              : "plan history incomplete, so no completion figure."}
           </>
         )}
       </p>
@@ -343,14 +370,32 @@ function CycleHero({
       <div className="grid gap-x-8 gap-y-5 lg:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.6fr)]">
         <div className="flex min-w-0 flex-col gap-4">
           <div>
-            <div className="mb-2 flex items-baseline gap-2.5">
-              <span className="font-display text-[44px] leading-none tabular-nums text-ink">{m.pct}%</span>
-              <span className="text-[13px] tabular-nums text-ink-dim">
-                of {m.total} {m.unit} done
-              </span>
-            </div>
-            <p className="-mt-1 mb-2 text-xs text-ink-faint">{unitNote(m.unit, m.items.done + m.items.review + m.items.doing + m.items.todo, m.unestimated)}</p>
-            <CycleBar m={m} big />
+            {c.status === "completed" ? (
+              <div className="mb-2 flex items-baseline gap-2.5">
+                <span className="font-display text-[44px] leading-none tabular-nums text-ink">{c.plan ? `${planPct(c.plan)}%` : "—"}</span>
+                <span className="text-[13px] tabular-nums text-ink-dim">
+                  {c.plan ? `${c.plan.plannedDone} of ${c.plan.planned} planned done` : "plan history incomplete"}
+                </span>
+              </div>
+            ) : (
+              <div className="mb-2 flex items-baseline gap-2.5">
+                <span className="font-display text-[44px] leading-none tabular-nums text-ink">{m.pct}%</span>
+                <span className="text-[13px] tabular-nums text-ink-dim">
+                  of {m.total} {m.unit} done
+                </span>
+              </div>
+            )}
+            {c.status === "completed" ? (
+              <div className="wk-bar !h-2.5" role="img" aria-label={c.plan ? `${c.plan.plannedDone} of ${c.plan.planned} planned done` : "plan history incomplete"}>
+                {c.plan && c.plan.planned > 0 && <b style={{ width: `${planPct(c.plan)}%`, background: "var(--color-plasma)" }} />}
+              </div>
+            ) : (
+              <>
+                <p className="-mt-1 mb-2 text-xs text-ink-faint">{unitNote(m.unit, m.items.done + m.items.review + m.items.doing + m.items.todo, m.unestimated)}</p>
+                <CycleBar m={m} big />
+              </>
+            )}
+            {c.status !== "upcoming" && (c.plan || c.status === "completed") && <PlanLine c={c} className="mt-2" />}
           </div>
           <CycleReads c={c} m={m} onOpenItem={onOpenItem} />
         </div>
@@ -464,14 +509,31 @@ function CycleCard({
         )}
       </button>
       <div className="wk-bar" aria-hidden>
-        {m.total > 0 && <b style={{ width: `${m.pct}%`, background: "var(--color-plasma)" }} />}
+        {c.status === "completed"
+          ? c.plan && c.plan.planned > 0 && <b style={{ width: `${planPct(c.plan)}%`, background: "var(--color-plasma)" }} />
+          : m.total > 0 && <b style={{ width: `${m.pct}%`, background: "var(--color-plasma)" }} />}
       </div>
       <div className="flex items-center gap-2 text-xs tabular-nums text-ink-dim">
-        <span className="text-ink">{m.pct}%</span>
-        <span title={unitNote(m.unit, c.total, m.unestimated)}>
-          {m.unit === "pts" ? `${c.pointsDone}/${c.points} pts · ${c.done}/${c.total} items` : `${c.done}/${c.total} items`}
-          {m.unestimated > 0 && m.unestimated < c.total && ` · ${m.unestimated} unestimated`}
-        </span>
+        {c.status === "completed" ? (
+          c.plan ? (
+            <>
+              <span className="text-ink">{planPct(c.plan)}%</span>
+              <span>
+                {c.plan.plannedDone} of {c.plan.planned} planned done
+              </span>
+            </>
+          ) : (
+            <span className="text-ink-faint">plan history incomplete</span>
+          )
+        ) : (
+          <>
+            <span className="text-ink">{m.pct}%</span>
+            <span title={unitNote(m.unit, c.total, m.unestimated)}>
+              {m.unit === "pts" ? `${c.pointsDone}/${c.points} pts · ${c.done}/${c.total} items` : `${c.done}/${c.total} items`}
+              {m.unestimated > 0 && m.unestimated < c.total && ` · ${m.unestimated} unestimated`}
+            </span>
+          </>
+        )}
         {c.status === "completed" && m.open > 0 && (
           <button
             type="button"
@@ -484,6 +546,7 @@ function CycleCard({
           </button>
         )}
       </div>
+      {c.status === "completed" && c.plan && <PlanLine c={c} />}
       {ops.error && <p className="text-xs text-flare">{ops.error}</p>}
     </article>
   );

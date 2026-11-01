@@ -55,7 +55,7 @@ export function atTime(day: Date, hhmm: string): Date {
   return d;
 }
 
-const ceilSlot = (d: Date) => new Date(Math.ceil(d.getTime() / (SLOT_MIN * MIN)) * SLOT_MIN * MIN);
+export const ceilSlot = (d: Date) => new Date(Math.ceil(d.getTime() / (SLOT_MIN * MIN)) * SLOT_MIN * MIN);
 const minutes = (i: Interval) => (i.end.getTime() - i.start.getTime()) / MIN;
 
 /** Merge overlapping intervals, clipped to [from, to]. */
@@ -77,7 +77,7 @@ function merge(list: Interval[], from: Date, to: Date): Interval[] {
 }
 
 /** [from, to] minus the given intervals. */
-function gaps(taken: Interval[], from: Date, to: Date): Interval[] {
+export function gaps(taken: Interval[], from: Date, to: Date): Interval[] {
   const out: Interval[] = [];
   let cur = from;
   for (const i of merge(taken, from, to)) {

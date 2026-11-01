@@ -130,7 +130,7 @@ export async function boxesOn(day: Date): Promise<Timebox[]> {
 
 export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
   const day = parseDay(dayParam);
-  const { end } = dayRange(day);
+  const { start, end } = dayRange(day);
   const [settings, { busy, allDay }, boxes, keys] = await Promise.all([
     getTimeboxSettings(),
     busyOn(day),
@@ -152,7 +152,19 @@ export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
   };
   const dueWhere = and(inArray(tasks.status, [...ACTIVE_STATUSES]), isNotNull(tasks.dueAt), lt(tasks.dueAt, end));
   const [due, [{ dueCount }], mine, cards] = await Promise.all([
-    db.select(taskCols).from(tasks).where(dueWhere).orderBy(asc(tasks.dueAt), priorityRank).limit(DUE_LIMIT),
+    // Yours first, then what falls due on this day, then the overdue backlog —
+    // so a long overdue tail never hides the day's own deadlines.
+    db
+      .select(taskCols)
+      .from(tasks)
+      .where(dueWhere)
+      .orderBy(
+        sql`coalesce(${tasks.assignee} = ${ME}, false) desc`,
+        sql`${tasks.dueAt} >= ${start.toISOString()} desc`,
+        asc(tasks.dueAt),
+        priorityRank,
+      )
+      .limit(DUE_LIMIT),
     db.select({ dueCount: sql<number>`count(*)::int` }).from(tasks).where(dueWhere),
     db
       .select(taskCols)

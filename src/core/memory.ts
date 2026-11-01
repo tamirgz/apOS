@@ -632,7 +632,9 @@ export async function reflectOnRun(input: {
       .replace(/<think>[\s\S]*?<\/think>/gi, "")
       .replace(/^["'\s]+|["'\s]+$/g, "")
       .trim();
-    if (!lesson || /^none\.?$/i.test(lesson) || lesson.length < 12) return;
+    // A model that says NONE and then keeps talking still means none (a stored
+    // "NONE | (All projects were visited…)" lesson, 2026-11-01).
+    if (!lesson || /^none\b/i.test(lesson) || lesson.length < 12) return;
     await rememberEntry({
       kind: "lesson",
       source: `agent-run:${input.agentName}`,

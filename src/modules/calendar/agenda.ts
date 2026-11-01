@@ -1,6 +1,6 @@
 import { and, asc, gte, inArray, lte } from "drizzle-orm";
 import { db } from "@/core/db/client";
-import { timeboxes } from "@/modules/today/schema";
+import { timeboxes, type TimeboxKind } from "@/modules/today/schema";
 import { KIND_META } from "@/modules/today/timebox-kinds";
 import { calendarEvents } from "./schema";
 
@@ -25,6 +25,10 @@ export interface AgendaItem {
   /** The event in its origin app (Google Calendar). */
   sourceUrl: string | null;
   source: string;
+  /** The event holds the time: not marked "free", not declined. Boxes never count as busy. */
+  busy: boolean;
+  /** Timebox fields — null for events. */
+  box: { kind: TimeboxKind; endMode: "soft" | "hard"; done: boolean } | null;
 }
 
 /**
@@ -63,6 +67,8 @@ export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
     meetingUrl: null,
     sourceUrl: null,
     source: "timebox",
+    busy: false,
+    box: { kind: b.kind, endMode: b.endMode, done: b.status === "done" },
   }));
 
   const eventItems: AgendaItem[] = events.map((e) => ({
@@ -82,6 +88,8 @@ export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
     meetingUrl: e.meetingUrl,
     sourceUrl: e.sourceUrl,
     source: e.source,
+    busy: !e.transparent && !(e.attendees ?? []).some((a) => a.self && a.responseStatus === "declined"),
+    box: null,
   }));
   return [...eventItems, ...boxItems].sort((a, b) => a.at.getTime() - b.at.getTime());
 }

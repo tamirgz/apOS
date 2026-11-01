@@ -18,7 +18,7 @@ import { createEvent, deleteEvent, requestIcsSync } from "../actions";
 import type { AgendaItem } from "../agenda";
 import { EventDetail } from "./EventDetail";
 
-const KIND_LABEL = { event: "event" } as const;
+const KIND_LABEL = { event: "event", timebox: "timebox" } as const;
 
 /** Category fallback colors — Google events use their own color when set. */
 const LEGEND = [

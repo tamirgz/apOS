@@ -14,5 +14,11 @@ export const todayManifest: ModuleManifest = {
       keywords: ["today", "plan", "day", "needs you", "focus", "now"],
       href: "/m/today",
     },
+    {
+      id: "today.plan",
+      title: "Plan my day (timebox)",
+      keywords: ["plan", "timebox", "schedule", "day", "draft", "boxes"],
+      href: "/m/today/plan",
+    },
   ],
 };

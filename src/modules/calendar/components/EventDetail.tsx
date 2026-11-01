@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { errorText } from "@/core/ui/feedback";
@@ -347,6 +348,15 @@ export function EventDetail({
                   <ExternalLink className="size-3" />
                   open in google calendar
                 </a>
+              )}
+              {item.kind === "timebox" && (
+                <Link
+                  href={item.href}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/8 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-dim transition hover:border-solar/30 hover:text-solar"
+                >
+                  <CalendarDays className="size-3" />
+                  open in plan
+                </Link>
               )}
               {item.deletable && (
                 <>

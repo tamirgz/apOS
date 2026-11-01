@@ -1,10 +1,13 @@
-import { and, asc, gte, lte } from "drizzle-orm";
+import { and, asc, gte, inArray, lte } from "drizzle-orm";
 import { db } from "@/core/db/client";
+import { timeboxes } from "@/modules/today/schema";
+import { KIND_META } from "@/modules/today/timebox-kinds";
 import { calendarEvents } from "./schema";
 
 export interface AgendaItem {
   id: string;
-  kind: "event";
+  /** A calendar event, or one of the user's planned timeboxes. */
+  kind: "event" | "timebox";
   title: string;
   at: Date;
   endAt: Date | null;
@@ -25,18 +28,44 @@ export interface AgendaItem {
 }
 
 /**
- * The user's personal agenda: calendar events only — apOS-local events plus
- * those synced from connected calendars (Google/ICS). Work items never appear
- * here; project dates live on the project's own Work calendar.
+ * The user's personal agenda: calendar events — apOS-local events plus those
+ * synced from connected calendars (Google/ICS) — and the timeboxes the user
+ * planned (drafts stay on the Plan screen). Work items never appear here;
+ * project dates live on the project's own Work calendar.
  */
 export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
-  const events = await db
-    .select()
-    .from(calendarEvents)
-    .where(and(gte(calendarEvents.startAt, from), lte(calendarEvents.startAt, to)))
-    .orderBy(asc(calendarEvents.startAt));
+  const [events, boxes] = await Promise.all([
+    db
+      .select()
+      .from(calendarEvents)
+      .where(and(gte(calendarEvents.startAt, from), lte(calendarEvents.startAt, to)))
+      .orderBy(asc(calendarEvents.startAt)),
+    db
+      .select()
+      .from(timeboxes)
+      .where(and(gte(timeboxes.startAt, from), lte(timeboxes.startAt, to), inArray(timeboxes.status, ["planned", "done"])))
+      .orderBy(asc(timeboxes.startAt)),
+  ]);
 
-  return events.map((e) => ({
+  const boxItems: AgendaItem[] = boxes.map((b) => ({
+    id: b.id,
+    kind: "timebox",
+    title: b.title,
+    at: b.startAt,
+    endAt: b.endAt,
+    allDay: false,
+    detail: `timebox · ${KIND_META[b.kind].label.toLowerCase()}`,
+    href: `/m/today/plan/${localDate(b.startAt)}`,
+    accent: KIND_META[b.kind].color,
+    deletable: false,
+    location: null,
+    notes: null,
+    meetingUrl: null,
+    sourceUrl: null,
+    source: "timebox",
+  }));
+
+  const eventItems: AgendaItem[] = events.map((e) => ({
     id: e.id,
     kind: "event" as const,
     title: e.title,
@@ -54,4 +83,8 @@ export async function getAgenda(from: Date, to: Date): Promise<AgendaItem[]> {
     sourceUrl: e.sourceUrl,
     source: e.source,
   }));
+  return [...eventItems, ...boxItems].sort((a, b) => a.at.getTime() - b.at.getTime());
 }
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const localDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

@@ -1,0 +1,1 @@
+ALTER TABLE "timeboxes" ADD COLUMN "attention_id" uuid;

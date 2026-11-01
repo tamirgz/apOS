@@ -35,7 +35,7 @@ function ScheduleButton({
   return (
     <button
       type="button"
-      title="Add a 1-hour block to today's calendar"
+      title="Box an hour for it today (a planned timebox, sent to Google)"
       disabled={pending}
       onClick={() =>
         start(async () => {
@@ -77,6 +77,12 @@ export function PlanMyDay({
           plan my day
         </p>
         <span className="font-mono text-[10px] text-ink-faint">{today}</span>
+        <Link
+          href="/m/today/plan"
+          className="ml-auto font-mono text-[10px] uppercase tracking-widest text-ink-faint transition hover:text-solar"
+        >
+          timebox it →
+        </Link>
       </div>
 
       {/* Today's timeline: calendar events. */}

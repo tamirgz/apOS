@@ -3,7 +3,7 @@
  * render path. It lays the whole corpus out as a force-directed knowledge graph
  * (ForceAtlas2 over the k-NN edges — the layout that actually reveals community
  * structure and fills space, unlike a UMAP scatter), detects topic communities
- * (Louvain), and NAMES the big ones with a local LLM (qwen). That costs tens of
+ * (Louvain), and NAMES the big ones with the "orbit.namer" route (local qwen). That costs tens of
  * seconds, so a background job builds it, persists it to app_settings, and only
  * rebuilds when the corpus fingerprint changes (idempotent). The page reads the
  * persisted result instantly.
@@ -19,6 +19,7 @@ import { eq, sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { getSetting, setSetting } from "@/core/app-settings";
 import { appSettings } from "@/core/db/schema/app-settings";
+import { completeText } from "@/core/ai/routing";
 
 export interface OrbitRegion {
   id: number;
@@ -64,8 +65,6 @@ const MIN_REGION = 12; // ignore communities smaller than this
 const NEIGHBORS = 6; // k-NN edges per node
 const MAX_DIST = 0.5; // the app's "genuinely related" cosine-distance gate
 
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const NAMER_MODEL = "qwen3:8b";
 
 const pct = (arr: number[], p: number) => {
   const s = [...arr].sort((a, b) => a - b);
@@ -142,28 +141,12 @@ async function nameRegions(
     "You label clusters of a person's notes/tasks/messages with a SHORT topic name (2–4 words), in English, capturing what the items are ABOUT across any language. Reply with ONLY a JSON object mapping each cluster number to its name — no prose.";
   const user = `CLUSTERS (number. sample items):\n${list}\n\nReply like {"0":"Investment research","1":"Trip planning",…}`;
   try {
-    const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: NAMER_MODEL,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        temperature: 0,
-        stream: false,
-      }),
+    const txt = await completeText("orbit.namer", {
+      system,
+      user,
+      label: "orbit region names",
       signal: AbortSignal.timeout(120_000),
     });
-    if (!res.ok) return names;
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const txt = (data.choices?.[0]?.message?.content ?? "").replace(
-      /<think>[\s\S]*?<\/think>/gi,
-      "",
-    );
     const m = txt.match(/\{[\s\S]*\}/);
     if (!m) return names;
     const obj = JSON.parse(m[0]) as Record<string, string>;
@@ -173,7 +156,7 @@ async function nameRegions(
         names.set(n, v.trim().slice(0, 40));
     }
   } catch {
-    /* Ollama down / slow — fall back to kind labels. */
+    /* model down / slow — fall back to kind labels. */
   }
   return names;
 }

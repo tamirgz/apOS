@@ -13,12 +13,11 @@ import { sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { projects } from "@/modules/projects/schema";
 import { searchIndex } from "@/core/db/schema/search-index";
-import { decide, DECIDE_MODEL } from "@/core/ai/decide";
+import { decide } from "@/core/ai/decide";
 import { recordUsage } from "@/core/ai/model-track";
+import { completeText } from "@/core/ai/routing";
 import type { ModelTrack } from "@/core/ai/provider";
 
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const CLASSIFIER_MODEL = "qwen3:8b";
 /** laya's pick is kept at or above this confidence; below it qwen decides.
  *  Shadow test on 120 real rows (AIOS-35): 91% agreement, 57% coverage. */
 const DECIDE_MIN_CONFIDENCE = 0.5;
@@ -50,23 +49,12 @@ async function classifyBatch(
     "Pick exactly ONE area per item, or \"none\" if it fits none. Reply with ONLY a JSON object mapping each item number to an area name (or \"none\") — no prose.";
   const user = `AREAS:\n${areaList}\n\nITEMS:\n${itemList}\n\nReply with JSON like {"1":"Technology & Craft","2":"none",…}`;
 
-  const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: CLASSIFIER_MODEL,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0,
-      stream: false,
-    }),
+  const txt = await completeText("area.classify", {
+    system,
+    user,
+    label: "area classify",
     signal: AbortSignal.timeout(60_000),
   });
-  if (!res.ok) throw new Error(`classifier → HTTP ${res.status}`);
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  const txt = data.choices?.[0]?.message?.content ?? "";
   const m = txt.match(/\{[\s\S]*\}/);
   if (!m) return {};
   try {
@@ -88,7 +76,7 @@ async function decideArea(
   areas: Area[],
   item: { kind: string; text: string },
   track?: ModelTrack,
-  tokens?: { calls: number; in: number },
+  tokens?: { calls: number; in: number; model: string },
 ): Promise<string | null> {
   const criteria: Record<string, string | null> = Object.fromEntries(
     areas.map((a) => [a.name, a.description || null]),
@@ -102,6 +90,7 @@ async function decideArea(
   if (d && tokens) {
     tokens.calls++;
     tokens.in += d.tokensIn;
+    tokens.model = d.model;
   }
   const a = d?.answers.area;
   if (!a || a.confidence < DECIDE_MIN_CONFIDENCE) return null;
@@ -166,7 +155,7 @@ export async function classifyAreas(
 
   const pairs: { id: string; ref: string }[] = [];
   const unsure: typeof rows = [];
-  const tokens = { calls: 0, in: 0 };
+  const tokens = { calls: 0, in: 0, model: "" };
   for (const r of rows) {
     const ref = await decideArea(areas, { kind: r.kind, text: `${r.title}\n${r.snippet ?? ""}` }, undefined, tokens);
     if (ref) pairs.push({ id: r.id, ref });
@@ -176,7 +165,7 @@ export async function classifyAreas(
   // One ledger row per sweep, not per item — rows re-asked while qwen is held
   // off would otherwise flood it.
   if (tokens.calls) {
-    void recordUsage("ollama", DECIDE_MODEL, { source: "job", ...DECIDE_TRACK, label: `area classify ×${tokens.calls}` }, tokens.in, 0);
+    void recordUsage("ollama", tokens.model, { source: "job", ...DECIDE_TRACK, label: `area classify ×${tokens.calls}` }, tokens.in, 0);
   }
 
   // Small sub-batches keep each prompt focused and each call fast.

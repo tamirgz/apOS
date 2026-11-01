@@ -137,9 +137,13 @@ export async function saveRoute(
   taskKey: string,
   provider: AIProviderId,
   model: string,
+  fallback: { provider: AIProviderId; model: string } | null,
 ) {
   if (!model.trim()) return { ok: false as const, error: "model is required" };
-  await setRoute(taskKey, provider, model);
+  if (fallback && !fallback.model.trim()) {
+    return { ok: false as const, error: "fallback model is required (or pick no fallback)" };
+  }
+  await setRoute(taskKey, provider, model, fallback);
   revalidatePath("/m/settings");
 }
 

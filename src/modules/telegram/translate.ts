@@ -2,11 +2,12 @@
  * Cross-lingual bridge for search. The unified search_index embeds with
  * nomic-embed-text, whose vectors CLUSTER BY LANGUAGE — so a Russian or Hebrew
  * post never surfaces for an English query. We translate a foreign post to
- * English once (a small LOCAL model, free) and embed that gloss, so an English
- * semantic search retrieves the original foreign post. English posts are left
+ * English once (the "telegram.translate" route — a small LOCAL model, free)
+ * and embed that gloss, so an English semantic search retrieves the original
+ * foreign post. English posts are left
  * untouched (needsTranslation → false).
  */
-import { db } from "@/core/db/client";
+import { completeText } from "@/core/ai/routing";
 
 /** Does this text contain enough non-Latin script (Cyrillic / Hebrew / Arabic /
  *  Greek) to be worth translating? Cheap char-class heuristic, no model call. */
@@ -24,28 +25,16 @@ export async function translateToEnglish(text: string): Promise<string | null> {
   const src = text.trim();
   if (!src) return null;
   try {
-    const { resolveRoute } = await import("@/core/ai/routing");
-    const route = await resolveRoute("source.relevance"); // local, free
     const system =
       "You are a translation engine. Translate the user's text to English. " +
       "Output ONLY the English translation — no preamble, no notes, no quotes. " +
       "Keep proper nouns, product names, tickers and hashtags as-is.";
-    let out = "";
-    for await (const ev of route.provider.run({
+    const out = await completeText("telegram.translate", {
       system,
-      messages: [{ role: "user", content: `/no_think\n${src.slice(0, 2000)}` }],
-      tools: [],
-      toolCtx: { db },
-      model: route.model,
-      maxTurns: 1,
-      track: { source: "job", label: "telegram translate" },
-    })) {
-      if (ev.type === "text") out += ev.text;
-      else if (ev.type === "done" && ev.text) out = ev.text;
-      else if (ev.type === "error") throw new Error(ev.message);
-    }
+      user: `/no_think\n${src.slice(0, 2000)}`,
+      label: "telegram translate",
+    });
     const clean = out
-      .replace(/<think>[\s\S]*?<\/think>/gi, "")
       .replace(/^\s*(translation|english)\s*:\s*/i, "")
       .trim();
     return clean || null;

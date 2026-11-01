@@ -26,16 +26,76 @@ const KEY_LABELS: Record<string, string> = {
   "routine.gate": "Routines · commit gate (does this commit need the executor?)",
   "memory.distill": "Memory · learning engine (distills events → rules; local)",
   "insight.verify": "Insight quality gate (rejects a generic advisor brief; local)",
+  "agent.subtask": "Agents · sub-task (fresh-context investigation an agent spawns)",
+  "area.classify": "Search · area drawers (files items into life areas)",
+  decide: "Search · decision model (fast first tier of area drawers; Ollama only)",
+  "tasks.shortTitle": "Tracker · short titles for long item titles",
+  "orbit.namer": "Orbit · names the topic clusters",
+  "ask.linkJudge": "Ask · related-link judge",
+  "inbox.verify": "Inbox · capture verifier (is this really a task?)",
+  "telegram.translate": "Telegram · translates foreign posts for search",
+  "investments.report": "Investments · daily report (Runs task)",
 };
+
+const SELECT =
+  "h-9 rounded-lg border border-white/10 bg-abyss px-3 font-mono text-xs text-ink outline-none focus:border-plasma/40";
+
+/** A model <select> fed by the provider's live model list; keeps a saved model
+ *  visible even when the list doesn't (yet) include it. */
+function ModelSelect({
+  provider,
+  value,
+  onChange,
+  className,
+}: {
+  provider: AIProviderId | "";
+  value: string;
+  onChange: (m: string) => void;
+  className?: string;
+}) {
+  const { models, error } = useProviderModels(provider);
+  return (
+    <>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={cn(SELECT, className)}>
+        {value && !models.includes(value) && <option value={value}>{value}</option>}
+        <option value="" disabled>
+          {models.length ? "select model…" : "loading models…"}
+        </option>
+        {models.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+      {error && (
+        <p className="w-full font-mono text-[10px] text-flare">
+          model list unavailable: {error.slice(0, 120)}
+        </p>
+      )}
+    </>
+  );
+}
+
+function fallbackOf(route: AiRoute): { provider: AIProviderId; model: string } | null {
+  const fb = (route.options as { fallback?: { provider: AIProviderId; model: string } | null } | null)?.fallback;
+  return fb?.provider && fb.model ? fb : null;
+}
 
 function RouteRow({ route }: { route: AiRoute }) {
   const [provider, setProvider] = useState<AIProviderId>(route.provider);
   const [model, setModel] = useState(route.model);
+  const savedFb = fallbackOf(route);
+  const [fbProvider, setFbProvider] = useState<AIProviderId | "">(savedFb?.provider ?? "");
+  const [fbModel, setFbModel] = useState(savedFb?.model ?? "");
   const [pending, startTransition] = useTransition();
   const [savedTick, setSavedTick] = useState(false);
-  const { models, error: loadError } = useProviderModels(provider);
 
-  const dirty = provider !== route.provider || model !== route.model;
+  const fallback = fbProvider ? { provider: fbProvider, model: fbModel } : null;
+  const dirty =
+    provider !== route.provider ||
+    model !== route.model ||
+    (savedFb?.provider ?? "") !== fbProvider ||
+    (savedFb?.model ?? "") !== (fbProvider ? fbModel : "");
 
   return (
     <div className="glass flex flex-wrap items-center gap-2.5 rounded-xl p-3">
@@ -55,7 +115,7 @@ function RouteRow({ route }: { route: AiRoute }) {
           setProvider(p);
           setModel("");
         }}
-        className="h-9 rounded-lg border border-white/10 bg-abyss px-3 font-mono text-xs text-ink outline-none focus:border-plasma/40"
+        className={SELECT}
       >
         {AI_PROVIDERS.map((p) => (
           <option key={p} value={p}>
@@ -64,30 +124,14 @@ function RouteRow({ route }: { route: AiRoute }) {
         ))}
       </select>
 
-      <select
-        value={model}
-        onChange={(e) => setModel(e.target.value)}
-        className="h-9 min-w-56 flex-1 rounded-lg border border-white/10 bg-abyss px-3 font-mono text-xs text-ink outline-none focus:border-plasma/40"
-      >
-        {model && !models.includes(model) && (
-          <option value={model}>{model}</option>
-        )}
-        <option value="" disabled>
-          {models.length ? "select model…" : "loading models…"}
-        </option>
-        {models.map((m) => (
-          <option key={m} value={m}>
-            {m}
-          </option>
-        ))}
-      </select>
+      <ModelSelect provider={provider} value={model} onChange={setModel} className="min-w-56 flex-1" />
 
       <button
         type="button"
-        disabled={!dirty || !model || pending}
+        disabled={!dirty || !model || (!!fallback && !fallback.model) || pending}
         onClick={() =>
           startTransition(async () => {
-            const r = await act(() => saveRoute(route.taskKey, provider, model), { failed: "Couldn't save the route" });
+            const r = await act(() => saveRoute(route.taskKey, provider, model, fallback), { failed: "Couldn't save the route" });
             if (!r.ok) return;
             setSavedTick(true);
             setTimeout(() => setSavedTick(false), 1600);
@@ -105,11 +149,32 @@ function RouteRow({ route }: { route: AiRoute }) {
         {pending ? "saving…" : savedTick ? "saved" : "save"}
       </button>
 
-      {loadError && (
-        <p className="w-full font-mono text-[10px] text-flare">
-          model list unavailable: {loadError.slice(0, 120)}
-        </p>
-      )}
+      <div className="flex w-full flex-wrap items-center gap-2.5">
+        <span
+          className="cursor-help font-mono text-[9px] uppercase tracking-[0.2em] text-ink-faint"
+          title="Used only when the primary fails before answering (e.g. a free tier is exhausted or the server is down)."
+        >
+          fallback
+        </span>
+        <select
+          value={fbProvider}
+          onChange={(e) => {
+            setFbProvider(e.target.value as AIProviderId | "");
+            setFbModel("");
+          }}
+          className={SELECT}
+        >
+          <option value="">none</option>
+          {AI_PROVIDERS.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+        {fbProvider && (
+          <ModelSelect provider={fbProvider} value={fbModel} onChange={setFbModel} className="min-w-56 flex-1" />
+        )}
+      </div>
     </div>
   );
 }

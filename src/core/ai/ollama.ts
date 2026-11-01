@@ -67,7 +67,10 @@ export const ollamaProvider: AIProvider = {
   // concurrent runs don't thrash the machine (freed during tool execution, so a
   // tool's own local call can't deadlock the run).
   run(opts) {
-    const gen = runOpenAICompatible(`${OLLAMA_BASE}/v1`, "ollama", opts, {}, true);
+    // An EXPLICIT reasoning hint is honoured (Ollama's /v1 accepts
+    // reasoning_effort); omitted → the model's own default, as before.
+    const extra = opts.reasoning ? { reasoning_effort: opts.reasoning } : {};
+    const gen = runOpenAICompatible(`${OLLAMA_BASE}/v1`, "ollama", opts, extra, true);
     const source = opts.track?.source ?? "unknown";
     const ttl = INTERACTIVE_SOURCES.has(source)
       ? INTERACTIVE_KEEP_ALIVE

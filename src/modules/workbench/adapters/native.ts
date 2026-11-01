@@ -6,6 +6,7 @@
  */
 import { db } from "@/core/db/client";
 import { providers, resolveRoute } from "@/core/ai/routing";
+import type { AIProviderId } from "@/core/db/schema/ai-routes";
 import type { Adapter, AdapterContext, AdapterResult } from "./types";
 
 /**
@@ -58,16 +59,15 @@ export const nativeAdapter: Adapter = {
   async run(ctx: AdapterContext, emit): Promise<AdapterResult> {
     const route = await resolveRoute("workbench.native");
     // The engine may hand us a NAMESPACED model id (workbench convention:
-    // "ollama/…", "mlx/…", "nvidia/…"). Strip the namespace and use it to pick
-    // the apOS provider; a bare name is Ollama unless it's a known MLX model.
+    // "ollama/…", "mlx/…", "tokenharbor/…" — any apOS provider id). Strip the
+    // namespace and use it to pick the provider; a bare name is Ollama unless
+    // it's a known MLX model.
     const resolve = async (raw: string) => {
       const slash = raw.indexOf("/");
       const ns = slash > 0 ? raw.slice(0, slash) : "";
       const bare = slash > 0 ? raw.slice(slash + 1) : raw;
-      if (ns === "ollama") return { provider: providers.ollama, model: bare };
-      if (ns === "mlx") return { provider: providers.mlx, model: bare };
-      if (ns === "nvidia") return { provider: providers.nvidia, model: bare };
-      if (ns === "anthropic" || raw.startsWith("claude"))
+      if (ns in providers) return { provider: providers[ns as AIProviderId], model: bare };
+      if (raw.startsWith("claude"))
         return { provider: providers.anthropic, model: bare };
       const { getSetting } = await import("@/core/app-settings");
       const mlx = ((await getSetting("mlx_models").catch(() => null))?.trim() ?? "")

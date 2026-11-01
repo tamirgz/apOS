@@ -123,6 +123,7 @@ export async function* runOpenAICompatible(
           tools: finishOnly ?? (!forceAnswer && tools.length ? tools : undefined),
           stream: true,
           stream_options: { include_usage: true },
+          ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
           ...extraBody,
         },
         { signal: opts.signal },

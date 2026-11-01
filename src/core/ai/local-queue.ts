@@ -74,14 +74,18 @@ export async function acquireLocalSlot(): Promise<() => void> {
 /** Local runtimes whose GPU/RAM an agent's model call contends for. */
 const LOCAL_PROVIDERS = ["ollama", "mlx"];
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-/** The tiny always-on embedder. It coexists with any chat model for ~370 MB and
- *  is needed constantly, so it is never a "contender" and never unloaded. */
-const EMBED_MODEL_PREFIX = "nomic-embed-text";
+/** The tiny always-on embedder (Settings → embedding model, tag stripped). It
+ *  coexists with any chat model for ~370 MB and is needed constantly, so it is
+ *  never a "contender" and never unloaded. */
+async function embedderPrefix(): Promise<string> {
+  const { getEmbeddingModel } = await import("@/core/embeddings");
+  return (await getEmbeddingModel().catch(() => "nomic-embed-text")).split(":")[0];
+}
 
 /** A model that can share the box with `myModel` without forcing a swap: the SAME
  *  model (already resident — no reload) or the tiny embedder. */
-function coexists(model: string, myModel: string): boolean {
-  return model === myModel || model.startsWith(EMBED_MODEL_PREFIX);
+function coexists(model: string, myModel: string, embedder: string): boolean {
+  return model === myModel || model.startsWith(embedder);
 }
 
 /**
@@ -100,7 +104,8 @@ async function activeLocalContenders(myModel: string): Promise<number> {
     .where(
       and(inArray(modelCalls.provider, LOCAL_PROVIDERS), gt(modelCalls.startedAt, cutoff)),
     );
-  return rows.filter((r) => !coexists(r.model, myModel)).length;
+  const embedder = await embedderPrefix();
+  return rows.filter((r) => !coexists(r.model, myModel, embedder)).length;
 }
 
 /**
@@ -123,9 +128,10 @@ export async function freeIdleLocalResidents(keepModel: string): Promise<string[
     const data = (await res.json()) as {
       models?: Array<{ name?: string; model?: string }>;
     };
+    const embedder = await embedderPrefix();
     for (const m of data.models ?? []) {
       const name = m.name ?? m.model ?? "";
-      if (!name || name === keepModel || name.startsWith(EMBED_MODEL_PREFIX)) continue;
+      if (!name || name === keepModel || name.startsWith(embedder)) continue;
       await fetch(`${OLLAMA_BASE}/api/generate`, {
         method: "POST",
         headers: { "content-type": "application/json" },

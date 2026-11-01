@@ -5,18 +5,15 @@
  * A row is (re)done only when that stamp is missing or stale, so re-runs are
  * no-ops and an edited title is picked up on the next pass.
  *
- * Free and local: the first sentence when it already fits, otherwise one
- * qwen3:8b call per title through the local-inference queue.
+ * Free and local: the first sentence when it already fits, otherwise one call
+ * per title on the "tasks.shortTitle" route (seeded to qwen3:8b).
  */
 import { gt, sql as dsql } from "drizzle-orm";
 import type { db as Db } from "@/core/db/client";
-import { withLocalSlot } from "@/core/ai/local-queue";
-import { withTrackedCall } from "@/core/ai/model-track";
+import { completeText } from "@/core/ai/routing";
 import { tasks } from "./schema";
 import { plainTitle, titleHash } from "./states";
 
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const MODEL = "qwen3:8b";
 /** Titles longer than this get a short title. */
 const LONG = 100;
 /** A short title must fit in this. */
@@ -47,30 +44,15 @@ async function modelShorten(plain: string, budget: number): Promise<string | nul
     `You shorten work-item titles. Reply with ONLY the new title: one line, at most ${budget} characters, ` +
     "sentence case, same language, no quotes, no trailing period. Keep the concrete subject and the key " +
     "action; drop explanations, examples, dates and parentheses.";
-  // Native /api/chat so thinking can be switched off (qwen3 otherwise reasons
-  // for 10–20s on a one-line rewrite).
-  const res = await withLocalSlot(() =>
-    withTrackedCall("ollama", MODEL, { source: "job", label: "short titles" }, () =>
-    fetch(`${OLLAMA_BASE}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: plain.slice(0, 600) },
-        ],
-        think: false,
-        stream: false,
-        options: { temperature: 0 },
-      }),
-      signal: AbortSignal.timeout(60_000),
-    })),
-  );
-  if (!res.ok) throw new Error(`short-title model → HTTP ${res.status}`);
-  const data = (await res.json()) as { message?: { content?: string } };
-  const out = (data.message?.content ?? "")
-    .replace(/<think>[\s\S]*?<\/think>/g, "")
+  // completeText turns reasoning off (qwen3 otherwise reasons for 10–20s on a
+  // one-line rewrite).
+  const text = await completeText("tasks.shortTitle", {
+    system,
+    user: plain.slice(0, 600),
+    label: "short titles",
+    signal: AbortSignal.timeout(60_000),
+  });
+  const out = text
     .split("\n")
     .map((l) => l.trim())
     .find(Boolean)

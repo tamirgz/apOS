@@ -10,10 +10,8 @@
  * status-200 check alone lets a parked domain (GoDaddy "for sale"), a soft-404,
  * or a live-but-irrelevant authoritative page through.
  */
+import { completeText } from "@/core/ai/routing";
 import { fetchUrlText } from "@/modules/telegram/fetch";
-
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const JUDGE_MODEL = process.env.ASK_JUDGE_MODEL || "qwen3:8b";
 
 /** Domains that return 200 but wall their content behind a login/subscription. */
 export const GATED_DOMAIN =
@@ -58,10 +56,6 @@ export function isLowQualityUrl(url: string): boolean {
 const DEAD_PAGE =
   /(this domain (is|may be|might be) (for sale|available)|buy this domain|domain( name)? (is )?for sale|godaddy|sedo(parking)?|afternic|hugedomains|dan\.com|parkingcrew|bodis|website is parked|domain( is)? parked|under construction|coming soon|account (has been )?suspended|page (you requested )?(was )?not found|404\b[^0-9]{0,20}(not found|error)|the requested (page|url|document)[^.]{0,40}(not|could not) (be )?found|no longer (exists|available)|this page (does not|doesn't) exist)/i;
 
-/** qwen "thinking" models wrap reasoning in <think>…</think>; drop it. */
-function stripThink(s: string): string {
-  return s.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-}
 
 /** Fetch a page's readable text for verification; "" on any failure. */
 async function fetchForVerify(url: string): Promise<string> {
@@ -93,23 +87,13 @@ async function judgeLinks(
     'You verify web links for a research answer. For each numbered page you get its URL and the actual text fetched from it. Mark a page "yes" ONLY if BOTH hold: (1) it is a REAL, live, publicly-readable page (not a domain-for-sale/parking page, not an error/404, not a login/subscribe wall, not empty/placeholder), AND (2) its content substantively covers the SPECIFIC topic asked about — not merely the broader field. Example: if the topic is "XDR", a general cybersecurity-framework page that never actually discusses XDR is "no". When in doubt, answer "no". Reply with ONLY a JSON object mapping each index to "yes" or "no" — no prose.';
   const user = `USER TOPIC: ${query}\n\nPAGES:\n${list}\n\nReply with JSON like {"0":"yes","1":"no"}`;
   try {
-    const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: JUDGE_MODEL,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        temperature: 0,
-        stream: false,
-      }),
+    const raw = await completeText("ask.linkJudge", {
+      system,
+      user,
+      label: "ask link judge",
+      source: "ask",
       signal: AbortSignal.timeout(60_000),
     });
-    if (!res.ok) return verdict;
-    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const raw = stripThink(data.choices?.[0]?.message?.content ?? "");
     const json = raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1);
     const map = JSON.parse(json) as Record<string, string>;
     items.forEach((it, i) => {

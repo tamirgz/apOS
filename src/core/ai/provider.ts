@@ -37,6 +37,9 @@ export interface AIRunOptions {
   // reasoning yields no thinking tokens but adds latency (up to 6.7×) and can
   // trigger spurious tool calls. Providers without a reasoning channel ignore it.
   reasoning?: "none" | "low";
+  // Sampling temperature for OpenAI-compatible providers (gates/classifiers pass
+  // 0 for stable answers). Omitted → the server's default.
+  temperature?: number;
   /**
    * Optional queue-visibility descriptor. The provider wrapper (core/ai/routing
    * → model-track) registers a live model-call row for this run; `track` labels

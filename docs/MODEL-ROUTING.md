@@ -30,9 +30,8 @@ the moment you have the RAM/GPU — switch any route back to Ollama/MLX/Claude i
 |---|---|---|
 | Chat (⌘K command bar) | `chat` | `qwen3-coder-30b-a3b-instruct` |
 | Ask (cited Q&A over your corpus) | `ask` | `qwen3-coder-30b-a3b-instruct` |
-| Knowledge enrichment | `knowledge.enrich` | `huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-mlx` |
 
-`knowledge.enrich` is the deliberate exception — it's background, but routed to MLX for the abliterated 35B's enrichment quality (the uncensored twin of the old Ollama knowledge model). It reasons unconditionally (~1–2 min/run); acceptable for background. Reasoning is otherwise disabled for MLX via `reasoning_effort: "none"` (base Qwen3 honors it; the abliterated fine-tune ignores it).
+`knowledge.enrich` runs on Token Harbor's free DeepSeek (`tokenharbor`), falling back to the MLX coder when the free tier is exhausted or down (see [Fallbacks](#fallbacks)). Reasoning is disabled for MLX chat via `reasoning_effort: "none"`.
 
 ## 🟢 Ollama — background / periodic / infra (must run headless)
 
@@ -42,14 +41,18 @@ the moment you have the RAM/GPU — switch any route back to Ollama/MLX/Claude i
 | Source relevance gate (runs on every incoming item) | `source.relevance` | `qwen3:8b` |
 | Routine gate (runs on every commit trigger) | `routine.gate` | `qwen3:8b` |
 | Routine builder (once per routine create) | `routine.builder` | `qwen3:8b` |
-| Area classification | hardcoded: `core/area-classify.ts` | `qwen3:8b` |
-| Ask link verification (judge) | hardcoded: `modules/ask/links.ts` | `qwen3:8b` |
-| Inbox handling verifier | hardcoded: `modules/inbox/verify.ts` | `qwen3:8b` |
+| Area classification (decision-model tier, then qwen) | `decide`, `area.classify` | `laya:421m-typed-decisions-mlx-fp16`, `qwen3:8b` |
+| Ask link verification (judge) | `ask.linkJudge` | `qwen3:8b` |
+| Inbox handling verifier | `inbox.verify` | `qwen3:8b` |
+| Tracker short titles | `tasks.shortTitle` | `qwen3:8b` |
+| Orbit cluster names | `orbit.namer` | `qwen3:8b` |
+| Telegram post translation | `telegram.translate` | `qwen3:8b` |
+| Investments daily report (a Runs task) | `investments.report` | `qwen3-coder:30b` |
 | Workbench judge (verifies delegated work) | `workbench.judge` | `qwen3-coder:30b` |
 | Workbench executors (opencode/pi routines) | `modules/workbench/engine.ts` | `qwen3-coder:30b` |
 | Periodic agents — today / projects / people templates | `manifest.server.ts` `defaultModel` | `qwen3-coder:30b` ×5, `qwen3-coder:30b-32k` ×1 (Weekly reviewer: a 32K window, created by install.sh) |
 
-The gates + hardcoded judges call Ollama **directly in code** (they bypass the `ai_routes` table), so they are NOT editable from Settings — pinned local-and-free by design because they fire constantly.
+Every one of these is a route, editable in **Settings → AI Routing**. They are seeded local-and-free because they fire constantly; one-shot text jobs go through `completeText()` in `core/ai/routing.ts` (no tools, temperature 0, reasoning off). `decide` only works on Ollama (it uses Ollama's `/v1/systemone` endpoint); pointing it at another provider turns the decision tier off and area classify falls through to `area.classify`.
 
 `workbench.judge` stays on the Ollama coder (not the MLX coder) on purpose: it always runs right after the Workbench **executor**, which uses the Ollama coder — so both share one resident copy instead of spinning up a second copy in LM Studio.
 
@@ -67,6 +70,12 @@ The gates + hardcoded judges call Ollama **directly in code** (they bypass the `
 
 ---
 
+## Fallbacks
+
+A route can name a **fallback** provider + model (Settings → AI Routing, the second line of each row; stored as `ai_routes.options.fallback`). `runTask` reruns the job on the fallback only when the primary fails **before producing any output** — a free tier out of quota, a server that's down — never mid-answer. Seeded fallbacks: `knowledge.enrich` → MLX `qwen3-coder-30b-a3b-instruct`; `ask` and `project.advisor` → Ollama `qwen3-coder:30b`. Setting a route's fallback to "none" is kept; the seed never re-adds it.
+
+---
+
 ## Maintaining this doc (where the truth lives)
 
 This table is a snapshot; the actual routing lives in code + DB. When you change routing, update this file from these sources:
@@ -76,11 +85,11 @@ This table is a snapshot; the actual routing lives in code + DB. When you change
    psql "$DATABASE_URL" -tAc "select provider, model, string_agg(task_key,', ' order by task_key) from ai_routes group by provider, model order by provider;"
    ```
    Seed defaults (for a fresh DB) are in `src/core/ai/routing.ts` (`DEFAULTS`). Defaults intentionally target **Ollama** as the assumed-present baseline; MLX is an opt-in the user sets per-route in Settings, stored in `ai_routes`.
-2. **Hardcoded local calls** (bypass routes) — grep to re-find them:
+2. **Direct local calls** (bypass routes) — grep to re-find them:
    ```bash
    grep -rn "OLLAMA_BASE\|11434" src --include=*.ts | grep -v node_modules
    ```
-   Currently: `core/area-classify.ts`, `modules/ask/links.ts`, `modules/inbox/verify.ts` (all `qwen3:8b`), `core/embeddings.ts` (`/api/embeddings`), `modules/workbench/engine.ts`.
+   None of them hardcodes a chat model any more: `core/embeddings.ts` (embedding model in Settings), `core/ai/decide.ts` (model from the `decide` route), `modules/workbench/` (executor config + the research adapter, model chosen per task), and keep-alive/health plumbing.
 3. **Agent-template default models**: `grep -rn 'defaultModel:' src/modules/*/manifest.server.ts`.
 4. **Embedding model**: `DEFAULT_EMBEDDING_MODEL` in `src/core/embeddings.ts`.
 5. **MLX provider + endpoint**: `src/core/ai/mlx.ts` (base URL, `reasoning_effort`), plus the `mlx_base_url` / `mlx_models` app settings.

@@ -16,7 +16,7 @@ import { recordUsage } from "./model-track";
 import type { ModelTrack } from "./provider";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-export const DECIDE_MODEL = process.env.AIOS_DECIDE_MODEL ?? "laya:421m-typed-decisions-mlx-fp16";
+const MODEL_TTL_MS = 60_000;
 /** Words kept per option description, tried in turn: one question's options
  *  share a 240-token budget (server-enforced), so long label sets get terser. */
 const OPTION_WORDS = [40, 16, 8, 4];
@@ -32,6 +32,7 @@ export interface ChoiceQuestion {
 export interface Decision {
   answers: Record<string, ChoiceAnswer>;
   tokensIn: number;
+  model: string;
 }
 
 export interface ChoiceAnswer {
@@ -42,6 +43,20 @@ export interface ChoiceAnswer {
 }
 
 let unavailableUntil = 0;
+// Small memo so a sweep's per-item calls don't each hit ai_routes.
+let modelCache: { value: string | null; at: number } | null = null;
+
+/** The model on the "decide" route (Settings → AI Routing; seeded from
+ *  AIOS_DECIDE_MODEL), or null when it is routed off Ollama — the endpoint is
+ *  Ollama-only, so that turns the first tier off. */
+export async function getDecideModel(): Promise<string | null> {
+  if (modelCache && Date.now() - modelCache.at < MODEL_TTL_MS) return modelCache.value;
+  const { resolveRoute } = await import("./routing");
+  const route = await resolveRoute("decide");
+  const value = route.providerId === "ollama" ? route.model : null;
+  modelCache = { value, at: Date.now() };
+  return value;
+}
 
 function clip(criteria: Record<string, string | null>, words: number): Record<string, string | null> {
   return Object.fromEntries(
@@ -61,9 +76,11 @@ export async function decide(
   track?: ModelTrack,
 ): Promise<Decision | null> {
   if (Date.now() < unavailableUntil || !state.trim()) return null;
+  const model = await getDecideModel().catch(() => null);
+  if (!model) return null;
   for (const words of OPTION_WORDS) {
     const body = {
-      model: DECIDE_MODEL,
+      model,
       state,
       questions: Object.fromEntries(
         Object.entries(questions).map(([k, q]) => [k, { ...q, criteria: clip(q.criteria, words) }]),
@@ -80,7 +97,7 @@ export async function decide(
       if (!res.ok) {
         const err = await res.text();
         if (/budget/i.test(err)) continue; // option text too long → shorter descriptions
-        // Not pulled, or AIOS_DECIDE_MODEL names a chat model → stop asking for a while.
+        // Not pulled, or the route names a chat model → stop asking for a while.
         if (res.status === 404 || /not found|not a .*decision model/i.test(err)) {
           unavailableUntil = Date.now() + UNAVAILABLE_MS;
         }
@@ -92,8 +109,8 @@ export async function decide(
       };
       if (!data.answers) return null;
       const tokensIn = data.usage?.input_tokens ?? 0;
-      if (track) void recordUsage("ollama", DECIDE_MODEL, track, tokensIn, 0);
-      return { answers: data.answers, tokensIn };
+      if (track) void recordUsage("ollama", model, track, tokensIn, 0);
+      return { answers: data.answers, tokensIn, model };
     } catch {
       return null;
     }

@@ -3,6 +3,7 @@
 import { createTask } from "@/modules/workbench/actions";
 import { getToolsByNames } from "@/core/ai/tool-registry";
 import { db } from "@/core/db/client";
+import { resolveRoute } from "@/core/ai/routing";
 
 /**
  * The deep investment report is STAGED to stay reliable on a local model:
@@ -16,15 +17,14 @@ import { db } from "@/core/db/client";
  *   all the data and the finished chart embeds, so the model just composes the
  *   prose. No gathering, no tool loop — the thing that used to hang.
  *
- * Runs on the faithful MLX abliterated model (needs LM Studio warm). Editable
+ * Runs on the "investments.report" route (Settings → AI Routing). Editable
  * per-attempt in the Workbench — retry on Claude for a heavier pass.
  */
-// The staged report is a single-shot WRITE from pre-provided data. It runs on
-// OLLAMA's qwen3-coder:30b, not LM Studio/MLX: a long MLX generation kept getting
-// dropped mid-stream ("Model unloaded" → TypeError: terminated) as LM Studio's
-// JIT evicted the model under memory pressure. Ollama keeps the model resident
-// (keep-alive) and streams the full report without eviction (~1min).
-const REPORT_MODEL = "ollama/qwen3-coder:30b";
+// The staged report is a single-shot WRITE from pre-provided data. The route is
+// seeded to OLLAMA's qwen3-coder:30b, not LM Studio/MLX: a long MLX generation
+// kept getting dropped mid-stream ("Model unloaded" → TypeError: terminated) as
+// LM Studio's JIT evicted the model under memory pressure. Ollama keeps the
+// model resident (keep-alive) and streams the full report without eviction.
 
 type ToolResult = Record<string, unknown>;
 
@@ -198,11 +198,13 @@ export async function createInvestmentReport(): Promise<{ id: string }> {
     .filter(Boolean)
     .join("\n");
 
+  const route = await resolveRoute("investments.report");
   const task = await createTask({
     prompt,
     taskType: "docs",
     executorId: "native",
-    model: REPORT_MODEL,
+    // Workbench model ids are namespaced by provider ("ollama/qwen3-coder:30b").
+    model: `${route.providerId}/${route.model}`,
     createdFrom: "investments",
   });
   return { id: task.id };

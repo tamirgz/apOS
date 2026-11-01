@@ -5,6 +5,7 @@
  */
 import { boxLength, capacity, draftDay, firstSlot, workWindow, type Candidate, type Interval } from "../src/modules/today/draft-day";
 import { TIMEBOX_DEFAULTS } from "../src/modules/today/timebox-settings";
+import { lanes, openTime } from "../src/modules/today/timeline";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: unknown) {
@@ -105,6 +106,29 @@ check(
   const s = firstSlot(30, at(9, 5), at(18), taken);
   check("firstSlot skips a gap too small and lands on the grid", !!s && hhmm(s.start) === "11:00", s && hhmm(s.start));
   check("firstSlot returns null when nothing fits", firstSlot(60, at(9), at(10), taken) === null);
+}
+
+// 9. The timeline layout: buffers vs unboxed time, and lanes for clashes.
+{
+  const taken = [iv([9, 0], [10, 0]), iv([10, 15], [11, 0]), iv([11, 2], [12, 0])];
+  const open = openTime(taken, at(9), at(14));
+  check(
+    "a 15m gap is a buffer, 2h is unboxed, a 2m sliver is dropped",
+    open.map((g) => `${g.kind}:${g.minutes}`).join() === "buffer:15,unboxed:120",
+    open.map((g) => `${g.kind}:${g.minutes}`),
+  );
+  const t = (h: number, m = 0) => at(h, m).getTime();
+  const l = lanes([
+    { start: t(9), end: t(10) },
+    { start: t(9, 30), end: t(10, 30) },
+    { start: t(10), end: t(11) },
+    { start: t(13), end: t(14) },
+  ]);
+  check(
+    "clashing blocks share lanes; a lone block gets the whole column",
+    l.map((x) => `${x.lane}/${x.of}`).join() === "0/2,1/2,0/2,0/1",
+    l,
+  );
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");

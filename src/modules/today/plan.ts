@@ -3,9 +3,11 @@ import { db } from "@/core/db/client";
 import { calendarEvents } from "@/modules/calendar/schema";
 import { ACTIVE_STATUSES, OPEN_STATUSES, priorityRank, tasks } from "@/modules/tasks/schema";
 import { identifierOf, projectKeyMap } from "@/modules/tasks/core";
+import { projects } from "@/modules/projects/schema";
 import { boxLength, capacity, workWindow, type Candidate, type Interval } from "./draft-day";
 import { attentionItems, timeboxes, type Timebox, type TimeboxKind } from "./schema";
 import { getTimeboxSettings, type TimeboxSettings } from "./timebox-settings";
+import { openTime } from "./timeline";
 
 /**
  * Data for the Plan screen (timeboxing Phase 1): one local day's busy time,
@@ -21,6 +23,7 @@ export interface BusyBlock extends Interval {
   id: string;
   title: string;
   color: string | null;
+  source: "local" | "ics" | "google";
 }
 
 export interface PlanCandidate {
@@ -29,6 +32,10 @@ export interface PlanCandidate {
   title: string;
   /** "ETHOS-12" for work items. */
   identifier: string | null;
+  /** The work item's project name. */
+  project: string | null;
+  /** The estimate in points, when there is one. */
+  points: number | null;
   href: string | null;
   kind: TimeboxKind;
   minutes: number;
@@ -48,12 +55,17 @@ export interface PlanDay {
   busy: BusyBlock[];
   allDay: { id: string; title: string }[];
   boxes: Timebox[];
+  /** Box id → the project name of its work item. */
+  boxProjects: Record<string, string>;
   due: PlanCandidate[];
   dueMore: number;
   mine: PlanCandidate[];
   needs: PlanCandidate[];
-  /** Minutes free and boxed before the work shutdown, for the capacity meter. */
-  capacity: { free: number; boxed: number };
+  /**
+   * Minutes before the work shutdown, for the time bar: free (not in a meeting),
+   * boxed, short buffers between things, and the unboxed rest.
+   */
+  capacity: { free: number; boxed: number; buffers: number; unboxed: number };
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -91,6 +103,7 @@ export async function busyOn(day: Date): Promise<{ busy: BusyBlock[]; allDay: { 
       allDay: calendarEvents.allDay,
       transparent: calendarEvents.transparent,
       color: calendarEvents.color,
+      source: calendarEvents.source,
       attendees: calendarEvents.attendees,
     })
     .from(calendarEvents)
@@ -113,6 +126,7 @@ export async function busyOn(day: Date): Promise<{ busy: BusyBlock[]; allDay: { 
         start: r.startAt,
         end: r.endAt ?? new Date(r.startAt.getTime() + 30 * 60_000),
         color: r.color,
+        source: r.source,
       })),
     allDay: rows.filter((r) => r.allDay && !declined(r)).map((r) => ({ id: r.id, title: r.title })),
   };
@@ -131,12 +145,14 @@ export async function boxesOn(day: Date): Promise<Timebox[]> {
 export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
   const day = parseDay(dayParam);
   const { start, end } = dayRange(day);
-  const [settings, { busy, allDay }, boxes, keys] = await Promise.all([
+  const [settings, { busy, allDay }, boxes, keys, projectRows] = await Promise.all([
     getTimeboxSettings(),
     busyOn(day),
     boxesOn(day),
     projectKeyMap(db),
+    db.select({ id: projects.id, name: projects.name }).from(projects),
   ]);
+  const projectNames = new Map(projectRows.map((p) => [`projects:${p.id}`, p.name]));
   const boxedTasks = new Set(boxes.map((b) => b.taskId).filter(Boolean));
   const boxedCards = new Set(boxes.map((b) => b.attentionId).filter(Boolean));
 
@@ -193,6 +209,8 @@ export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
       ref: `task:${t.id}`,
       title: t.shortTitle || t.title,
       identifier: identifierOf(t, keys),
+      project: (t.projectRef && projectNames.get(t.projectRef)) || null,
+      points: t.estimate,
       href: `/m/tasks/${t.id}`,
       kind: taskKind(t.estimate),
       minutes,
@@ -204,6 +222,13 @@ export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
   };
   const today = parseDay(null);
   const window = workWindow(day, new Date(), settings);
+  const boxSpans = boxes.map((b) => ({ start: b.startAt, end: b.endAt }));
+  const { free, boxed } = capacity(window, busy, boxSpans);
+  const buffers = window
+    ? openTime([...busy, ...boxSpans], window.start, window.end)
+        .filter((g) => g.kind === "buffer")
+        .reduce((n, g) => n + g.minutes, 0)
+    : 0;
 
   return {
     date: localDate(day),
@@ -212,6 +237,7 @@ export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
     busy,
     allDay,
     boxes,
+    boxProjects: await boxProjectsOf(boxes, projectNames),
     due: due.map(fromTask),
     dueMore: Math.max(0, dueCount - due.length),
     mine: mine.map(fromTask),
@@ -219,6 +245,8 @@ export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
       ref: `attention:${c.id}`,
       title: c.title,
       identifier: null,
+      project: null,
+      points: null,
       href: "/m/today/queue",
       kind: "admin" as const,
       minutes: 30,
@@ -227,12 +255,22 @@ export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
       mine: true,
       boxed: boxedCards.has(c.id),
     })),
-    capacity: capacity(
-      window,
-      busy,
-      boxes.map((b) => ({ start: b.startAt, end: b.endAt })),
-    ),
+    capacity: { free, boxed, buffers, unboxed: Math.max(0, free - boxed - buffers) },
   };
+}
+
+/** Box id → its work item's project name, for the box's second line. */
+async function boxProjectsOf(boxes: Timebox[], names: Map<string, string>): Promise<Record<string, string>> {
+  const ids = [...new Set(boxes.map((b) => b.taskId).filter((id): id is string => !!id))];
+  if (!ids.length) return {};
+  const rows = await db.select({ id: tasks.id, projectRef: tasks.projectRef }).from(tasks).where(inArray(tasks.id, ids));
+  const byTask = new Map(rows.map((r) => [r.id, r.projectRef ? names.get(r.projectRef) : undefined]));
+  const out: Record<string, string> = {};
+  for (const b of boxes) {
+    const name = b.taskId ? byTask.get(b.taskId) : undefined;
+    if (name) out[b.id] = name;
+  }
+  return out;
 }
 
 /**

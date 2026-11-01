@@ -9,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Eraser,
-  Lock,
   Plus,
   Star,
   Trash2,
@@ -18,10 +17,12 @@ import {
 import { act } from "@/core/ui/feedback";
 import { cn } from "@/core/ui/cn";
 import { useLiveEvents } from "@/core/ui/useLiveEvents";
-import { atTime, firstSlot, SLOT_MIN, type Interval } from "../draft-day";
+import { atTime, ceilSlot, firstSlot, SLOT_MIN, type Interval } from "../draft-day";
 import type { PlanCandidate, PlanDay } from "../plan";
 import type { Timebox, TimeboxKind } from "../schema";
+import { lanes, openTime } from "../timeline";
 import { KIND_META } from "../timebox-kinds";
+import { BoxBlock, BusyBlock, dur, GapBlock, HATCH, hhmm, NowLine, pad, TimeBar, tint } from "./DayTimeline";
 import {
   clearDrafts,
   createBox,
@@ -37,19 +38,13 @@ const KINDS = Object.keys(KIND_META) as TimeboxKind[];
 const SLOT = SLOT_MIN * MIN;
 /** Vertical scale: 15 minutes = 18px. */
 const PX_PER_MIN = 1.2;
-const GUTTER = 48;
+const GUTTER = 56;
 const DRAG_SLOP = 3;
 
 type Span = { start: number; end: number };
 type BoxDrag = { id: string; mode: "move" | "resize"; steps: number };
 type NewDrag = { cand: PlanCandidate; x: number; y: number; start: number | null };
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const hhmm = (t: number | Date) => {
-  const d = new Date(t);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
-const dur = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}h${min % 60 ? ` ${pad(min % 60)}m` : ""}` : `${min}m`);
 const dayOf = (date: string) => {
   const [y, m, d] = date.split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -223,11 +218,33 @@ export function PlanBoard({ plan }: { plan: PlanDay }) {
   const shutdown = atTime(day, plan.settings.workEnd).getTime();
   const preview = newDrag?.start != null ? { start: newDrag.start, end: newDrag.start + newDrag.cand.minutes * MIN } : null;
 
+  // Busy events and boxes share the column; clashes split it into lanes.
+  const blocks = [
+    ...plan.busy.map((b) => ({ busy: b, box: null, start: new Date(b.start).getTime(), end: new Date(b.end).getTime() })),
+    ...plan.boxes.map((b) => ({ busy: null, box: b, ...shown(b) })),
+  ].filter((x) => Math.min(x.end, close) > Math.max(x.start, origin));
+  const laneOf = lanes(blocks);
+  const across = (i: number): React.CSSProperties => {
+    const { lane, of } = laneOf[i];
+    const width = `(100% - ${GUTTER + 10}px)`;
+    return { left: `calc(${GUTTER + 4}px + ${width} * ${lane / of})`, width: `calc(${width} / ${of} - ${of > 1 ? 3 : 0}px)` };
+  };
+  // Open time from now (today) to the shutdown: buffers and unboxed room.
+  const openFrom = plan.isToday && now != null ? Math.max(origin, ceilSlot(new Date(now)).getTime()) : origin;
+  const open = plan.settings.days.includes(day.getDay())
+    ? openTime(
+        blocks.map((x) => ({ start: new Date(x.start), end: new Date(x.end) })),
+        new Date(openFrom),
+        new Date(Math.min(shutdown, close)),
+      )
+    : [];
+  const column: React.CSSProperties = { left: GUTTER + 4, right: 6 };
+  const longDay = day.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+
   return (
-    <div className={cn("flex flex-col gap-4", (drag || newDrag) && "select-none", newDrag && "cursor-grabbing")}>
-      <header className="flex flex-wrap items-center gap-3 px-1">
-        <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-solar">plan</p>
-        <div className="flex items-center gap-1">
+    <div className={cn("glass overflow-hidden rounded-2xl", (drag || newDrag) && "select-none", newDrag && "cursor-grabbing")}>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-white/6 bg-white/2 px-4 py-3">
+        <div className="flex items-center">
           <Link
             href={`/m/today/plan/${shiftDate(plan.date, -1)}`}
             aria-label="Previous day"
@@ -235,9 +252,6 @@ export function PlanBoard({ plan }: { plan: PlanDay }) {
           >
             <ChevronLeft className="size-4" />
           </Link>
-          <h1 className="min-w-44 text-center font-display text-lg font-semibold text-ink">
-            {day.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
-          </h1>
           <Link
             href={`/m/today/plan/${shiftDate(plan.date, 1)}`}
             aria-label="Next day"
@@ -245,17 +259,29 @@ export function PlanBoard({ plan }: { plan: PlanDay }) {
           >
             <ChevronRight className="size-4" />
           </Link>
-          {!plan.isToday && (
-            <Link
-              href="/m/today/plan"
-              className="ml-1 rounded-md border border-white/8 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:text-ink"
-            >
-              today
-            </Link>
-          )}
         </div>
-        <Capacity {...plan.capacity} cap={plan.settings.draftCap} workEnd={plan.settings.workEnd} />
+        <h1 className="font-display text-lg font-semibold text-ink">
+          Timebox {plan.isToday ? "today" : day.toLocaleDateString(undefined, { weekday: "long" })}
+        </h1>
+        <span className="font-mono text-[11px] text-ink-dim">
+          {longDay} · boxable {plan.settings.start}–{plan.settings.end} · shutdown {plan.settings.workEnd}
+        </span>
+        {!plan.isToday && (
+          <Link
+            href="/m/today/plan"
+            className="rounded-md border border-white/8 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:text-ink"
+          >
+            today
+          </Link>
+        )}
         <div className="ml-auto flex items-center gap-2">
+          <ActionButton
+            icon={Eraser}
+            label="Clear drafts"
+            quiet
+            disabled={saving || drafts.length === 0}
+            onClick={() => run(() => clearDrafts(plan.date), "Couldn't clear the drafts")}
+          />
           <ActionButton
             icon={Wand2}
             label="Draft my day"
@@ -266,37 +292,42 @@ export function PlanBoard({ plan }: { plan: PlanDay }) {
                 r.drafted ? `Drafted ${r.drafted} box${r.drafted === 1 ? "" : "es"}` : "Nothing to draft — no ★ Mine or Needs-you work fits",
               )
             }
-            tone="plasma"
-          />
-          <ActionButton
-            icon={Eraser}
-            label="Clear drafts"
-            disabled={saving || drafts.length === 0}
-            onClick={() => run(() => clearDrafts(plan.date), "Couldn't clear the drafts")}
           />
           <ActionButton
             icon={CalendarCheck}
             label={`Lock plan${drafts.length ? ` (${drafts.length})` : ""}`}
             title="Turn the drafts into planned boxes and send them to Google"
+            primary
             disabled={saving || drafts.length === 0}
             onClick={() =>
               run(() => lockPlan(plan.date), "Couldn't lock the plan", (r: { locked: number }) =>
                 `Locked ${r.locked} box${r.locked === 1 ? "" : "es"} — sending to Google`,
               )
             }
-            tone="solar"
           />
         </div>
       </header>
 
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(280px,360px)_1fr]">
-        <aside className="glass flex max-h-[78vh] flex-col gap-4 overflow-y-auto rounded-2xl p-4">
+      <div className="border-b border-white/6 px-4 py-3">
+        <TimeBar {...plan.capacity} cap={plan.settings.draftCap} workEnd={plan.settings.workEnd} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(300px,350px)_1fr]">
+        <aside className="flex max-h-[74vh] flex-col gap-1 overflow-y-auto border-white/6 p-3.5 lg:border-r">
           <AddBox onAdd={(title) => placeNext({ title, minutes: 30, kind: "personal" })} disabled={saving} />
           <CandidateList
-            title="Due"
+            title="Due or overdue"
             items={plan.due}
             more={plan.dueMore}
             empty="nothing due"
+            onBegin={beginCandidate}
+            onPlace={placeNext}
+            onStar={(id) => run(() => toggleMine(id), "Couldn't change the owner")}
+          />
+          <CandidateList
+            title="My items"
+            items={plan.mine}
+            empty="★ an item to make it yours"
             onBegin={beginCandidate}
             onPlace={placeNext}
             onStar={(id) => run(() => toggleMine(id), "Couldn't change the owner")}
@@ -308,17 +339,9 @@ export function PlanBoard({ plan }: { plan: PlanDay }) {
             onBegin={beginCandidate}
             onPlace={placeNext}
           />
-          <CandidateList
-            title="Mine"
-            items={plan.mine}
-            empty="★ an item to make it yours"
-            onBegin={beginCandidate}
-            onPlace={placeNext}
-            onStar={(id) => run(() => toggleMine(id), "Couldn't change the owner")}
-          />
         </aside>
 
-        <section className="glass flex flex-col overflow-hidden rounded-2xl">
+        <section className="flex min-w-0 flex-col">
           {selected && (
             <BoxDetail
               box={selected}
@@ -335,102 +358,94 @@ export function PlanBoard({ plan }: { plan: PlanDay }) {
           {plan.allDay.length > 0 && (
             <div className="flex flex-wrap gap-1.5 border-b border-white/6 px-4 py-2">
               {plan.allDay.map((e) => (
-                <span key={e.id} dir="auto" className="rounded-md bg-white/5 px-2 py-0.5 text-xs text-ink-dim">
+                <span key={e.id} dir="auto" className="rounded-md px-2 py-0.5 text-xs text-ink-dim" style={{ background: HATCH }}>
                   {e.title}
                 </span>
               ))}
             </div>
           )}
-          <div ref={scrollRef} data-testid="plan-timeline" className="relative max-h-[72vh] overflow-y-auto">
-            <div className="relative" style={{ height }}>
-              {/* The focus window and the work shutdown. */}
+          <div ref={scrollRef} data-testid="plan-timeline" className="relative max-h-[74vh] overflow-y-auto">
+            <div className="relative my-3" style={{ height }}>
+              {/* The focus window: deep work goes here first. */}
               <div
-                className="absolute right-0 bg-violet/4"
-                style={{ left: GUTTER, top: yOf(focus.start), height: Math.max(0, yOf(focus.end) - yOf(focus.start)) }}
+                className="absolute bg-violet/5"
+                style={{ ...column, top: yOf(focus.start), height: Math.max(0, yOf(focus.end) - yOf(focus.start)) }}
               />
               {hours.map((t) => (
-                <div key={t} className="absolute right-0 left-0 border-t border-white/6" style={{ top: yOf(t) }}>
-                  <span className="absolute -top-2 left-2 font-mono text-[10px] tabular-nums text-ink-faint">{hhmm(t)}</span>
+                <div key={t} className="absolute right-0 border-t border-white/6" style={{ left: GUTTER - 6, top: yOf(t) }}>
+                  <span className="absolute -top-[7px] font-mono text-[10px] tabular-nums text-ink-faint" style={{ right: `calc(100% + 6px)` }}>
+                    {hhmm(t)}
+                  </span>
                 </div>
               ))}
+
+              {open.map((g) => (
+                <GapBlock
+                  key={g.start.getTime()}
+                  gap={g}
+                  className="absolute"
+                  style={{ ...column, top: yOf(g.start.getTime()) + 1, height: Math.max(10, yOf(g.end.getTime()) - yOf(g.start.getTime()) - 2) }}
+                />
+              ))}
+
               {shutdown > origin && shutdown < close && (
-                <div className="absolute right-0 border-t border-dashed border-solar/40" style={{ left: GUTTER, top: yOf(shutdown) }}>
-                  <span className="absolute -top-4 right-2 font-mono text-[9px] uppercase tracking-widest text-solar/70">
-                    shutdown
-                  </span>
+                <div
+                  className="absolute flex items-center rounded-md px-2.5 font-mono text-[10px] text-solar"
+                  style={{ ...column, top: yOf(shutdown), height: 16, borderLeft: "3px solid var(--color-solar)", background: tint("var(--color-solar)", 12) }}
+                >
+                  Shutdown · {plan.settings.workEnd}
                 </div>
               )}
 
-              {plan.busy.map((b) => {
-                const s = Math.max(new Date(b.start).getTime(), origin);
-                const e = Math.min(new Date(b.end).getTime(), close);
-                if (e <= s) return null;
+              {blocks.map((x, i) => {
+                const top = yOf(Math.max(x.start, origin));
+                const h = Math.max(14, yOf(Math.min(x.end, close)) - top);
+                const tall = h >= 34;
+                if (x.busy)
+                  return (
+                    <BusyBlock
+                      key={x.busy.id}
+                      title={x.busy.title}
+                      start={x.busy.start}
+                      end={x.busy.end}
+                      source={x.busy.source}
+                      tall={tall}
+                      className="absolute z-[5]"
+                      style={{ ...across(i), top, height: h - 1 }}
+                    />
+                  );
+                const b = x.box!;
                 return (
-                  <div
-                    key={b.id}
-                    title={`${b.title} · ${hhmm(b.start)}–${hhmm(b.end)}`}
-                    className="absolute right-1 flex items-start gap-1 overflow-hidden rounded-md border border-white/8 bg-white/5 px-2 py-0.5 text-[11px] text-ink-faint"
-                    style={{ left: GUTTER + 2, top: yOf(s), height: Math.max(14, yOf(e) - yOf(s)) }}
-                  >
-                    <Lock className="mt-0.5 size-3 shrink-0" />
-                    <span dir="auto" className="truncate">
-                      {b.title}
-                    </span>
-                  </div>
-                );
-              })}
-
-              {plan.boxes.map((b) => {
-                const s = shown(b);
-                const top = yOf(Math.max(s.start, origin));
-                const h = yOf(Math.min(s.end, close)) - top;
-                if (h <= 0) return null;
-                const color = KIND_META[b.kind].color;
-                const draft = b.status === "draft";
-                return (
-                  <div
+                  <BoxBlock
                     key={b.id}
                     data-box={b.id}
+                    title={b.title}
+                    start={x.start}
+                    end={x.end}
+                    kind={b.kind}
+                    endMode={b.endMode}
+                    draft={b.status === "draft"}
+                    meta={plan.boxProjects[b.id]}
+                    tall={tall}
+                    selected={selectedId === b.id}
                     onPointerDown={(e) => beginBox(e, b, "move")}
-                    className={cn(
-                      "absolute right-1 z-10 cursor-grab overflow-hidden rounded-md border px-2 py-0.5 text-xs text-ink shadow-sm transition-[box-shadow]",
-                      draft ? "border-dashed" : "border-solid",
-                      selectedId === b.id && "ring-1 ring-white/50",
-                      drag?.id === b.id && "z-20 cursor-grabbing shadow-lg",
-                    )}
-                    style={{
-                      left: GUTTER + 40,
-                      top,
-                      height: Math.max(14, h),
-                      borderColor: color,
-                      borderLeftWidth: 3,
-                      background: `color-mix(in oklab, ${color} ${draft ? 10 : 20}%, var(--color-panel))`,
-                    }}
+                    className={cn("absolute z-10 cursor-grab shadow-sm", drag?.id === b.id && "z-20 cursor-grabbing shadow-lg")}
+                    style={{ ...across(i), top, height: h - 1 }}
                   >
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink-dim">
-                        {hhmm(s.start)}–{hhmm(s.end)}
-                      </span>
-                      <span dir="auto" className="truncate font-medium">
-                        {b.title}
-                      </span>
-                      {b.endMode === "hard" && <span className="shrink-0 font-mono text-[9px] uppercase text-flare/80">hard</span>}
-                      {draft && <span className="ml-auto shrink-0 font-mono text-[9px] uppercase tracking-widest text-ink-faint">draft</span>}
-                    </div>
                     <div
                       aria-label="Resize"
                       onPointerDown={(e) => beginBox(e, b, "resize")}
                       className="absolute right-0 bottom-0 left-0 h-1.5 cursor-ns-resize hover:bg-white/20"
                     />
-                  </div>
+                  </BoxBlock>
                 );
               })}
 
               {preview && (
                 <div
-                  className="pointer-events-none absolute right-1 z-30 rounded-md border border-dashed px-2 py-0.5 font-mono text-[10px] text-ink"
+                  className="pointer-events-none absolute z-30 rounded-md border border-dashed px-2.5 py-0.5 font-mono text-[10px] text-ink"
                   style={{
-                    left: GUTTER + 40,
+                    ...column,
                     top: yOf(preview.start),
                     height: yOf(preview.end) - yOf(preview.start),
                     borderColor: KIND_META[newDrag!.cand.kind].color,
@@ -441,11 +456,7 @@ export function PlanBoard({ plan }: { plan: PlanDay }) {
                 </div>
               )}
 
-              {plan.isToday && now != null && now > origin && now < close && (
-                <div className="pointer-events-none absolute right-0 z-30 border-t border-flare" style={{ left: GUTTER - 6, top: yOf(now) }}>
-                  <span className="absolute -top-[4px] -left-[4px] size-2 rounded-full bg-flare" />
-                </div>
-              )}
+              {plan.isToday && now != null && now > origin && now < close && <NowLine style={{ left: GUTTER - 6, top: yOf(now) }} />}
             </div>
           </div>
         </section>
@@ -463,38 +474,22 @@ export function PlanBoard({ plan }: { plan: PlanDay }) {
   );
 }
 
-function Capacity({ free, boxed, cap, workEnd }: { free: number; boxed: number; cap: number; workEnd: string }) {
-  if (free === 0)
-    return <span className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">no work time left on this day</span>;
-  const pct = boxed / free;
-  const tone = pct > 1 ? "bg-flare" : pct > cap ? "bg-solar" : "bg-plasma";
-  return (
-    <div className="flex items-center gap-2" title={`Boxed time ÷ free time before ${workEnd}. Keep it under ${Math.round(cap * 100)}%.`}>
-      <div data-testid="capacity" className="relative h-2 w-40 overflow-hidden rounded-full bg-white/8">
-        <div className={cn("h-full rounded-full transition-[width]", tone)} style={{ width: `${Math.min(pct, 1) * 100}%` }} />
-        <div className="absolute top-0 h-full w-px bg-ink/70" style={{ left: `${cap * 100}%` }} />
-      </div>
-      <span className={cn("font-mono text-[10px] tabular-nums", pct > cap ? "text-solar" : "text-ink-dim")}>
-        {Math.round(pct * 100)}% · {dur(Math.round(boxed))} of {dur(Math.round(free))} before {workEnd}
-      </span>
-    </div>
-  );
-}
-
 function ActionButton({
   icon: Icon,
   label,
   title,
   disabled,
   onClick,
-  tone,
+  primary,
+  quiet,
 }: {
   icon: typeof Wand2;
   label: string;
   title?: string;
   disabled?: boolean;
   onClick: () => void;
-  tone?: "plasma" | "solar";
+  primary?: boolean;
+  quiet?: boolean;
 }) {
   return (
     <button
@@ -503,10 +498,10 @@ function ActionButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest transition disabled:opacity-35",
-        tone === "plasma" && "border-plasma/30 text-plasma hover:bg-plasma/10",
-        tone === "solar" && "border-solar/30 text-solar hover:bg-solar/10",
-        !tone && "border-white/10 text-ink-dim hover:bg-white/5 hover:text-ink",
+        "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] font-medium transition disabled:opacity-35",
+        primary && "border-plasma bg-plasma text-void hover:bg-plasma/85",
+        quiet && "border-transparent text-ink-faint hover:text-ink",
+        !primary && !quiet && "border-white/10 bg-white/4 text-ink hover:bg-white/8",
       )}
     >
       <Icon className="size-3.5" />
@@ -547,6 +542,22 @@ function AddBox({ onAdd, disabled }: { onAdd: (title: string) => void; disabled?
   );
 }
 
+const DAY = 86_400_000;
+/** "due today", "overdue 2d", "due Tue" — measured from today. */
+function dueLabel(due: Date | null): { text: string; late: boolean } | null {
+  if (!due) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(due);
+  d.setHours(0, 0, 0, 0);
+  const days = Math.round((d.getTime() - today.getTime()) / DAY);
+  if (days < 0) return { text: `overdue ${-days}d`, late: true };
+  if (days === 0) return { text: "due today", late: true };
+  return { text: `due ${days === 1 ? "tomorrow" : d.toLocaleDateString(undefined, { weekday: "short" })}`, late: false };
+}
+
+const chip = "rounded-full border px-2 font-mono text-[10px] leading-[18px]";
+
 function CandidateList({
   title,
   items,
@@ -564,82 +575,95 @@ function CandidateList({
   onPlace: (c: PlanCandidate) => void;
   onStar?: (taskId: string) => void;
 }) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   return (
     <div>
-      <p className="mb-1.5 px-1 font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+      <p className="mt-3 mb-2 px-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
         {title} <span className="text-ink-faint/70">{items.length + more || ""}</span>
       </p>
       {items.length === 0 ? (
-        <p className="px-1 py-1 font-mono text-[10px] text-ink-faint">{empty}</p>
+        <p className="px-0.5 font-mono text-[10px] text-ink-faint">{empty}</p>
       ) : (
-        <ul className="flex flex-col gap-0.5">
+        <ul className="flex flex-col gap-2">
           {items.map((c) => {
-            const overdue = c.due && new Date(c.due) < today;
+            const due = dueLabel(c.due);
             const isTask = c.ref.startsWith("task:");
             return (
               <li
                 key={c.ref}
                 data-ref={c.ref}
                 onPointerDown={(e) => onBegin(e, c)}
-                title="Drag onto the day to box it"
+                title={c.boxed ? "Boxed on this day — drag to box it again" : "Drag onto the day to box it"}
                 className={cn(
-                  "group flex cursor-grab items-center gap-1.5 rounded-lg px-1.5 py-1 transition hover:bg-white/4",
-                  c.boxed && "opacity-45",
+                  "group relative cursor-grab rounded-[9px] border border-white/8 bg-white/3 px-3 py-2 transition hover:border-white/16 hover:bg-white/5",
+                  c.boxed && "opacity-40",
                 )}
+                style={{ borderLeft: `2px solid ${KIND_META[c.kind].color}` }}
               >
-                <span className="h-4 w-0.5 shrink-0 rounded-full" style={{ background: KIND_META[c.kind].color }} />
-                {onStar && isTask && (
-                  <button
-                    type="button"
-                    aria-label={c.mine ? "Not mine" : "Mark as mine"}
-                    title={c.mine ? "Mine — click to let it go" : "Mark as mine"}
-                    onClick={() => onStar(c.ref.slice(5))}
-                    className={cn("shrink-0 transition", c.mine ? "text-gold" : "text-ink-faint/50 hover:text-gold")}
-                  >
-                    <Star className={cn("size-3.5", c.mine && "fill-current")} />
-                  </button>
-                )}
-                {c.identifier && <span className="shrink-0 font-mono text-[10px] text-ink-faint">{c.identifier}</span>}
-                <span dir="auto" className="min-w-0 flex-1 truncate text-sm text-ink-dim group-hover:text-ink">
-                  {c.title}
-                </span>
-                {c.tooBig && (
-                  <span className="shrink-0 font-mono text-[9px] uppercase text-solar" title="5+ points won't fit one box">
-                    too big, split it
+                <div className="flex items-start justify-between gap-2">
+                  <span dir="auto" className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug text-ink">
+                    {c.title}
                   </span>
-                )}
-                {overdue && <span className="shrink-0 font-mono text-[9px] uppercase text-flare">overdue</span>}
-                <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink-faint">{dur(c.minutes)}</span>
-                {c.boxed ? (
-                  <span className="shrink-0 font-mono text-[9px] uppercase text-plasma">boxed</span>
-                ) : (
-                  <button
-                    type="button"
-                    aria-label={`Box ${c.title} at the next free slot`}
-                    title="Box it at the next free slot"
-                    onClick={() => onPlace(c)}
-                    className="shrink-0 rounded p-0.5 text-ink-faint opacity-0 transition group-hover:opacity-100 hover:text-plasma focus:opacity-100"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                )}
-                {c.href && (
-                  <Link
-                    href={c.href}
-                    aria-label="Open"
-                    className="shrink-0 rounded p-0.5 text-ink-faint opacity-0 transition group-hover:opacity-100 hover:text-ink focus:opacity-100"
-                  >
-                    <ArrowUpRight className="size-3.5" />
-                  </Link>
-                )}
+                  <span className="mt-px shrink-0 font-mono text-[11px] tabular-nums text-ink-dim">
+                    {c.tooBig && c.points ? `${c.points} pts → ${dur(c.minutes)}+` : `~${dur(c.minutes)}`}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {due && <span className={cn(chip, due.late ? "border-flare/35 text-flare" : "border-white/10 text-ink-dim")}>{due.text}</span>}
+                  {c.project && <span className={cn(chip, "border-white/10 text-ink-dim")}>{c.project}</span>}
+                  {!isTask && <span className={cn(chip, "border-solar/35 text-solar")}>attention card</span>}
+                  {onStar && isTask && (
+                    <button
+                      type="button"
+                      aria-label={c.mine ? "Not mine" : "Mark as mine"}
+                      title={c.mine ? "Mine — click to let it go" : "Mark as mine"}
+                      onClick={() => onStar(c.ref.slice(5))}
+                      className={cn(
+                        chip,
+                        "flex items-center gap-1 transition",
+                        c.mine ? "border-ion/35 text-ion" : "border-transparent text-ink-faint/60 hover:text-gold",
+                      )}
+                    >
+                      <Star className={cn("size-2.5", c.mine && "fill-current")} />
+                      {c.mine && "mine"}
+                    </button>
+                  )}
+                  {c.tooBig && (
+                    <span className={cn(chip, "border-solar/35 text-solar")} title="5+ points won't fit one box">
+                      too big, split it
+                    </span>
+                  )}
+                  {c.identifier && <span className="font-mono text-[10px] text-ink-faint">{c.identifier}</span>}
+                  <span className="absolute right-1.5 bottom-1.5 flex items-center gap-0.5 rounded-md bg-panel/90 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+                    {c.boxed ? (
+                      <span className="sr-only">boxed</span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Box ${c.title} at the next free slot`}
+                        title="Box it at the next free slot"
+                        onClick={() => onPlace(c)}
+                        className="rounded p-0.5 text-ink-faint transition hover:text-plasma"
+                      >
+                        <Plus className="size-3.5" />
+                      </button>
+                    )}
+                    {c.href && (
+                      <Link
+                        href={c.href}
+                        aria-label="Open"
+                        className="rounded p-0.5 text-ink-faint transition hover:text-ink"
+                      >
+                        <ArrowUpRight className="size-3.5" />
+                      </Link>
+                    )}
+                  </span>
+                </div>
               </li>
             );
           })}
         </ul>
       )}
-      {more > 0 && <p className="px-1 pt-1 font-mono text-[10px] text-ink-faint">+{more} more due</p>}
+      {more > 0 && <p className="px-0.5 pt-2 font-mono text-[10px] text-ink-faint">+{more} more due</p>}
     </div>
   );
 }

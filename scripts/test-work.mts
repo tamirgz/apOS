@@ -226,6 +226,44 @@ try {
     }
   });
 
+  await check("cycles: a finished cycle shows the share of its plan that was done", async () => {
+    const now = Date.now();
+    const cur = await createCycle(db, { name: "ZZ plan", startsAt: new Date(now - 1 * DAY), endsAt: new Date(now + 5 * DAY), projectId: p.id });
+    const next = await createCycle(db, { name: "ZZ plan next", startsAt: new Date(now + 6 * DAY), endsAt: new Date(now + 12 * DAY), projectId: p.id });
+    try {
+      const its = [];
+      for (const t of ["ZZ p1", "ZZ p2", "ZZ p3"]) its.push(await createWorkItem(db, { title: t, projectRef: ref, status: "todo", cycleId: cur.id }, "user"));
+      await updateWorkItem(db, its[0].id, { status: "done" }, "user");
+      assert.equal(await rollOverCycle(db, cur.id, next.id), 2, "the two open items move on");
+      // What the cycle shows: its plan when it has one, else the old done-of-members count.
+      const shown = async (id: string) => {
+        const c = (await listCycles(db, { projectId: p.id })).find((x) => x.id === id)! as any;
+        return c.plan ? `${c.plan.plannedDone} of ${c.plan.planned}` : `${c.done} of ${c.total}`;
+      };
+      const was = await shown(cur.id);
+      assert.equal(was, "1 of 3", `the old cycle must show 1 of 3 planned done; today it shows ${was}`);
+      const old = (await listCycles(db, { projectId: p.id })).find((x) => x.id === cur.id)!.plan!;
+      assert.equal(old.ratio, 1 / 3);
+      assert.equal(old.carriedOver, 2);
+      assert.deepEqual(old.carriedTo.map((x) => [x.id, x.count]), [[next.id, 2]]);
+      const moves = await db.select().from(taskActivity).where(and(eq(taskActivity.taskId, its[1].id), eq(taskActivity.field, "cycleId")));
+      assert.ok(moves.some((m) => m.fromValue === "ZZ plan" && m.toValue === "ZZ plan next"), "the carry is in the item's history");
+      // A carried item done in the next cycle counts there, and never back in the old one.
+      await db.update(tasks).set({ status: "done", completedAt: new Date(now + 7 * DAY) }).where(eq(tasks.id, its[1].id));
+      await reconcileDoneCycles(db, { projectId: p.id });
+      assert.equal(await shown(cur.id), "1 of 3", "reconcile leaves the old cycle's numbers alone");
+      assert.equal(await shown(next.id), "1 of 2", "the next cycle planned the two carried items and finished one");
+      // An item added after the lock is "added", not planned.
+      const late = await createWorkItem(db, { title: "ZZ late", projectRef: ref, status: "todo", cycleId: next.id }, "user");
+      await db.execute(sql`update cycle_membership set joined_at = ${new Date(now + 8 * DAY).toISOString()} where task_id = ${late.id}`);
+      const nx = (await listCycles(db, { projectId: p.id })).find((x) => x.id === next.id)!.plan!;
+      assert.deepEqual([nx.planned, nx.added, nx.addedDone], [2, 1, 0]);
+    } finally {
+      await deleteCycle(db, next.id);
+      await deleteCycle(db, cur.id);
+    }
+  });
+
   await check("workbench write-back: review → In review once; done → Done", async () => {
     const [wb] = await db
       .insert(workbenchTasks)

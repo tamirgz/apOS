@@ -385,8 +385,16 @@ function CycleHero({
                 </span>
               </div>
             )}
-            <p className="-mt-1 mb-2 text-xs text-ink-faint">{unitNote(m.unit, m.items.done + m.items.review + m.items.doing + m.items.todo, m.unestimated)}</p>
-            <CycleBar m={m} big />
+            {c.status === "completed" ? (
+              <div className="wk-bar !h-2.5" role="img" aria-label={c.plan ? `${c.plan.plannedDone} of ${c.plan.planned} planned done` : "plan history incomplete"}>
+                {c.plan && c.plan.planned > 0 && <b style={{ width: `${planPct(c.plan)}%`, background: "var(--color-plasma)" }} />}
+              </div>
+            ) : (
+              <>
+                <p className="-mt-1 mb-2 text-xs text-ink-faint">{unitNote(m.unit, m.items.done + m.items.review + m.items.doing + m.items.todo, m.unestimated)}</p>
+                <CycleBar m={m} big />
+              </>
+            )}
             {c.status !== "upcoming" && (c.plan || c.status === "completed") && <PlanLine c={c} className="mt-2" />}
           </div>
           <CycleReads c={c} m={m} onOpenItem={onOpenItem} />

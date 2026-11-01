@@ -4,6 +4,7 @@ import { todayTools } from "./tools";
 import { todayJobs } from "./jobs";
 import { TodayPage } from "./pages/TodayPage";
 import { QueuePage } from "./pages/QueuePage";
+import { PlanPage } from "./pages/PlanPage";
 import { NeedsYouWidget } from "./widgets/NeedsYouWidget";
 
 export const todayServerManifest: ModuleServerManifest = {
@@ -11,6 +12,9 @@ export const todayServerManifest: ModuleServerManifest = {
   routes: {
     "": TodayPage,
     queue: QueuePage,
+    // The Plan screen: /m/today/plan is today, /m/today/plan/YYYY-MM-DD another day.
+    plan: PlanPage,
+    "plan/[id]": PlanPage,
   },
   widgets: [
     {

@@ -43,6 +43,12 @@ export async function NeedsYouWidget() {
           hygieneCount={hygiene.length}
         />
       </div>
+      <Link
+        href="/m/today/plan"
+        className="mt-2 self-end font-mono text-[9px] uppercase tracking-widest text-ink-faint transition hover:text-solar"
+      >
+        plan the day →
+      </Link>
     </div>
   );
 }

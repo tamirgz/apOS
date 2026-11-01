@@ -4,9 +4,9 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, sql } from "@/core/db/client";
 import { recordUsage } from "@/core/usage";
-import { createEvent } from "@/modules/calendar/actions";
+import { requestTimeboxSync } from "@/modules/calendar/timebox-sync";
 import { insertAttentionItem, type RaiseInput } from "./core";
-import { attentionItems, type AttentionStatus } from "./schema";
+import { attentionItems, timeboxes, type AttentionStatus } from "./schema";
 
 function revalidate() {
   revalidatePath("/");
@@ -85,18 +85,24 @@ export async function scheduleBlock(input: {
   title: string;
   startAt: Date;
   minutes?: number;
-  notes?: string;
   attentionId?: string;
 }) {
-  const endAt = new Date(input.startAt.getTime() + (input.minutes ?? 60) * 60_000);
-  await createEvent({
-    title: input.title,
+  // A block is a planned timebox: it lands on the Plan screen and the worker
+  // pushes it to the Timeboxes Google calendar.
+  await db.insert(timeboxes).values({
+    title: input.title.slice(0, 300),
+    attentionId: input.attentionId ?? null,
     startAt: input.startAt,
-    endAt,
-    notes: input.notes,
+    endAt: new Date(input.startAt.getTime() + (input.minutes ?? 60) * 60_000),
+    kind: "shallow",
+    status: "planned",
+    syncState: "pending",
   });
+  await sql.notify("calendar_changed", "timeboxes");
+  await requestTimeboxSync();
   // If this block came from an attention card, close it — it's now scheduled.
   if (input.attentionId) await setStatus(input.attentionId, "done");
   revalidatePath("/m/today");
+  revalidatePath("/m/today/plan");
 }
 

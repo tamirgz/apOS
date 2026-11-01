@@ -117,6 +117,8 @@ export const timeboxes = pgTable(
     title: text("title").notNull(),
     /** The work item this box is for, or null for a free-text box. No FK. */
     taskId: uuid("task_id"),
+    /** The Needs-you card this box is for, if any. No FK. */
+    attentionId: uuid("attention_id"),
     startAt: timestamp("start_at", { withTimezone: true }).notNull(),
     endAt: timestamp("end_at", { withTimezone: true }).notNull(),
     kind: text("kind", { enum: TIMEBOX_KINDS }).notNull().default("shallow"),

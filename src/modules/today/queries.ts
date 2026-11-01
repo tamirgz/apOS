@@ -234,7 +234,7 @@ export async function todaySummary() {
   end.setHours(23, 59, 59, 999);
   const [agenda, needs] = await Promise.all([getAgenda(start, end), listNeedsYou()]);
   return {
-    events: agenda.length,
+    events: agenda.filter((a) => a.kind === "event").length,
     needsYou: needs.length,
   };
 }

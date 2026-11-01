@@ -205,7 +205,9 @@ try {
 
   // 10. Two processes reaching an empty setting at once create ONE calendar.
   // A second module instance has its own in-process mutex, like another process.
-  const other = (await import("../src/modules/calendar/timebox-sync.ts?race")) as typeof import("../src/modules/calendar/timebox-sync");
+  // The query string makes a fresh instance; a variable keeps tsc from resolving it.
+  const racePath = "../src/modules/calendar/timebox-sync.ts?race";
+  const other = (await import(racePath)) as typeof import("../src/modules/calendar/timebox-sync");
   const creates = () => google.calls.filter((c) => c === "POST /calendars").length;
   const createsBefore = creates();
   await setSetting("timebox_calendar_id", "");

@@ -1,4 +1,5 @@
 import { Suspense, type ComponentType } from "react";
+import { cn } from "./cn";
 import { WidgetFrame } from "./WidgetFrame";
 
 export type DeckWidget = {
@@ -6,18 +7,27 @@ export type DeckWidget = {
   title: string;
   moduleId: string;
   component: ComponentType;
-  stat?: ComponentType;
-  priority: 1 | 2 | 3;
+  priority: 1 | 2;
   span: number;
   accent: string;
   href?: string;
+  /** Draws its own chrome: no frame, full width at the top of its tier. */
+  bare?: boolean;
+  /** Set when the widget's compact form applies right now: shown as a slim line instead of the card. */
+  compact?: ComponentType;
 };
 
-// Column span → static class (Tailwind can't see interpolated class names).
+// Column span / count → static class (Tailwind can't see interpolated class names).
 const SPAN_CLASS: Record<number, string> = {
   2: "lg:col-span-2",
   3: "lg:col-span-3",
   4: "lg:col-span-4",
+};
+const COLS_CLASS: Record<number, string> = {
+  1: "lg:grid-cols-1",
+  2: "lg:grid-cols-2",
+  3: "lg:grid-cols-3",
+  4: "lg:grid-cols-4",
 };
 
 function TierLabel({ children }: { children: React.ReactNode }) {
@@ -46,26 +56,23 @@ function WidgetPending() {
   );
 }
 
-function StatPending() {
-  return (
-    <div className="flex animate-pulse flex-col gap-2 px-4 py-3" aria-hidden>
-      <div className="h-2.5 w-16 rounded bg-ink/[0.06]" />
-      <div className="h-5 w-10 rounded bg-ink/[0.06]" />
-    </div>
-  );
+function BarePending() {
+  return <div className="glass h-44 animate-pulse rounded-(--radius-panel)" aria-hidden />;
 }
 
 /**
- * The tiered widget grid (the home page's layout): Now → In motion → At a
- * glance. On large screens it is height-locked to the viewport (minus the top
- * bar) and the tiers flex to fill it, so everything fits on one screen; cards
- * that overflow scroll internally. Small screens fall back to block flow.
+ * The tiered widget grid (the home page's layout): Now → In motion. On large
+ * screens it is height-locked to the viewport (minus the top bar) and the
+ * tiers flex to fill it, so everything fits on one screen; cards that
+ * overflow scroll internally. Small screens fall back to block flow.
  */
 export function DeckGrid({ widgets }: { widgets: DeckWidget[] }) {
-  const t1hero = widgets.filter((w) => w.priority === 1 && w.span < 4);
-  const t1wide = widgets.filter((w) => w.priority === 1 && w.span >= 4);
-  const tier2 = widgets.filter((w) => w.priority === 2);
-  const tier3 = widgets.filter((w) => w.priority === 3);
+  const t1bare = widgets.filter((w) => w.priority === 1 && w.bare);
+  // Wider cards lead the row.
+  const t1hero = widgets.filter((w) => w.priority === 1 && !w.bare).sort((a, b) => b.span - a.span);
+  const t2cards = widgets.filter((w) => w.priority === 2 && !w.compact);
+  const t2lines = widgets.filter((w) => w.priority === 2 && w.compact);
+  const t2cols = Math.min(4, t2cards.length + (t2lines.length ? 1 : 0));
 
   let idx = 0;
   const frame = (w: DeckWidget, extra: string) => {
@@ -88,44 +95,46 @@ export function DeckGrid({ widgets }: { widgets: DeckWidget[] }) {
 
   return (
     <div className="flex flex-col gap-4 lg:h-[calc(100dvh-5rem)] lg:gap-3.5">
-      {/* TIER 1 — Now: what needs you and today's agenda. */}
-      <section className="flex flex-col gap-2.5 lg:min-h-0 lg:flex-[1.45]">
+      {/* TIER 1 — Now: where the day stands, then what needs you. */}
+      <section className="flex flex-col gap-2.5 lg:min-h-0 lg:flex-[1.6]">
         <TierLabel>Now</TierLabel>
-        <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:auto-rows-fr lg:grid-cols-4">
-          {t1hero.map((w) =>
-            frame(w, `${SPAN_CLASS[w.span] ?? ""} min-h-[13rem] lg:min-h-0`),
-          )}
-        </div>
-        {t1wide.map((w) => (
-          <div key={`${w.moduleId}:${w.id}`} className="lg:flex-none">
-            {frame(w, "min-h-[7rem] lg:h-[6.75rem]")}
+        {t1bare.map((w) => {
+          const Widget = w.component;
+          return (
+            <div key={`${w.moduleId}:${w.id}`} className="lg:flex-none">
+              <Suspense fallback={<BarePending />}>
+                <Widget />
+              </Suspense>
+            </div>
+          );
+        })}
+        {t1hero.length > 0 && (
+          <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:auto-rows-fr lg:grid-cols-5">
+            {t1hero.map((w) => frame(w, `${SPAN_CLASS[w.span] ?? ""} min-h-[13rem] lg:min-h-0`))}
           </div>
-        ))}
+        )}
       </section>
 
       {/* TIER 2 — In motion: active work & automation, glanceable. */}
-      {tier2.length > 0 && (
+      {t2cols > 0 && (
         <section className="flex flex-col gap-2.5 lg:min-h-0 lg:flex-1">
           <TierLabel>In motion</TierLabel>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:min-h-0 lg:flex-1 lg:auto-rows-fr lg:grid-cols-4">
-            {tier2.map((w) => frame(w, "min-h-[11rem] lg:min-h-0"))}
-          </div>
-        </section>
-      )}
-
-      {/* TIER 3 — Ambient: passive counts, one slim pulse strip. */}
-      {tier3.length > 0 && (
-        <section className="flex flex-col gap-2.5 lg:flex-none">
-          <TierLabel>At a glance</TierLabel>
-          <div className="glass grid grid-cols-2 divide-x divide-y divide-white/5 overflow-hidden rounded-(--radius-panel) sm:grid-cols-4 sm:divide-y-0">
-            {tier3.map((w) => {
-              const Stat = w.stat ?? w.component;
-              return (
-                <Suspense key={`${w.moduleId}:${w.id}`} fallback={<StatPending />}>
-                  <Stat />
-                </Suspense>
-              );
-            })}
+          <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2 lg:min-h-0 lg:flex-1 lg:auto-rows-fr", COLS_CLASS[t2cols])}>
+            {t2cards.map((w) => frame(w, "min-h-[11rem] lg:min-h-0"))}
+            {t2lines.length > 0 && (
+              <div className="flex flex-col gap-3">
+                {t2lines.map((w) => {
+                  const Line = w.compact!;
+                  return (
+                    <div key={`${w.moduleId}:${w.id}`} className="glass rounded-(--radius-panel) px-4 py-2.5">
+                      <Suspense fallback={<div className="h-5 animate-pulse rounded bg-ink/[0.06]" aria-hidden />}>
+                        <Line />
+                      </Suspense>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </section>
       )}

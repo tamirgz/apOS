@@ -7,7 +7,7 @@ import { memoryDistillJobs } from "./memory-distill";
 import { AgentsPage } from "./pages/AgentsPage";
 import { AgentDetailPage } from "./pages/AgentDetailPage";
 import { AgentModelsPage } from "./pages/AgentModelsPage";
-import { AgentActivityWidget } from "./widgets/AgentActivityWidget";
+import { AgentActivityWidget, AgentsOkLine, agentsAllOk } from "./widgets/AgentActivityWidget";
 
 export const agentsServerManifest: ModuleServerManifest = {
   id: "agents",
@@ -22,6 +22,7 @@ export const agentsServerManifest: ModuleServerManifest = {
       title: "Agent activity",
       size: "md",
       component: AgentActivityWidget,
+      compact: { when: agentsAllOk, component: AgentsOkLine },
     },
   ],
   // Core owns agents/agent_runs; this module owns external_reports.

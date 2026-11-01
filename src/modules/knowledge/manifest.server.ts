@@ -4,8 +4,6 @@ import { knowledgeTools } from "./tools";
 import { knowledgeJobs } from "./pipeline";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
-import { RecentKnowledgeWidget } from "./widgets/RecentKnowledgeWidget";
-import { KnowledgeStat } from "./widgets/KnowledgeStat";
 
 export const knowledgeServerManifest: ModuleServerManifest = {
   id: "knowledge",
@@ -13,16 +11,7 @@ export const knowledgeServerManifest: ModuleServerManifest = {
     "": KnowledgePage,
     "[id]": KnowledgeDetailPage,
   },
-  widgets: [
-    {
-      id: "recent-knowledge",
-      title: "Knowledge intake",
-      size: "md",
-      component: RecentKnowledgeWidget,
-      priority: 3,
-      stat: KnowledgeStat,
-    },
-  ],
+  widgets: [],
   schema: { knowledgeItems },
   aiTools: knowledgeTools,
   agentTemplates: [

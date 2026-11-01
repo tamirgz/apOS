@@ -23,7 +23,7 @@ export const todayServerManifest: ModuleServerManifest = {
       size: "md",
       component: NeedsYouWidget,
       priority: 1,
-      span: 2,
+      span: 3,
       href: "/m/today/queue",
     },
   ],

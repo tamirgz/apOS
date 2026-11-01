@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore, useTransition } from "react";
-import { CalendarCheck2, Check, Copy, ExternalLink, Unplug } from "lucide-react";
+import { CalendarCheck2, Check, Copy, ExternalLink, RefreshCw, Unplug } from "lucide-react";
 import { cn } from "@/core/ui/cn";
 import { act, errorText, failed } from "@/core/ui/feedback";
 import {
@@ -402,6 +402,13 @@ function GoogleWizard({
             <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-ion">
               <CalendarCheck2 className="size-3.5" /> connected
             </span>
+            {/* Re-consent in place — how a newly added scope gets granted. */}
+            <a
+              href="/api/google/auth"
+              className="flex items-center gap-1.5 rounded-lg border border-plasma/25 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-plasma transition hover:bg-plasma/10"
+            >
+              <RefreshCw className="size-3" /> reconnect
+            </a>
             <button
               type="button"
               disabled={pending}

@@ -178,7 +178,7 @@ export const INTEGRATIONS: Integration[] = [
     id: "google",
     label: "Google Calendar + Gmail",
     category: "calendar",
-    blurb: "OAuth read-only sync of your calendar events and recent mail.",
+    blurb: "OAuth sync of your calendar events and recent mail (read-only), plus the Timeboxes calendar apOS creates and writes to.",
     connect: "google",
     fields: [
       {

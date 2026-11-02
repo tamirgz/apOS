@@ -36,6 +36,13 @@ export type Actor = string;
 
 export type WorkItem = Task & { identifier: string | null };
 
+/**
+ * The item's project is active: a paused, done or archived project shelves its
+ * work. Project-less items count.
+ */
+export const inLiveProject = sql`coalesce((select p.status from projects p
+  where p.id::text = split_part(${tasks.projectRef}, ':', 2)), 'active') = 'active'`;
+
 export interface WorkItemInput {
   title: string;
   notes?: string | null;

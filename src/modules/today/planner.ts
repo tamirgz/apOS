@@ -15,6 +15,7 @@
 import { and, eq, inArray, isNotNull, lt, sql as dsql } from "drizzle-orm";
 import { db, sql } from "@/core/db/client";
 import { projects } from "@/modules/projects/schema";
+import { inLiveProject } from "@/modules/tasks/core";
 import { ACTIVE_STATUSES, OPEN_STATUSES, tasks } from "@/modules/tasks/schema";
 import { attentionItems } from "./schema";
 import { deriveDedupeKey, insertAttentionItem, normalizeRef, type RaiseInput } from "./core";
@@ -52,9 +53,7 @@ export async function planDay(): Promise<{ raised: number; closed: number }> {
   }
 
   // A task in a paused/done/archived project is shelved with it — never a
-  // "Needs you" card (the ETHOS "Gate runner v4" nag). Project-less tasks count.
-  const inLiveProject = dsql`coalesce((select p.status from projects p
-    where p.id::text = split_part(${tasks.projectRef}, ':', 2)), 'active') = 'active'`;
+  // "Needs you" card (the ETHOS "Gate runner v4" nag) — see inLiveProject.
 
   // 2) Overdue open tasks — the most overdue first.
   const overdue = await db

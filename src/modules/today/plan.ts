@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, ne, or, sql } from
 import { db } from "@/core/db/client";
 import { calendarEvents } from "@/modules/calendar/schema";
 import { ACTIVE_STATUSES, OPEN_STATUSES, priorityRank, tasks } from "@/modules/tasks/schema";
-import { identifierOf, projectKeyMap } from "@/modules/tasks/core";
+import { identifierOf, inLiveProject, projectKeyMap } from "@/modules/tasks/core";
 import { projects } from "@/modules/projects/schema";
 import { boxLength, capacity, workWindow, type Candidate, type Interval } from "./draft-day";
 import { attentionItems, timeboxes, type Timebox, type TimeboxKind } from "./schema";
@@ -166,7 +166,8 @@ export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
     dueAt: tasks.dueAt,
     assignee: tasks.assignee,
   };
-  const dueWhere = and(inArray(tasks.status, [...ACTIVE_STATUSES]), isNotNull(tasks.dueAt), lt(tasks.dueAt, end));
+  // Work in a paused, done or archived project is shelved with it — never offered for the day.
+  const dueWhere = and(inArray(tasks.status, [...ACTIVE_STATUSES]), isNotNull(tasks.dueAt), lt(tasks.dueAt, end), inLiveProject);
   const [due, [{ dueCount }], mine, cards] = await Promise.all([
     // Yours first, then what falls due on this day, then the overdue backlog —
     // so a long overdue tail never hides the day's own deadlines.
@@ -191,6 +192,7 @@ export async function getPlanDay(dayParam?: string | null): Promise<PlanDay> {
           inArray(tasks.status, [...OPEN_STATUSES]),
           // Mine-and-due items are listed under Due.
           or(sql`${tasks.dueAt} is null`, gte(tasks.dueAt, end)),
+          inLiveProject,
         ),
       )
       .orderBy(priorityRank, asc(tasks.dueAt))

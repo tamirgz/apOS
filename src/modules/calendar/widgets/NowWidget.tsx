@@ -1,6 +1,6 @@
 import { and, count, gte, inArray, lt } from "drizzle-orm";
 import { db } from "@/core/db/client";
-import { identifierOf, projectKeyMap } from "@/modules/tasks/core";
+import { identifierOf, inLiveProject, projectKeyMap } from "@/modules/tasks/core";
 import { ACTIVE_STATUSES, tasks } from "@/modules/tasks/schema";
 import { boxesOn, dayRange, localDate } from "@/modules/today/plan";
 import { KIND_META } from "@/modules/today/timebox-kinds";
@@ -21,7 +21,7 @@ export async function NowWidget() {
     db
       .select({ due: count() })
       .from(tasks)
-      .where(and(inArray(tasks.status, [...ACTIVE_STATUSES]), gte(tasks.dueAt, today.start), lt(tasks.dueAt, today.end))),
+      .where(and(inArray(tasks.status, [...ACTIVE_STATUSES]), gte(tasks.dueAt, today.start), lt(tasks.dueAt, today.end), inLiveProject)),
   ]);
 
   // "open ETHOS-12" on the box you're in.

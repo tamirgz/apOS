@@ -851,6 +851,8 @@ export function WorkItemDetail({
                       {a.field === "deleted" ? "removed" : a.field === "version" ? "added a new version of" : "attached"}{" "}
                       <span className="text-ink">{a.toValue}</span>
                     </>
+                  ) : a.field === "comment" ? (
+                    "deleted a comment"
                   ) : a.field === "notes" ? (
                     "edited the description"
                   ) : a.field === "relation" ? (

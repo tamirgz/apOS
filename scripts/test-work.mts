@@ -333,7 +333,7 @@ try {
       const listed = (await client.listTools()).tools;
       const names = listed.map((t) => t.name);
       assert.equal(listed.find((t) => t.name === "cycles__delete")?.annotations?.destructiveHint, true, "cycles.delete is marked destructive");
-      for (const n of ["tasks__create", "tasks__relate", "cycles__create", "cycles__delete", "cycles__get", "modules__update", "projects__list", "decisions__record", "decisions__list", "decisions__delete", "docs__delete"]) assert.ok(names.includes(n), `exposes ${n}`);
+      for (const n of ["tasks__create", "tasks__relate", "cycles__create", "cycles__delete", "cycles__get", "modules__update", "projects__list", "decisions__record", "decisions__list", "decisions__delete", "docs__delete", "tasks__deleteComment"]) assert.ok(names.includes(n), `exposes ${n}`);
       assert.ok(!names.includes("memory__update"), "only the work-tracker surface");
       const call = async (name: string, args: Record<string, unknown>) => {
         const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
@@ -361,6 +361,14 @@ try {
       const got = await call("tasks__get", { ref: b.identifier });
       assert.equal(got.parent.identifier, a.identifier);
       assert.ok(got.activity.some((x: { by: string }) => /^agent:zz-test:zz-test\/0#[0-9a-f]{6}$/.test(x.by)), "activity credits the MCP actor (prefix:client/version#session)");
+      const { commentId } = await call("tasks__comment", { ref: b.identifier, body: "ZZ posted twice" });
+      assert.ok((await call("tasks__get", { ref: b.identifier })).activity.some((x: { commentId?: string }) => x.commentId === commentId), "tasks.get shows the comment's id");
+      await assert.rejects(call("tasks__deleteComment", { ref: a.identifier, commentId, confirm: true }), /No comment/, "a comment on another item is not found");
+      assert.equal((await call("tasks__deleteComment", { ref: b.identifier, commentId, confirm: true })).deleted, true);
+      const after = (await call("tasks__get", { ref: b.identifier })).activity;
+      assert.ok(!after.some((x: { commentId?: string }) => x.commentId === commentId), "the comment is gone");
+      assert.ok(after.some((x: { changed?: string }) => x.changed === "comment"), "history keeps a 'deleted a comment' line");
+      await assert.rejects(call("tasks__deleteComment", { ref: b.identifier, commentId, confirm: true }), /No comment/, "deleting twice is an error");
       await call("modules__update", { module: "m1", status: "paused", startAt: new Date(now).toISOString() });
       const [m] = await call("modules__list", { project: proj.key, status: "all" });
       assert.equal(m.status, "paused");

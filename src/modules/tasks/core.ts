@@ -610,6 +610,28 @@ export async function addComment(db: Db, taskId: string, body: string, actor: Ac
   return row;
 }
 
+/**
+ * Delete one comment on an item. The comment goes; the item's history keeps a
+ * "deleted a comment" line, and files attached to it are hidden, not erased.
+ * Null when the item has no such comment.
+ */
+export async function deleteComment(db: Db, taskId: string, commentId: string, actor: Actor) {
+  const [row] = await db
+    .delete(taskActivity)
+    .where(and(eq(taskActivity.id, commentId), eq(taskActivity.taskId, taskId), eq(taskActivity.kind, "comment")))
+    .returning();
+  if (!row) return null;
+  const files = await db
+    .update(taskAttachments)
+    .set({ deletedAt: new Date(), deletedBy: actor })
+    .where(and(eq(taskAttachments.commentId, commentId), isNull(taskAttachments.deletedAt)))
+    .returning({ id: taskAttachments.id });
+  const excerpt = (row.body ?? "").replace(/\s+/g, " ").slice(0, 120);
+  await db.insert(taskActivity).values({ taskId, actor, kind: "changed", field: "comment", fromValue: excerpt });
+  await db.update(tasks).set({ updatedAt: new Date() }).where(eq(tasks.id, taskId));
+  return { comment: row, hiddenFiles: files.map((f) => f.id) };
+}
+
 export async function deleteWorkItem(db: Db, id: string): Promise<boolean> {
   const [row] = await db.delete(tasks).where(eq(tasks.id, id)).returning();
   if (!row) return false;

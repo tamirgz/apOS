@@ -11,6 +11,7 @@ import {
   blockingRelations,
   claimWorkItem,
   createWorkItem,
+  deleteComment,
   deleteWorkItem,
   findByIdentifier,
   getWorkItem,
@@ -726,6 +727,25 @@ export const taskTools: AiToolDef[] = [
         }
       }
       return { commented: true, commentId: c.id, ...(files.length ? { attached } : {}), ...(failed.length ? { failed } : {}) };
+    },
+  },
+  {
+    name: "tasks.deleteComment",
+    description:
+      "Delete one comment on a work item — one posted by mistake, twice, or on the wrong item. Take its `commentId` from tasks.comment or from the item's activity in tasks.get. " +
+      "The comment is removed for good; the item's history keeps a 'deleted a comment' line, and files attached to the comment are hidden (soft-deleted), not erased. Needs confirm: true.",
+    input: z.object({
+      ref: z.string().describe("The item the comment is on: ref from tasks.list ('t3') or identifier ('ETHOS-12')"),
+      commentId: z.string().describe("The comment's id (commentId in tasks.get activity)"),
+      confirm: z.literal(true).describe("Must be true"),
+    }),
+    async execute(input, ctx) {
+      const t = await resolveTask(ctx, input.ref);
+      if ("error" in t) return t;
+      if (!isUuid(input.commentId)) return { error: `Not a comment id: ${input.commentId}` };
+      const r = await deleteComment(ctx.db, t.id, input.commentId.trim(), actorOf(ctx));
+      if (!r) return { error: `No comment ${input.commentId} on ${input.ref}` };
+      return { deleted: true, commentId: r.comment.id, ...(r.hiddenFiles.length ? { hiddenAttachments: r.hiddenFiles } : {}) };
     },
   },
   {

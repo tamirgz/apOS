@@ -12,7 +12,8 @@
 import assert from "node:assert/strict";
 import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { db } from "@/core/db/client";
-import { features, projectDecisions, projects } from "@/modules/projects/schema";
+import { docHistory, putDoc } from "@/modules/projects/docs";
+import { features, projectDecisions, projects, type ProjectDoc } from "@/modules/projects/schema";
 import { workbenchTasks } from "@/modules/workbench/schema";
 import {
   addLink,
@@ -196,6 +197,21 @@ try {
     await deleteCycle(db, cur.id);
     assert.equal((await db.select().from(tasks).where(eq(tasks.id, b.id)))[0].cycleId, null);
     await deleteCycle(db, done.id);
+  });
+
+  await check("docs: history older than 7 days keeps each day's last version and every delete", async () => {
+    const put = async (body: string, change?: "delete") => (await putDoc(db, { projectId: p.id, key: "zz-thin", body, actor: "zz" }, change)) as ProjectDoc;
+    for (let i = 1; i <= 5; i++) await put(`v${i}`);
+    const doc = await put("v6", "delete");
+    const at = (v: number[], daysAgo: number) =>
+      db.execute(sql`update project_doc_versions set created_at = date_trunc('day', now() at time zone 'UTC') at time zone 'UTC' - make_interval(days => ${daysAgo}) + make_interval(hours => version)
+        where doc_id = ${doc.id} and version in ${v}`);
+    await at([1, 2, 3], 10); // one day: only v3 survives
+    await at([4], 12); // alone on its day: kept
+    await at([5, 6], 9); // v6 is a delete, so v5 goes but v6 stays
+    await put("v7"); // recent: v7 and v8 both kept
+    await put("v8");
+    assert.deepEqual((await docHistory(db, doc.id)).map((v) => v.version), [8, 7, 6, 4, 3]);
   });
 
   await check("cycles: done items follow their done date (create, close, sweep)", async () => {

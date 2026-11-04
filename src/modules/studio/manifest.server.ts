@@ -1,6 +1,4 @@
 import type { ModuleServerManifest } from "@/core/modules/types.server";
-import { StudioPage } from "./pages/StudioPage";
-import { FlowEditorPage } from "./pages/FlowEditorPage";
 
 /**
  * Studio — the visual builder for Flows. The `flows` module owns the schema +
@@ -10,11 +8,6 @@ import { FlowEditorPage } from "./pages/FlowEditorPage";
  */
 export const studioServerManifest: ModuleServerManifest = {
   id: "studio",
-  routes: {
-    "": StudioPage,
-    "[id]": FlowEditorPage,
-  },
-  widgets: [],
   schema: {},
   aiTools: [],
   agentTemplates: [],

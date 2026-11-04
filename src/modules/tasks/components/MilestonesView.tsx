@@ -29,7 +29,7 @@ import {
 } from "../milestone-actions";
 import type { WorkFeature, WorkProject } from "../queries";
 import { STATUS_META } from "../states";
-import { MILESTONE_STATUSES, type MilestoneStatus, type TaskStatus } from "../schema";
+import { MILESTONE_STATUSES, type MilestoneStatus, type TaskStatus } from "../constants";
 import { dateInput } from "./CyclePanel";
 import { ContentPicker, CriteriaEditor, NewMilestone, RequiresEditor, useMilestoneWrite } from "./MilestoneEdit";
 

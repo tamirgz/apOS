@@ -7,24 +7,9 @@ import { projectFilesJobs } from "./files-pipeline";
 import { projectRepoJobs } from "./repo-jobs";
 import { projectSetupJobs } from "./setup-jobs";
 import { activeProjectsJobs } from "./active-projects";
-import { ProjectsPage } from "./pages/ProjectsPage";
-import { ProjectDetailPage } from "./pages/ProjectDetailPage";
-import { ActiveProjectsWidget } from "./widgets/ActiveProjectsWidget";
 
 export const projectsServerManifest: ModuleServerManifest = {
   id: "projects",
-  routes: {
-    "": ProjectsPage,
-    "[id]": ProjectDetailPage,
-  },
-  widgets: [
-    {
-      id: "active-projects",
-      title: "Active projects",
-      size: "sm",
-      component: ActiveProjectsWidget,
-    },
-  ],
   schema: { projects, projectFiles, features, projectDocs, projectDocVersions },
   aiTools: [...projectTools, ...docTools, ...decisionTools],
   jobs: [...projectFilesJobs, ...projectRepoJobs, ...projectSetupJobs, ...activeProjectsJobs],

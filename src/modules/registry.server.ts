@@ -1,4 +1,6 @@
 // Server-side module registry — ONE line per module, mirroring registry.ts.
+// Capabilities only (schema, tools, templates, jobs): the tool registry and
+// worker import this, so it must never reach a page or a client component.
 import type { ModuleServerManifest } from "@/core/modules/types.server";
 import { tasksServerManifest } from "./tasks/manifest.server";
 import { projectsServerManifest } from "./projects/manifest.server";
@@ -26,7 +28,7 @@ let cached: ModuleServerManifest[] | null = null;
 
 /**
  * Every module's server manifest, built on first call — never at import time.
- * Several manifests import pages/actions that import this file back (agents,
+ * Several manifests import code that imports this file back (agents,
  * flows, investments, studio, today); an eager array read their bindings while
  * they were still initializing whenever a chunk entered through one of them,
  * a TDZ ReferenceError → intermittent 500s (AIOS-36).

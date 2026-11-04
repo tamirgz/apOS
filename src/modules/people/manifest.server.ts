@@ -2,17 +2,9 @@ import type { ModuleServerManifest } from "@/core/modules/types.server";
 import { people } from "./schema";
 import { peopleTools } from "./tools";
 import { peopleJobs } from "./jobs";
-import { PeoplePage } from "./pages/PeoplePage";
-import { PersonDetailPage } from "./pages/PersonDetailPage";
 
 export const peopleServerManifest: ModuleServerManifest = {
   id: "people",
-  routes: {
-    "": PeoplePage,
-    "[id]": PersonDetailPage,
-  },
-  // No dashboard widget — People lives on its own page (keeps the deck uncluttered).
-  widgets: [],
   schema: { people },
   aiTools: peopleTools,
   jobs: peopleJobs,

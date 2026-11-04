@@ -17,16 +17,9 @@ import { milestoneTools } from "./milestone-tools";
 import { planningTools } from "./planning-tools";
 import { taskTools } from "./tools";
 import { workJobs } from "./jobs";
-import { TasksPage } from "./pages/TasksPage";
-import { TaskDetailPage } from "./pages/TaskDetailPage";
 
 export const tasksServerManifest: ModuleServerManifest = {
   id: "tasks",
-  routes: {
-    "": TasksPage,
-    "[id]": TaskDetailPage,
-  },
-  widgets: [],
   schema: { tasks, workCounters, taskActivity, taskAttachments, cycles, taskRelations, taskLinks, workViews, milestones, milestoneCapabilities, milestoneContent },
   aiTools: [...taskTools, ...attachmentTools, ...planningTools, ...milestoneTools],
   jobs: workJobs,

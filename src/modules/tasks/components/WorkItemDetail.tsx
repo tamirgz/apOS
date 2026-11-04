@@ -48,7 +48,8 @@ import {
 } from "../actions";
 import type { AcceptanceInput, WorkItemPatch } from "../core";
 import { AttachButton, AttachmentList, Lightbox } from "./Attachments";
-import { TASK_PRIORITIES, TASK_STATUSES, type TaskAttachment, type TaskPriority, type TaskStatus } from "../schema";
+import { TASK_PRIORITIES, TASK_STATUSES, type TaskPriority, type TaskStatus } from "../constants";
+import type { TaskAttachment } from "../schema";
 import { ESTIMATES, PRIORITY_META, RELATION_SIDE_LABEL, STATUS_META, displayTitle, plainTitle, type RelationSide } from "../states";
 import type { WorkProject } from "../queries";
 import { LabelPill, PriorityGlyph, StateGlyph, Who, branchName, claimantName, dueTone, isClosed, liveClaim, splitTitle } from "./work-ui";

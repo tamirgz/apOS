@@ -220,11 +220,28 @@ export interface ModuleJob {
   runOnBoot?: boolean;
 }
 
-export interface ModuleServerManifest {
+/**
+ * A module's pages, imported only by its route folder (app/(shell)/m/<id>).
+ * Pages, widgets and capabilities live in separate manifests so that a page
+ * ships only its own module's client components: while one manifest held all
+ * three, the tool registry imported every module's UI and every page loaded
+ * all of it.
+ */
+export interface ModulePagesManifest {
   id: string;
   /** "" is the module root page; "[id]" matches a single dynamic segment. */
   routes: Record<string, ComponentType<ModuleRouteProps>>;
+}
+
+/** A module's Today cards, imported only by the Today page (registry.widgets.ts). */
+export interface ModuleWidgets {
+  id: string;
   widgets: ModuleWidget[];
+}
+
+/** What a module can do: tables, AI tools, agent templates and worker jobs. */
+export interface ModuleServerManifest {
+  id: string;
   schema: Record<string, PgTable>;
   aiTools: AiToolDef[];
   agentTemplates: AgentTemplate[];

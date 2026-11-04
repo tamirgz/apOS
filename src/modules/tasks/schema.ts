@@ -11,24 +11,10 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { MILESTONE_STATUSES, TASK_PRIORITIES, TASK_STATUSES } from "./constants";
 
-/**
- * Work-item lifecycle (Plane's state groups, one state each):
- *   backlog → todo → doing → review → done   (+ cancelled, a closed dead end)
- * Text enum, no DB constraint — widening it needs no migration.
- */
-export const TASK_STATUSES = ["backlog", "todo", "doing", "review", "done", "cancelled"] as const;
-export type TaskStatus = (typeof TASK_STATUSES)[number];
+export * from "./constants";
 
-/** Still to do — everything the "open work" views, rollups and agents count. */
-export const OPEN_STATUSES = ["backlog", "todo", "doing", "review"] as const satisfies readonly TaskStatus[];
-/** Committed / in motion — what the day planner may pull into today. */
-export const ACTIVE_STATUSES = ["todo", "doing", "review"] as const satisfies readonly TaskStatus[];
-export const CLOSED_STATUSES = ["done", "cancelled"] as const satisfies readonly TaskStatus[];
-export const isClosed = (s: TaskStatus) => s === "done" || s === "cancelled";
-
-export const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
-export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
 export const tasks = pgTable(
   "tasks",
@@ -346,8 +332,6 @@ export type WorkView = typeof workViews.$inferSelect;
  * items from partly-in-scope modules, other milestones, and any other apOS
  * entity. Progress is resolved from the content at read time.
  */
-export const MILESTONE_STATUSES = ["planned", "active", "done", "cancelled"] as const;
-export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
 
 /** One exit criterion — a checkbox the milestone must tick besides its content. */
 export interface MilestoneCriterion {

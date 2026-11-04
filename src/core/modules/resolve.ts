@@ -1,6 +1,6 @@
 import type {
   ModuleRouteProps,
-  ModuleServerManifest,
+  ModulePagesManifest,
 } from "./types.server";
 import type { ComponentType } from "react";
 
@@ -10,7 +10,7 @@ import type { ComponentType } from "react";
  * "<page>/[id]" matches one segment under that page.
  */
 export function resolveModuleRoute(
-  mod: ModuleServerManifest,
+  mod: ModulePagesManifest,
   rest: string[],
 ): ComponentType<ModuleRouteProps> | null {
   if (rest.length === 0) return mod.routes[""] ?? null;

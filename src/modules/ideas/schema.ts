@@ -1,13 +1,8 @@
 import { jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { IDEA_CATEGORIES } from "./constants";
 
-export const IDEA_CATEGORIES = [
-  "product",
-  "business",
-  "feature",
-  "experiment",
-  "other",
-] as const;
-export type IdeaCategory = (typeof IDEA_CATEGORIES)[number];
+export * from "./constants";
+
 
 export const IDEA_STAGES = [
   "spark",

@@ -10,8 +10,6 @@ import { flowNodeRuns, flowRuns, flows } from "./schema";
  */
 export const flowsServerManifest: ModuleServerManifest = {
   id: "flows",
-  routes: {},
-  widgets: [],
   schema: { flows, flowRuns, flowNodeRuns },
   aiTools: [],
   agentTemplates: [],

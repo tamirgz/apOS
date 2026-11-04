@@ -10,9 +10,10 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { bytea } from "@/core/db/bytea";
+import { PROJECT_STATUSES } from "./constants";
 
-export const PROJECT_STATUSES = ["active", "paused", "done", "archived"] as const;
-export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+export * from "./constants";
+
 
 /**
  * What kind of "project" this row is:

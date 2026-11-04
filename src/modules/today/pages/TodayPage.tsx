@@ -7,12 +7,12 @@ import { DeckGrid, type DeckWidget } from "@/core/ui/DeckGrid";
  * and the day plan live one click away at /m/today/queue and /m/today/plan.
  */
 export async function TodayPage() {
-  // Lazy: the registry imports this module's manifest, which imports this page.
-  const [{ getServerModules }, { modules }] = await Promise.all([
-    import("@/modules/registry.server"),
+  // Lazy: the widget registry imports this module's widgets, which sit beside this page.
+  const [{ getModuleWidgets }, { modules }] = await Promise.all([
+    import("@/modules/registry.widgets"),
     import("@/modules/registry"),
   ]);
-  const all = getServerModules().flatMap((m) => {
+  const all = getModuleWidgets().flatMap((m) => {
     const accent =
       modules.find((mod) => mod.id === m.id)?.accent ?? "var(--color-ink-faint)";
     return m.widgets.map((w) => ({ w, moduleId: m.id, accent }));

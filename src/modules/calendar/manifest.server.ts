@@ -3,25 +3,9 @@ import { calendarEvents } from "./schema";
 import { calendarTools } from "./tools";
 import { calendarJobs } from "./sync";
 import { googleJobs } from "./google";
-import { CalendarPage } from "./pages/CalendarPage";
-import { NowWidget } from "./widgets/NowWidget";
 
 export const calendarServerManifest: ModuleServerManifest = {
   id: "calendar",
-  routes: {
-    "": CalendarPage,
-  },
-  widgets: [
-    {
-      id: "now",
-      title: "Now",
-      size: "lg",
-      component: NowWidget,
-      priority: 1,
-      span: 4,
-      bare: true,
-    },
-  ],
   schema: { calendarEvents },
   aiTools: calendarTools,
   agentTemplates: [

@@ -5,13 +5,15 @@
  * stored and returned exactly as given (no trimming), so a round trip is
  * byte-identical.
  */
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "@/core/db/client";
 import { projectDocs, projectDocVersions, type ProjectDoc } from "./schema";
 
 /** Well above the 64 KB a resume note needs; still a document, not a blob. */
 export const DOC_MAX_BYTES = 512 * 1024;
 export const DOC_KEY_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+/** Every version from the last week is kept; before that, each day's last one (and every delete). */
+export const DOC_HISTORY_FULL_DAYS = 7;
 
 export interface DocConflict {
   error: "conflict";
@@ -140,6 +142,7 @@ export async function putDoc(
         guarded: expectedVersion !== undefined,
         updatedBy: actor,
       });
+      await thinHistory(tx, row.id);
       return row;
     });
   } catch (e) {
@@ -148,6 +151,24 @@ export async function putDoc(
     if ((e as { code?: string }).code === "23505") return conflictOf(await findDoc(db, projectId, key), expectedVersion ?? 0);
     throw e;
   }
+}
+
+/**
+ * Drop versions older than DOC_HISTORY_FULL_DAYS that a later version on the
+ * same (UTC) day supersedes. A resume note rewritten 45 times a day otherwise
+ * grows the table by megabytes a day.
+ */
+export async function thinHistory(db: Pick<Db, "execute">, docId: string) {
+  await db.execute(sql`
+    delete from project_doc_versions v
+    where v.doc_id = ${docId}
+      and v.created_at < now() - make_interval(days => ${DOC_HISTORY_FULL_DAYS})
+      and v.change <> 'delete'
+      and exists (
+        select 1 from project_doc_versions w
+        where w.doc_id = v.doc_id and w.version > v.version
+          and date_trunc('day', w.created_at at time zone 'UTC') = date_trunc('day', v.created_at at time zone 'UTC')
+      )`);
 }
 
 /** Soft delete: the doc leaves the list, its history stays (a delete is a version too). */

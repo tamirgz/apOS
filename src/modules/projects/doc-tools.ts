@@ -69,7 +69,7 @@ export const docTools: AiToolDef[] = [
       if ("error" in p) return p;
       const r = await readDoc(ctx.db, p.id, input.key, input.version);
       if (!r) return { error: `No doc "${input.key}" in that project` };
-      if ("missing" in r) return { error: `"${input.key}" has no version ${r.missing} (latest is ${r.doc.version})` };
+      if ("missing" in r) return { error: `"${input.key}" has no version ${r.missing} (latest is ${r.doc.version}; versions older than 7 days keep only each day's last one — see docs.history)` };
       return {
         key: r.doc.key,
         title: r.title,
@@ -87,7 +87,7 @@ export const docTools: AiToolDef[] = [
   {
     name: "docs.put",
     description:
-      "Create or replace a project doc. The body is stored exactly as given (up to 512 KB) and the previous version is kept in history. Pass `expectedVersion` (the version you read, or 0 for a new doc) so a concurrent writer can't be overwritten unseen; a write without it still lands but is recorded as unguarded.",
+      "Create or replace a project doc. The body is stored exactly as given (up to 512 KB) and the previous version is kept in history (every version from the last 7 days; before that, each day's last one). Pass `expectedVersion` (the version you read, or 0 for a new doc) so a concurrent writer can't be overwritten unseen; a write without it still lands but is recorded as unguarded.",
     input: z.object({
       project: PROJECT,
       key: KEY,
@@ -137,7 +137,7 @@ export const docTools: AiToolDef[] = [
   {
     name: "docs.history",
     description:
-      "A project doc's versions, newest first: when, by whom, size, whether the write was guarded (named the version it replaced), and deletes. Read any of them with docs.get {version}; compare with docs.diff.",
+      "A project doc's versions, newest first — all of the last 7 days, then each day's last one and every delete: when, by whom, size, whether the write was guarded (named the version it replaced), and deletes. Read any of them with docs.get {version}; compare with docs.diff.",
     input: z.object({ project: PROJECT, key: KEY }),
     async execute(input, ctx) {
       const p = await projectOf(ctx, input.project);

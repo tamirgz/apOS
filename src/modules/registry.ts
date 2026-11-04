@@ -1,5 +1,7 @@
 // Client-safe module registry — ONE line per module. Adding a module to the
-// system means adding its manifest here and in registry.server.ts.
+// system means adding its manifest here and in registry.server.ts, plus a
+// route folder app/(shell)/m/<id>/[[...rest]] for its pages (and a line in
+// registry.widgets.ts if it puts a card on Today).
 import type { ModuleManifest } from "@/core/modules/types";
 import { tasksManifest } from "./tasks/manifest";
 import { projectsManifest } from "./projects/manifest";

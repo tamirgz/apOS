@@ -2,16 +2,9 @@ import type { ModuleServerManifest } from "@/core/modules/types.server";
 import { knowledgeItems } from "./schema";
 import { knowledgeTools } from "./tools";
 import { knowledgeJobs } from "./pipeline";
-import { KnowledgePage } from "./pages/KnowledgePage";
-import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
 
 export const knowledgeServerManifest: ModuleServerManifest = {
   id: "knowledge",
-  routes: {
-    "": KnowledgePage,
-    "[id]": KnowledgeDetailPage,
-  },
-  widgets: [],
   schema: { knowledgeItems },
   aiTools: knowledgeTools,
   agentTemplates: [

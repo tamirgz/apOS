@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { cn } from "@/core/ui/cn";
 import { act } from "@/core/ui/feedback";
 import { updateProject } from "../actions";
-import { PROJECT_STATUSES, type ProjectStatus } from "../schema";
+import { PROJECT_STATUSES, type ProjectStatus } from "../constants";
 import { STATUS_CHIP } from "./statusStyle";
 
 export function StatusCycleButton({

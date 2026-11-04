@@ -2,16 +2,9 @@ import type { ModuleServerManifest } from "@/core/modules/types.server";
 import { ideas } from "./schema";
 import { ideaTools } from "./tools";
 import { ideaJobs } from "./analyze";
-import { IdeasPage } from "./pages/IdeasPage";
-import { IdeaDetailPage } from "./pages/IdeaDetailPage";
 
 export const ideasServerManifest: ModuleServerManifest = {
   id: "ideas",
-  routes: {
-    "": IdeasPage,
-    "[id]": IdeaDetailPage,
-  },
-  widgets: [],
   schema: { ideas },
   aiTools: ideaTools,
   agentTemplates: [

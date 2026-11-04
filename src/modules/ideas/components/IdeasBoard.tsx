@@ -27,7 +27,7 @@ import {
   STAGE_ORDER,
   VERDICT_META,
 } from "./ideaMeta";
-import { IDEA_CATEGORIES } from "../schema";
+import { IDEA_CATEGORIES } from "../constants";
 
 function QuickAdd() {
   const [pending, startTransition] = useTransition();

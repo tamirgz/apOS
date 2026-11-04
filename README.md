@@ -273,8 +273,8 @@ See [`docs/RUNTIME.md`](docs/RUNTIME.md) for the full topology and
 ## Architecture in 60 seconds
 
 - `src/core/` — shell (animated bg, sidebar, ⌘K bar), DB client, AI layer, module contract.
-- `src/modules/<name>/` — one folder per module: `manifest.ts` (client metadata: nav, icon, ⌘K commands) + `manifest.server.ts` (pages, widgets, Drizzle schema, AI tools, agent templates, background jobs).
-- `src/modules/registry.ts` + `registry.server.ts` — **one import line per module, per file**. That's the whole integration surface.
+- `src/modules/<name>/` — one folder per module: `manifest.ts` (client metadata: nav, icon, ⌘K commands), `manifest.pages.ts` (its pages), `manifest.server.ts` (Drizzle schema, AI tools, agent templates, background jobs) and, if it puts a card on Today, `manifest.widgets.ts`. Pages, widgets and capabilities are kept apart so each page ships only its own module's client code; the tool registry and worker never import UI.
+- `src/modules/registry.ts` + `registry.server.ts` (+ `registry.widgets.ts`) — **one import line per module, per file**, plus a three-line route folder `src/app/(shell)/m/<id>/[[...rest]]/page.tsx`. That's the whole integration surface.
 - `src/worker/` — host-run agent runner: cron scheduling (croner), one-live-run-per-agent DB guard, heartbeats + orphan sweep, `agent_ledger` processed-items manifest for idempotent scheduled runs, module job channels (knowledge enrichment runs here).
 - AI: `AIProvider` abstraction with Ollama + Apple-MLX (OpenAI-compatible) and Anthropic (Agent SDK, subscription) adapters; per-job routing table (`ai_routes`) editable in Settings; every module's `aiTools` are auto-exposed to chat **and** agents (agents get a per-agent allowlist).
 - **Memory blocks**: labeled, size-budgeted `memory_blocks` injected into every AI call; chat/agents maintain them via `memory.update`; editable in Settings.
@@ -284,9 +284,10 @@ See [`docs/RUNTIME.md`](docs/RUNTIME.md) for the full topology and
 
 ## Adding a module
 
-1. `mkdir src/modules/foo` → write `manifest.ts`, `manifest.server.ts`, `schema.ts`, pages/widgets/tools.
-2. Add one line to `registry.ts` and one to `registry.server.ts`.
-3. `pnpm db:generate && pnpm db:migrate`, restart dev + worker.
+1. `mkdir src/modules/foo` → write `manifest.ts`, `manifest.pages.ts`, `manifest.server.ts`, `schema.ts`, pages/tools (and `manifest.widgets.ts` for a Today card).
+2. Add one line to `registry.ts` and one to `registry.server.ts` (and one to `registry.widgets.ts` for a Today card).
+3. Add the route folder `src/app/(shell)/m/foo/[[...rest]]/page.tsx` — copy any sibling's three lines and point it at `foo/manifest.pages`.
+4. `pnpm db:generate && pnpm db:migrate`, restart dev + worker.
 
 Nav entry, routes (`/m/foo`), dashboard widgets, ⌘K commands, AI tools, agent templates, and background jobs all appear with zero core edits.
 

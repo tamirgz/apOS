@@ -6,7 +6,7 @@ import { cn } from "@/core/ui/cn";
 import { useNow } from "@/core/ui/useNow";
 import type { WorkItem } from "../core";
 import type { WorkData } from "../queries";
-import { TASK_STATUSES, type TaskStatus } from "../schema";
+import { TASK_STATUSES, type TaskStatus } from "../constants";
 import { PRIORITY_META, STATUS_META, displayTitle, plainTitle } from "../states";
 import { ItemMarks, subCounts, type Flags } from "./Board";
 import { Due, Est, LabelPills, PriorityGlyph, StateGlyph, TitleTag, Who, botOwned, isClosed, splitTitle } from "./work-ui";

@@ -33,7 +33,6 @@ const KEY_LABELS: Record<string, string> = {
   "orbit.namer": "Orbit · names the topic clusters",
   "ask.linkJudge": "Ask · related-link judge",
   "inbox.verify": "Inbox · capture verifier (is this really a task?)",
-  "telegram.translate": "Telegram · translates foreign posts for search",
   "investments.report": "Investments · daily report (Runs task)",
 };
 

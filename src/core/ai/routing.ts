@@ -147,7 +147,6 @@ const DEFAULTS: (RouteTarget & { taskKey: string; options?: RouteOptions })[] = 
   { taskKey: "orbit.namer", provider: "ollama", model: "qwen3:8b" },
   { taskKey: "ask.linkJudge", provider: "ollama", model: process.env.ASK_JUDGE_MODEL || "qwen3:8b" },
   { taskKey: "inbox.verify", provider: "ollama", model: process.env.INBOX_VERIFY_MODEL || "qwen3:8b" },
-  { taskKey: "telegram.translate", provider: "ollama", model: "qwen3:8b" },
   // The daily investments report (a Runs task; the provider must be one the
   // Workbench has an executor for).
   { taskKey: "investments.report", provider: "ollama", model: "qwen3-coder:30b" },

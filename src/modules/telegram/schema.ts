@@ -51,7 +51,9 @@ export const telegramPosts = pgTable(
     /** English translation of a non-English post, for CROSS-LINGUAL search:
      *  nomic embeddings cluster by language, so a Russian/Hebrew post is invisible
      *  to an English query. We embed this English gloss instead, so an English
-     *  search retrieves the original foreign post. Null = post is already English. */
+     *  search retrieves the original foreign post. No longer written since
+     *  2026-11-04 (translation cost more than the cross-lingual recall was used);
+     *  old rows keep theirs. */
     textEn: text("text_en"),
     /** The relevance gate's verdict: "yes" | "no" | null (not yet judged). */
     relevant: text("relevant"),

@@ -23,26 +23,11 @@ console.log = console.info = console.debug = (...a: unknown[]) => console.error(
 // each used to open up to 10 connections on the session-mode pooler, whose 40
 // slots the web server and worker already share: a fresh process then waited
 // 1–3 s per TLS connect, or got "max clients reached", and a caller with a 20 s
-// budget (the ETHOS gate) gave up. One client at a time is served here, so 2
-// connections are plenty, and on Supabase it goes through the TRANSACTION
-// pooler (port 6543), which doesn't hold a slot per client. That pooler can't
-// keep prepared statements, so they're off. Opt out with APOS_MCP_SESSION_POOLER=1.
+// budget (the ETHOS gate) gave up. 2 connections per process are plenty.
+// Stay on the SESSION pooler: on Supabase's transaction pooler (port 6543) a
+// few concurrent tool calls hang with no answer at all (5 parallel tasks.get
+// from the ETHOS dispatch guard never returned, 2026-11-24).
 process.env.AIOS_PG_POOL_MAX ??= "2";
-{
-  const raw = process.env.DATABASE_URL;
-  if (raw && process.env.APOS_MCP_SESSION_POOLER !== "1") {
-    try {
-      const u = new URL(raw);
-      if (u.hostname.endsWith(".pooler.supabase.com") && (u.port === "5432" || u.port === "")) {
-        u.port = "6543";
-        process.env.DATABASE_URL = u.toString();
-        process.env.AIOS_PG_PREPARE = "0";
-      }
-    } catch {
-      /* not a URL we understand — leave it as is */
-    }
-  }
-}
 
 const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
 const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");

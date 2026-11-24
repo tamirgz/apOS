@@ -5,7 +5,7 @@
  * structure and fills space, unlike a UMAP scatter), detects topic communities
  * (Louvain), and NAMES the big ones with the "orbit.namer" route (local qwen). That costs tens of
  * seconds, so a background job builds it, persists it to app_settings, and only
- * rebuilds when the corpus fingerprint changes (idempotent). The page reads the
+ * rebuilds at most daily, when the corpus fingerprint changed (idempotent). The page reads the
  * persisted result instantly.
  *
  * Persisting the LAYOUT (not just the names) is also correctness: ForceAtlas2 is
@@ -366,20 +366,28 @@ async function build(fingerprint: string): Promise<AtlasBlob> {
   };
 }
 
+// The search sync touches some row every few minutes, so "the corpus changed"
+// was true on every run and the atlas rebuilt every 15 minutes: its k-NN
+// cross-join was the database's heaviest query by far (70 s each, ~4,700 runs
+// in two months). A map of the corpus doesn't need to be fresher than a day.
+const REBUILD_AFTER_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Background job: rebuild the atlas only when the corpus changed. Idempotent —
- * a no-op run costs one COUNT query. Scheduled + run-on-boot from the manifest.
+ * Background job: build the atlas when there is none, else rebuild it at most
+ * once a day, and only when the corpus changed since. A no-op run reads one
+ * timestamp (not the 1.7 MB blob). Scheduled + run-on-boot from the manifest.
  */
 export async function refreshAtlas(): Promise<void> {
+  const [row] = await db
+    .select({
+      updatedAt: appSettings.updatedAt,
+      fingerprint: dsql<string | null>`case when ${appSettings.value} like '{%' then (${appSettings.value})::jsonb ->> 'fingerprint' end`,
+    })
+    .from(appSettings)
+    .where(eq(appSettings.key, ATLAS_KEY));
+  if (row && Date.now() - new Date(row.updatedAt).getTime() < REBUILD_AFTER_MS) return;
   const fp = await corpusFingerprint();
-  const existing = await getSetting(ATLAS_KEY);
-  if (existing) {
-    try {
-      if ((JSON.parse(existing) as AtlasBlob).fingerprint === fp) return;
-    } catch {
-      /* corrupt — rebuild */
-    }
-  }
+  if (row?.fingerprint === fp) return;
   const blob = await build(fp);
   await setSetting(ATLAS_KEY, JSON.stringify(blob));
 }

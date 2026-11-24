@@ -141,11 +141,30 @@ async function allocateNumber(db: Db, projectRef: string | null | undefined): Pr
   return nextNumber(db, pid ?? LOOSE_SCOPE);
 }
 
-/** projectId → key, for rendering identifiers. */
-export async function projectKeyMap(db: Db): Promise<Map<string, string>> {
+// A project's key is write-once (ensureProjectKey only fills a null one), so
+// an id → key this process has already read is never stale. Kept per Db.
+const keyCache = new WeakMap<object, Map<string, string>>();
+
+/**
+ * projectId → key, for rendering identifiers. Given `need` (the project ids
+ * about to be rendered), answers from the cache when it knows them all — the
+ * table was read on every list and lookup before, ~600k times in two months.
+ */
+export async function projectKeyMap(db: Db, need?: Iterable<string | null>): Promise<Map<string, string>> {
+  const cached = keyCache.get(db);
+  if (cached && need) {
+    let hit = true;
+    for (const id of need) if (id && !cached.has(id)) hit = false;
+    if (hit) return cached;
+  }
   const rows = await db.select({ id: projects.id, key: projects.key }).from(projects);
-  return new Map(rows.filter((r) => r.key).map((r) => [r.id, r.key!]));
+  const map = new Map(rows.filter((r) => r.key).map((r) => [r.id, r.key!]));
+  keyCache.set(db, map);
+  return map;
 }
+
+/** The project ids a set of items is rendered under. */
+export const projectIdsOf = (rows: Pick<Task, "projectRef">[]) => rows.map((t) => projectIdOf(t.projectRef));
 
 export function identifierOf(t: Pick<Task, "projectRef" | "number">, keys: Map<string, string>): string | null {
   const pid = projectIdOf(t.projectRef);
@@ -153,7 +172,7 @@ export function identifierOf(t: Pick<Task, "projectRef" | "number">, keys: Map<s
 }
 
 export async function withIdentifiers(db: Db, rows: Task[]): Promise<WorkItem[]> {
-  const keys = await projectKeyMap(db);
+  const keys = await projectKeyMap(db, projectIdsOf(rows));
   return rows.map((t) => ({ ...t, identifier: identifierOf(t, keys) }));
 }
 

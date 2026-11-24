@@ -6,6 +6,12 @@ import { attentionItems } from "@/modules/today/schema";
 import { firstConferenceUrl } from "./meeting-url";
 import { syncTimeboxes } from "./timebox-sync";
 import { calendarEvents } from "./schema";
+import { upsertSyncedEvents } from "./upsert";
+
+const GOOGLE_FIELDS = [
+  "title", "notes", "location", "meetingUrl", "sourceUrl", "startAt", "endAt",
+  "allDay", "color", "calendarId", "transparent", "attendees",
+] as const;
 
 export const GOOGLE_KEYS = {
   clientId: "google_client_id",
@@ -272,6 +278,7 @@ export async function syncGoogle(
   const calendars = await listCalendars(headers);
   const seenAll = new Set<string>();
   let synced = 0;
+  let changed = 0;
   let failed = 0;
   const fetched: string[] = [];
 
@@ -298,6 +305,7 @@ export async function syncGoogle(
           nextPageToken?: string;
         };
 
+        const rows: (typeof calendarEvents.$inferInsert)[] = [];
         for (const ev of data.items ?? []) {
           if (ev.status === "cancelled") continue;
           const startRaw = ev.start?.dateTime ?? ev.start?.date;
@@ -337,14 +345,9 @@ export async function syncGoogle(
                 responseStatus: a.responseStatus,
               })),
           };
-          await db
-            .insert(calendarEvents)
-            .values({ ...fields, source: "google", icsUid: uid })
-            .onConflictDoUpdate({
-              target: calendarEvents.icsUid,
-              set: { ...fields, updatedAt: new Date() },
-            });
+          rows.push({ ...fields, source: "google", icsUid: uid });
         }
+        changed += await upsertSyncedEvents(rows, [...GOOGLE_FIELDS]);
         pageToken = data.nextPageToken;
       } while (pageToken);
     } catch (e) {
@@ -363,7 +366,7 @@ export async function syncGoogle(
   // is re-homed by the upsert above, not deleted and re-created.
   const all = [...seenAll];
   for (const calendarId of fetched) {
-    await db
+    const gone = await db
       .delete(calendarEvents)
       .where(
         and(
@@ -372,15 +375,19 @@ export async function syncGoogle(
           gte(calendarEvents.startAt, new Date()),
           notInArray(calendarEvents.icsUid, all),
         ),
-      );
+      )
+      .returning({ id: calendarEvents.id });
+    changed += gone.length;
   }
 
   if (seenAll.size > 0 && failed === 0) {
     // API mode supersedes ICS rows entirely.
-    await db.delete(calendarEvents).where(eq(calendarEvents.source, "ics"));
+    changed += (
+      await db.delete(calendarEvents).where(eq(calendarEvents.source, "ics")).returning({ id: calendarEvents.id })
+    ).length;
     // Future rows from calendars no longer visible in Google, and rows written
     // before events remembered their calendar (null calendar_id).
-    await db
+    const stale = await db
       .delete(calendarEvents)
       .where(
         and(
@@ -395,12 +402,15 @@ export async function syncGoogle(
           ),
           notInArray(calendarEvents.icsUid, all),
         ),
-      );
+      )
+      .returning({ id: calendarEvents.id });
+    changed += stale.length;
   }
 
   await setSetting(GOOGLE_SYNCED_AT, new Date().toISOString());
-  await sql.notify("calendar_changed", "google-synced");
-  log(`google sync: ${synced} events from ${calendars.length - failed}/${calendars.length} calendars`);
+  // Every open calendar/plan page re-renders on this, so only when something moved.
+  if (changed > 0) await sql.notify("calendar_changed", "google-synced");
+  log(`google sync: ${synced} events (${changed} changed) from ${calendars.length - failed}/${calendars.length} calendars`);
   return { synced };
 }
 

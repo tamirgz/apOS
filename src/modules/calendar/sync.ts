@@ -5,6 +5,7 @@ import { getSetting, SETTING_KEYS } from "@/core/app-settings";
 import type { ModuleJob } from "@/core/modules/types.server";
 import { firstConferenceUrl } from "./meeting-url";
 import { calendarEvents } from "./schema";
+import { upsertSyncedEvents } from "./upsert";
 
 const WINDOW_PAST_DAYS = 30;
 const WINDOW_FUTURE_DAYS = 365;
@@ -33,6 +34,7 @@ export async function syncIcs(): Promise<{ synced: number } | null> {
   const to = new Date(Date.now() + WINDOW_FUTURE_DAYS * 86_400_000);
 
   const seenUids: string[] = [];
+  const rows: (typeof calendarEvents.$inferInsert)[] = [];
   let synced = 0;
 
   const isAllDay = (ev: VEvent) =>
@@ -60,7 +62,7 @@ export async function syncIcs(): Promise<{ synced: number } | null> {
     );
   };
 
-  const upsert = async (
+  const upsert = (
     uid: string,
     ev: VEvent,
     startAt: Date,
@@ -77,13 +79,7 @@ export async function syncIcs(): Promise<{ synced: number } | null> {
       endAt,
       allDay: isAllDay(ev),
     };
-    await db
-      .insert(calendarEvents)
-      .values({ ...fields, source: "ics", icsUid: uid })
-      .onConflictDoUpdate({
-        target: calendarEvents.icsUid,
-        set: { ...fields, updatedAt: new Date() },
-      });
+    rows.push({ ...fields, source: "ics", icsUid: uid });
   };
 
   for (const item of Object.values(data)) {
@@ -95,7 +91,7 @@ export async function syncIcs(): Promise<{ synced: number } | null> {
 
     if (!ev.rrule) {
       if (start < from || start > to) continue;
-      await upsert(uid, ev, start, (ev.end as Date | undefined) ?? null);
+      upsert(uid, ev, start, (ev.end as Date | undefined) ?? null);
       continue;
     }
 
@@ -124,7 +120,7 @@ export async function syncIcs(): Promise<{ synced: number } | null> {
       const occStart = new Date(raw.getTime() + offsetDiff * 60_000);
       const key = Math.floor(occStart.getTime() / 60_000);
       if (exdates.has(key) || overrideKeys.has(key)) continue;
-      await upsert(
+      upsert(
         `${uid}:${occStart.toISOString()}`,
         ev,
         occStart,
@@ -137,7 +133,7 @@ export async function syncIcs(): Promise<{ synced: number } | null> {
       const ov = o as VEvent;
       const ovStart = ov.start as Date | undefined;
       if (!ovStart || ovStart < from || ovStart > recTo) continue;
-      await upsert(
+      upsert(
         `${uid}:override:${(ov.recurrenceid as Date).toISOString()}`,
         ov,
         ovStart,
@@ -146,11 +142,15 @@ export async function syncIcs(): Promise<{ synced: number } | null> {
     }
   }
 
+  let changed = await upsertSyncedEvents(rows, [
+    "title", "notes", "location", "meetingUrl", "startAt", "endAt", "allDay",
+  ]);
+
   // Remove ICS events (in the future window) that vanished from the feed.
   // Guard: an empty/failed feed must NOT wipe the calendar — without the UID
   // filter this delete would drop every future synced event.
   if (seenUids.length > 0) {
-    await db
+    const gone = await db
       .delete(calendarEvents)
       .where(
         and(
@@ -158,10 +158,12 @@ export async function syncIcs(): Promise<{ synced: number } | null> {
           gte(calendarEvents.startAt, new Date()),
           notInArray(calendarEvents.icsUid, seenUids),
         ),
-      );
+      )
+      .returning({ id: calendarEvents.id });
+    changed += gone.length;
   }
 
-  await sql.notify("calendar_changed", "synced");
+  if (changed > 0) await sql.notify("calendar_changed", "synced");
   return { synced };
 }
 

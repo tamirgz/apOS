@@ -59,8 +59,14 @@ const idleOpts =
 // Cache the connection across Next.js HMR reloads.
 const g = globalThis as unknown as { __aiosSql?: ReturnType<typeof postgres> };
 
+// Prepared statements are per-connection, so a transaction-mode pooler (which
+// hands each transaction a different backend) can't use them: AIOS_PG_PREPARE=0
+// turns them off for a process on that pooler (the MCP server — see apos-mcp.mts).
+const PREPARE = process.env.AIOS_PG_PREPARE !== "0";
+
 export const sql =
-  g.__aiosSql ?? postgres(url, { max: POOL_MAX, ssl: PG_SSL, ...idleOpts });
+  g.__aiosSql ??
+  postgres(url, { max: POOL_MAX, ssl: PG_SSL, prepare: PREPARE, ...idleOpts });
 if (process.env.NODE_ENV !== "production") g.__aiosSql = sql;
 
 export const db = drizzle(sql);

@@ -23,12 +23,15 @@ const UPSERTS = [
   // Gmail — subject + sender + snippet.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
+    select * from (
     select 'mail', id,
            coalesce(nullif(subject,''),'(no subject)'),
            left(coalesce(from_name, from_email, '') || ' — ' || coalesce(snippet,''), 500),
            '/m/gmail',
            md5(coalesce(subject,'') || '|' || coalesce(snippet,''))
       from gmail_messages
+    ) as x(kind, source_id, title, snippet, href, content_hash)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
@@ -39,12 +42,15 @@ const UPSERTS = [
   // Calendar events — title + when/where + notes.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
+    select * from (
     select 'event', id::text,
            coalesce(nullif(title,''),'(untitled event)'),
            left(to_char(start_at,'YYYY-MM-DD HH24:MI') || '  ' || coalesce(location,'') || '  ' || coalesce(notes,''), 500),
            '/m/calendar',
            md5(coalesce(title,'') || '|' || coalesce(notes,'') || '|' || coalesce(start_at::text,'') || '|' || coalesce(location,''))
       from calendar_events
+    ) as x(kind, source_id, title, snippet, href, content_hash)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
@@ -57,6 +63,7 @@ const UPSERTS = [
   // it; the displayed snippet keeps the original text.
   dsql`
     insert into search_index (kind, source_id, title, snippet, embed_text, href, content_hash)
+    select * from (
     select 'telegram', id::text,
            left(channel || ': ' || coalesce(text_en, text, ''), 80),
            left(coalesce(text,'') || '  ' || coalesce(linked_text,''), 500),
@@ -65,6 +72,8 @@ const UPSERTS = [
            md5(coalesce(text,'') || '|' || coalesce(linked_text,'') || '|' || coalesce(text_en,''))
       from telegram_posts
      where coalesce(text,'') <> ''
+    ) as x(kind, source_id, title, snippet, embed_text, href, content_hash)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, embed_text=excluded.embed_text, href=excluded.href,
       content_hash=excluded.content_hash,
@@ -75,12 +84,15 @@ const UPSERTS = [
   // External reports (Slack-ingested etc.).
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
+    select * from (
     select 'report', id::text,
            coalesce(nullif(title,''),'(report)'),
            left(coalesce(body,''), 500),
            '/m/agents',
            md5(coalesce(title,'') || '|' || coalesce(body,''))
       from external_reports
+    ) as x(kind, source_id, title, snippet, href, content_hash)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
@@ -91,12 +103,15 @@ const UPSERTS = [
   // People — name + role/notes + meeting count.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
+    select * from (
     select 'person', id::text,
            coalesce(nullif(name,''), email, '(person)'),
            left(coalesce(last_event_title,'') || '  ' || coalesce(notes,'') || '  (' || coalesce(meeting_count::text,'0') || ' meetings)', 400),
            '/m/people',
            md5(coalesce(name,'') || '|' || coalesce(notes,'') || '|' || coalesce(last_event_title,'') || '|' || coalesce(meeting_count::text,'0'))
       from people
+    ) as x(kind, source_id, title, snippet, href, content_hash)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
@@ -107,12 +122,15 @@ const UPSERTS = [
   // Inbox captures.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
+    select * from (
     select 'inbox', id::text,
            left(coalesce(input,'(inbox item)'), 80),
            left(coalesce(input,''), 400),
            '/m/inbox',
            md5(coalesce(input,''))
       from inbox_items
+    ) as x(kind, source_id, title, snippet, href, content_hash)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
@@ -123,6 +141,7 @@ const UPSERTS = [
   // Workbench results — the finished analysis IS knowledge worth finding later.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash, project_refs)
+    select * from (
     select 'workbench', t.id::text,
            coalesce(nullif(t.title,''),'(task)'),
            left(coalesce(a.result, t.summary, t.prompt), 1000),
@@ -136,6 +155,8 @@ const UPSERTS = [
          order by seq desc limit 1
       ) a on true
      where t.status in ('done','review','needs_input') and t.archived_at is null
+    ) as x(kind, source_id, title, snippet, href, content_hash, project_refs)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash, project_refs=excluded.project_refs,
@@ -146,6 +167,7 @@ const UPSERTS = [
   // Project features — user-authored specs, already tied to their project.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash, project_refs)
+    select * from (
     select 'feature', id::text,
            coalesce(nullif(name,''),'(feature)'),
            left(coalesce(description,''), 500),
@@ -153,6 +175,8 @@ const UPSERTS = [
            md5(coalesce(name,'') || '|' || coalesce(description,'') || '|' || project_id::text),
            jsonb_build_array('projects:' || project_id::text)
       from features
+    ) as x(kind, source_id, title, snippet, href, content_hash, project_refs)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash, project_refs=excluded.project_refs,
@@ -163,6 +187,7 @@ const UPSERTS = [
   // Ask answers.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash, project_refs)
+    select * from (
     select 'ask', id::text,
            coalesce(nullif(title,''), left(query, 80)),
            left(coalesce(answer,''), 1000),
@@ -170,6 +195,8 @@ const UPSERTS = [
            md5(coalesce(title,'') || '|' || coalesce(answer,'') || '|' || coalesce(project_refs::text,'[]')),
            project_refs
       from ask_history
+    ) as x(kind, source_id, title, snippet, href, content_hash, project_refs)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash, project_refs=excluded.project_refs,
@@ -182,12 +209,15 @@ const UPSERTS = [
   // set and the orphan delete follows it.
   dsql`
     insert into search_index (kind, source_id, title, snippet, href, content_hash)
+    select * from (
     select 'notification', id::text,
            coalesce(nullif(title,''),'(notification)'),
            left(coalesce(body,''), 500),
            coalesce(href, '/notifications'),
            md5(coalesce(title,'') || '|' || coalesce(body,''))
       from notifications
+    ) as x(kind, source_id, title, snippet, href, content_hash)
+    where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
     on conflict (kind, source_id) do update set
       title=excluded.title, snippet=excluded.snippet, href=excluded.href,
       content_hash=excluded.content_hash,
@@ -239,11 +269,14 @@ const INTERNAL_SOURCES: InternalSource[] = [
     pk: "id::text",
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'note', id::text, title, left(body, 160),
              title || E'\n' || body, '/m/notes/' || id::text,
              md5(title || E'\n' || body || '|' || coalesce(project_refs::text, '[]')),
              project_refs
         from notes where true ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='note' and source_id not in (select id::text from notes)`,
   },
@@ -252,11 +285,14 @@ const INTERNAL_SOURCES: InternalSource[] = [
     pk: "id::text",
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'task', id::text, title, left(coalesce(notes, ''), 160),
              title || E'\n' || coalesce(notes, ''), '/m/tasks/' || id::text,
              md5(title || '|' || coalesce(notes, '') || '|' || coalesce(project_ref, '')),
              ${REFS("project_ref")}
         from tasks where true ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='task' and source_id not in (select id::text from tasks)`,
   },
@@ -265,11 +301,14 @@ const INTERNAL_SOURCES: InternalSource[] = [
     pk: "id::text",
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'idea', id::text, title, left(coalesce(notes, ''), 160),
              title || E'\n' || coalesce(notes, ''), '/m/ideas/' || id::text,
              md5(title || '|' || coalesce(notes, '') || '|' || coalesce(project_ref, '')),
              ${REFS("project_ref")}
         from ideas where true ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='idea' and source_id not in (select id::text from ideas)`,
   },
@@ -279,6 +318,7 @@ const INTERNAL_SOURCES: InternalSource[] = [
     pk: "id::text",
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'knowledge', id::text, coalesce(nullif(title, ''), left(input, 80)),
              left(coalesce(insight->>'summary', note, input), 160),
              concat_ws(' · ', coalesce(nullif(title,''), left(input,80)), note,
@@ -289,6 +329,8 @@ const INTERNAL_SOURCES: InternalSource[] = [
              md5(coalesce(title,'') || '|' || coalesce(note,'') || '|' || coalesce(insight::text,'')),
              '[]'::jsonb
         from knowledge_items where status = 'ready' ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='knowledge' and source_id not in (select id::text from knowledge_items where status='ready')`,
   },
@@ -298,10 +340,13 @@ const INTERNAL_SOURCES: InternalSource[] = [
     pk: "path",
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'vault', path, title, left(excerpt, 160),
              title || E'\n' || excerpt, null,
              md5(title || E'\n' || excerpt), '[]'::jsonb
         from obsidian_notes where true ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='vault' and source_id not in (select path from obsidian_notes)`,
   },
@@ -316,10 +361,13 @@ const INTERNAL_SOURCES: InternalSource[] = [
     // trim() strips spaces but NOT newlines, so a "\n"-only page needs this.
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'notion', id, title, left(coalesce(content, ''), 160),
              title || E'\n' || coalesce(content, ''), null,
              md5(title || E'\n' || coalesce(content, '')), '[]'::jsonb
         from notion_pages where coalesce(content, '') ~ '[^[:space:]]' ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='notion' and source_id not in (select id from notion_pages where coalesce(content, '') ~ '[^[:space:]]')`,
   },
@@ -328,11 +376,14 @@ const INTERNAL_SOURCES: InternalSource[] = [
     pk: "id::text",
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'file', id::text, filename, left(coalesce(extracted_text, ''), 160),
              filename || E'\n' || coalesce(extracted_text, ''), null,
              md5(filename || E'\n' || coalesce(extracted_text, '')),
              jsonb_build_array('projects:' || project_id::text)
         from project_files where status = 'ready' ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='file' and source_id not in (select id::text from project_files where status='ready')`,
   },
@@ -346,6 +397,7 @@ const INTERNAL_SOURCES: InternalSource[] = [
     pk: "id::text",
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'project', p.id::text, p.name, left(coalesce(p.description, p.goal, ''), 160),
              concat_ws(' · ', p.name, p.goal, p.description, p.next_action,
                (select string_agg(t.title, ' · ') from tasks t where t.project_ref = 'projects:' || p.id::text),
@@ -356,6 +408,8 @@ const INTERNAL_SOURCES: InternalSource[] = [
                (select string_agg(n.title, ',') from notes n where n.project_refs @> jsonb_build_array('projects:' || p.id::text)))),
              '[]'::jsonb
         from projects p where true ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='project' and source_id not in (select id::text from projects)`,
   },
@@ -366,11 +420,14 @@ const INTERNAL_SOURCES: InternalSource[] = [
     pk: "id::text",
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'attention', id::text, title, left(coalesce(body, ''), 160),
              title, href,
              md5(title || '|' || coalesce(body, '')),
              ${REFS("project_ref")}
         from attention_items where status = 'open' ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='attention' and source_id not in (select id::text from attention_items where status='open')`,
   },
@@ -379,9 +436,12 @@ const INTERNAL_SOURCES: InternalSource[] = [
     pk: "id::text",
     upsert: (scope) => dsql`
       insert into search_index ${COLS}
+      select * from (
       select 'memory', id::text, left(text, 80), left(text, 200),
              text, null, md5(text), '[]'::jsonb
         from memory_entries where true ${scope}
+      ) as x${COLS}
+      where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
     orphan: dsql`delete from search_index where kind='memory' and source_id not in (select id::text from memory_entries)`,
   },

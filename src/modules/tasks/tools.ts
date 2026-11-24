@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, ilike, inArray, isNull, sql } from "drizzle-orm";
 import type { AiToolContext, AiToolDef } from "@/core/modules/types.server";
 import { isUuid, registerRefs, resolveRef } from "@/core/ai/refs";
 import { resolveProjectByName } from "@/modules/projects/subject";
@@ -15,11 +15,13 @@ import {
   deleteWorkItem,
   findByIdentifier,
   getWorkItem,
+  identifierOf,
   listRelations,
+  projectIdsOf,
+  projectKeyMap,
   releaseWorkItem,
   removeRelation,
   updateWorkItem,
-  withIdentifiers,
   type AcceptanceInput,
   type WorkItemPatch,
 } from "./core";
@@ -462,19 +464,21 @@ export const taskTools: AiToolDef[] = [
           ? sql`(${tasks.projectRef} is null or ${tasks.projectRef} in (select 'projects:' || id from projects where status = 'active'))`
           : undefined,
       ].filter((f) => f !== undefined);
+      // One round trip: the summary never shows notes (up to 14 KB an item, most
+      // of the bytes), and the module and cycle names come joined instead of
+      // reading both whole tables after.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped from the select on purpose
+      const { notes: _notes, ...lean } = getTableColumns(tasks);
       const rows = await ctx.db
-        .select()
+        .select({ ...lean, moduleName: features.name, cycleName: cycles.name })
         .from(tasks)
+        .leftJoin(features, sql`${tasks.featureRef} = 'features:' || ${features.id}`)
+        .leftJoin(cycles, eq(cycles.id, tasks.cycleId))
         .where(filters.length ? and(...filters) : undefined)
         .orderBy(...(input.completedSince ? [desc(tasks.completedAt)] : [priorityRank, asc(tasks.sortOrder)]))
         .limit(input.limit);
-      const items = await withIdentifiers(ctx.db, rows);
-      const [featureNames, cycleNames] = await Promise.all([
-        ctx.db.select({ id: features.id, name: features.name }).from(features),
-        ctx.db.select({ id: cycles.id, name: cycles.name }).from(cycles),
-      ]);
-      const fName = new Map(featureNames.map((f) => [`features:${f.id}`, f.name]));
-      const cName = new Map(cycleNames.map((c) => [c.id, c.name]));
+      const keys = await projectKeyMap(ctx.db, projectIdsOf(rows));
+      const items = rows.map((t) => ({ ...t, notes: null, identifier: identifierOf(t, keys) }));
       const [rels, inMilestones] = await Promise.all([
         input.relations ? blockingRelations(ctx.db, items.map((t) => t.id)) : null,
         input.withMilestones ? milestoneNames(ctx, items) : null,
@@ -485,8 +489,8 @@ export const taskTools: AiToolDef[] = [
         "t",
         items.map((t) => ({
           ...summary(t),
-          module: t.featureRef ? (fName.get(t.featureRef) ?? null) : null,
-          cycle: t.cycleId ? (cName.get(t.cycleId) ?? null) : null,
+          module: t.moduleName ?? null,
+          cycle: t.cycleName ?? null,
           ...(inMilestones ? { milestones: inMilestones.get(t.id) ?? [] } : {}),
           ...(rels ? rels.get(t.id) : {}),
         })),

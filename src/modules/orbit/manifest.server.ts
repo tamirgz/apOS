@@ -9,10 +9,11 @@ export const orbitServerManifest: ModuleServerManifest = {
   jobs: [
     {
       // Rebuild the semantic atlas (2D projection + qwen-named topic regions)
-      // when the corpus changes. Heavy + LLM-backed, so it lives here — never on
-      // the page render path.
+      // when the corpus changed, at most once a day (refreshAtlas decides).
+      // Heavy + LLM-backed, so it lives here — never on the page render path.
+      // Hourly is only the check; a run that finds nothing to do is one read.
       channel: "orbit.atlas",
-      schedule: "*/15 * * * *",
+      schedule: "23 * * * *",
       runOnBoot: true,
       handle: () => refreshAtlas(),
     },

@@ -2,7 +2,7 @@
 // LLM agent used to rewrite it: a week stale between runs, and it padded the
 // facts with guessed "main thrust" / "pushing X" lines that every other AI call
 // then repeated. Every fact here is a column or a count; nothing is inferred.
-import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/core/db/client";
 import { memoryBlocks } from "@/core/db/schema/memory";
 import type { ModuleJob } from "@/core/modules/types.server";
@@ -81,14 +81,14 @@ export async function refreshActiveProjects(db: Db = defaultDb): Promise<boolean
   const [block] = await db
     .select({ value: memoryBlocks.value, charLimit: memoryBlocks.charLimit, description: memoryBlocks.description })
     .from(memoryBlocks)
-    .where(eq(memoryBlocks.label, ACTIVE_PROJECTS_BLOCK));
+    .where(and(eq(memoryBlocks.label, ACTIVE_PROJECTS_BLOCK), isNull(memoryBlocks.scopeProjectId)));
   if (!block) return false; // ensureDefaultMemoryBlocks creates it
   const next = await buildActiveProjects(db, block.charLimit);
   if (next === block.value && block.description === DESCRIPTION) return false;
   await db
     .update(memoryBlocks)
     .set({ value: next, description: DESCRIPTION, updatedAt: new Date() })
-    .where(eq(memoryBlocks.label, ACTIVE_PROJECTS_BLOCK));
+    .where(and(eq(memoryBlocks.label, ACTIVE_PROJECTS_BLOCK), isNull(memoryBlocks.scopeProjectId)));
   return true;
 }
 

@@ -16,4 +16,8 @@ export const embeddingVector = customType<{ data: unknown }>({
   dataType() {
     return "vector";
   },
+  // pgvector reads "[1,2,3]"; a JS array would go over the wire as "1,2,3".
+  toDriver(value) {
+    return Array.isArray(value) ? `[${value.join(",")}]` : value;
+  },
 });

@@ -46,6 +46,10 @@ async function check(name: string, fn: () => Promise<void> | void) {
 }
 
 const DAY = 86_400_000;
+const MEMORY_MCP_TOOLS = [
+  "memory__list", "memory__get", "memory__put", "memory__search", "memory__delete",
+  "memory__blocks__list", "memory__blocks__get", "memory__blocks__put", "memory__blocks__delete",
+];
 const projectIds: string[] = [];
 const wbIds: string[] = [];
 
@@ -350,7 +354,8 @@ try {
       const names = listed.map((t) => t.name);
       assert.equal(listed.find((t) => t.name === "cycles__delete")?.annotations?.destructiveHint, true, "cycles.delete is marked destructive");
       for (const n of ["tasks__create", "tasks__relate", "cycles__create", "cycles__delete", "cycles__get", "modules__update", "projects__list", "decisions__record", "decisions__list", "decisions__delete", "docs__delete", "tasks__deleteComment"]) assert.ok(names.includes(n), `exposes ${n}`);
-      assert.ok(!names.includes("memory__update"), "only the work-tracker surface");
+      for (const n of MEMORY_MCP_TOOLS) assert.ok(names.includes(n), `exposes ${n}`);
+      assert.ok(!names.includes("memory__update") && !names.includes("memory__remember"), "the apOS-internal memory tools stay off MCP");
       const call = async (name: string, args: Record<string, unknown>) => {
         const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
         if (r.isError) throw new Error(`${name}: ${r.content[0].text}`);
@@ -586,6 +591,124 @@ try {
       assert.equal((await call("cycles__get", { cycle: "ZZ goal sprint 2", project: P })).goal ?? null, null, "an empty goal clears it");
     } finally {
       await client.close();
+    }
+  });
+  await check("apos MCP memory: scoped entries, stale-write refusal, merge guard, project blocks (AIOS-53)", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+    const { mkdtempSync, realpathSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    // Two ZZ projects whose repos are scratch folders; a client whose working
+    // folder is inside one is that project's session.
+    const dirA = realpathSync(mkdtempSync(join(tmpdir(), "zz-mem-a-")));
+    const dirB = realpathSync(mkdtempSync(join(tmpdir(), "zz-mem-b-")));
+    const [pa] = await db.insert(projects).values({ name: "ZZ Mem A", key: "ZZMA", repoUrl: dirA }).returning();
+    const [pb] = await db.insert(projects).values({ name: "ZZ Mem B", key: "ZZMB", repoUrl: dirB }).returning();
+    projectIds.push(pa.id, pb.id);
+    const open = async (cwd: string) => {
+      const c = new Client({ name: "zz-test", version: "0" });
+      await c.connect(new StdioClientTransport({ command: "scripts/apos-mcp.sh", env: { ...process.env, APOS_ACTOR: "zz-test", APOS_CALLER_CWD: join(cwd, "sub") } as Record<string, string>, stderr: "ignore" }));
+      return c;
+    };
+    const A = await open(dirA);
+    const B = await open(dirB);
+    try {
+      const raw = async (c: typeof A, name: string, args: Record<string, unknown>) => {
+        const r = (await c.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+        let body: unknown = r.content[0].text;
+        try { body = JSON.parse(r.content[0].text); } catch { /* plain error text */ }
+        return { isError: !!r.isError, body: body as Record<string, any>, text: r.content[0].text };
+      };
+      const ok = async (c: typeof A, name: string, args: Record<string, unknown>) => {
+        const r = await raw(c, name, args);
+        if (r.isError) throw new Error(`${name}: ${r.text}`);
+        return r.body;
+      };
+      const refused = async (c: typeof A, name: string, args: Record<string, unknown>, re: RegExp, why: string) => {
+        const r = await raw(c, name, args);
+        assert.ok(r.isError, `${why} — expected a refusal, got ${r.text.slice(0, 200)}`);
+        assert.match(r.text, re, why);
+        return r;
+      };
+      const names = (await A.listTools()).tools.map((t) => t.name);
+      for (const n of MEMORY_MCP_TOOLS) assert.ok(names.includes(n), `exposes ${n}`);
+
+      // ── 1. put / get / search / list, scoped; another project's recall misses it
+      const text = "ZZ the zz-mem release checklist runs the migration dry-run before tagging";
+      const put1 = await ok(A, "memory__put", { scope: "ZZMA", kind: "lesson", description: "ZZ dry-run the migration before tagging", text });
+      const id = put1.written.id as string;
+      assert.equal(put1.written.version, 1);
+      const got = await ok(A, "memory__get", { id });
+      assert.deepEqual([got.scope, got.kind, got.text, got.version, got.links], ["ZZMA", "lesson", text, 1, []]);
+      const found = await ok(A, "memory__search", { query: "dry-run the migration before tagging a release", scope: "ZZMA" });
+      const hit = found.hits.find((h: { id: string }) => h.id === id);
+      assert.ok(hit, "search finds it in its own scope");
+      assert.equal(typeof hit.distance, "number", "each hit carries its distance");
+      const listed = await ok(A, "memory__list", { scope: "ZZMA" });
+      assert.ok(listed.entries.some((e: { id: string; version: number; description: string }) => e.id === id && e.version === 1 && e.description), "list shows it with version and description");
+      const other = await ok(B, "memory__search", { query: "dry-run the migration before tagging a release", scope: "ZZMB" });
+      assert.ok(!other.hits.some((h: { id: string }) => h.id === id), "a recall scoped to another project misses it");
+      const otherText = await ok(B, "memory__search", { query: "zz-mem release checklist", scope: "ZZMB" });
+      assert.ok(!otherText.hits.some((h: { id: string }) => h.id === id), "the exact-text fallback misses it too");
+      assert.ok(!(await ok(B, "memory__list", { scope: "ZZMB" })).entries.some((e: { id: string }) => e.id === id));
+
+      // ── 2. two writers with the same expectedVersion: the second is refused
+      const w1 = await ok(A, "memory__put", { scope: "ZZMA", kind: "lesson", description: "ZZ dry-run first", text: `${text} (writer one)`, id, expectedVersion: 1 });
+      assert.equal(w1.written.version, 2);
+      await refused(B, "memory__put", { scope: "ZZMA", kind: "lesson", description: "ZZ dry-run first", text: `${text} (writer two)`, id, expectedVersion: 1 }, /version 2, not 1/, "a stale expectedVersion names the current version");
+      await refused(A, "memory__put", { scope: "ZZMA", kind: "lesson", description: "ZZ x", text: "ZZ no version given", id }, /expectedVersion/, "an update without expectedVersion is refused");
+      assert.equal((await ok(A, "memory__get", { id })).text, `${text} (writer one)`, "the refused write changed nothing");
+
+      // ── 3. a near-duplicate without force returns the near entry and writes nothing
+      const before = (await ok(A, "memory__list", { scope: "ZZMA", limit: 100 })).entries.length;
+      const dup = await ok(A, "memory__put", { scope: "ZZMA", kind: "lesson", description: "ZZ same thing again", text: `${text} (writer one)` });
+      assert.equal(dup.written, null, "nothing written");
+      assert.equal(dup.near.id, id, "the near entry comes back");
+      assert.ok(dup.near.distance < 0.12, "with its distance");
+      assert.equal((await ok(A, "memory__list", { scope: "ZZMA", limit: 100 })).entries.length, before, "no row added");
+      const forced = await ok(A, "memory__put", { scope: "ZZMA", kind: "feedback", description: "ZZ worded alike, a different rule", text: `${text} (writer one)`, force: true, links: [id] });
+      assert.ok(forced.written.id && forced.written.id !== id, "force: true writes a second entry");
+      assert.deepEqual((await ok(A, "memory__get", { id: forced.written.id })).links, [id], "links are entry ids");
+      await refused(A, "memory__put", { scope: "ZZMA", kind: "fact", description: "ZZ bad link", text: "ZZ link to nowhere", links: ["00000000-0000-0000-0000-000000000000"] }, /link/i, "a link to an unknown entry is refused");
+      await refused(A, "memory__put", { scope: "ZZMA", kind: "reference", description: "x".repeat(151), text: "ZZ long description" }, /150/, "a description over 150 characters is refused");
+      // A fake key assembled at run time, so no secret-shaped string sits in this file.
+      const fake = ["sk", "ant", "api03", "Zz9".repeat(30)].join("-");
+      await refused(A, "memory__put", { scope: "ZZMA", kind: "fact", description: "ZZ a key", text: `ZZ the key is ${fake}` }, /secret/i, "a put whose text matches the secret scanner is refused");
+      await refused(A, "memory__put", { scope: "ZZNOPE", kind: "fact", description: "ZZ", text: "ZZ unknown scope" }, /ZZNOPE/, "an unknown scope is named");
+
+      // soft delete: gone from list and search, kept for review
+      assert.equal((await ok(A, "memory__delete", { id: forced.written.id })).deleted.id, forced.written.id);
+      assert.ok(!(await ok(A, "memory__list", { scope: "ZZMA" })).entries.some((e: { id: string }) => e.id === forced.written.id), "a deleted entry leaves the list");
+      assert.equal((await ok(A, "memory__get", { id: forced.written.id })).deleted, true, "and is kept for review");
+
+      // ── 7. project blocks over MCP
+      const v1 = await ok(A, "memory__blocks__put", { label: "zz-core", scope: "ZZMA", description: "ZZ always-on rules", value: "ZZ rule one" });
+      assert.equal(v1.written.version, 1, "creates the block in its project");
+      await refused(A, "memory__blocks__put", { label: "zz-core", scope: "ZZMA", description: "ZZ again", value: "ZZ rule two" }, /exists/, "a second create of the same label is refused");
+      assert.equal((await ok(A, "memory__blocks__put", { label: "zz-core", scope: "ZZMA", description: "ZZ always-on rules", value: "ZZ rule two", expectedVersion: 1 })).written.version, 2);
+      await refused(A, "memory__blocks__put", { label: "zz-core", scope: "ZZMA", description: "ZZ", value: "ZZ rule three", expectedVersion: 1 }, /version 2, not 1/, "a stale update is refused");
+      await refused(A, "memory__blocks__put", { label: "zz-global", scope: "global", description: "ZZ", value: "ZZ" }, /global/i, "scope global is refused");
+      await refused(B, "memory__blocks__put", { label: "zz-intruder", scope: "ZZMA", description: "ZZ", value: "ZZ" }, /ZZMA/, "another project's session can't write ZZMA's blocks");
+      await refused(B, "memory__blocks__list", { scope: "ZZMA" }, /ZZMA/, "nor read them");
+      await refused(A, "memory__blocks__put", { label: "zz-core", scope: "ZZMA", description: "ZZ", value: "y".repeat(1201), expectedVersion: 2 }, /1,?200/, "a 1,201-character value is refused");
+      for (let i = 1; i <= 11; i++) await ok(A, "memory__blocks__put", { label: `zz-b${i}`, scope: "ZZMA", description: "ZZ filler", value: "ZZ" });
+      await refused(A, "memory__blocks__put", { label: "zz-b12", scope: "ZZMA", description: "ZZ thirteenth", value: "ZZ" }, /12/, "a 13th block is refused");
+      // per-scope total: 4 × 1,200 + 8 small ones fits; a 5th full block pushes past 6,000
+      await ok(A, "memory__blocks__put", { label: "zz-core", scope: "ZZMA", description: "ZZ always-on rules", value: "c".repeat(1200), expectedVersion: 2 });
+      for (const l of ["zz-b1", "zz-b2", "zz-b3"]) await ok(A, "memory__blocks__put", { label: l, scope: "ZZMA", description: "ZZ filler", value: "f".repeat(1200), expectedVersion: 1 });
+      await refused(A, "memory__blocks__put", { label: "zz-b4", scope: "ZZMA", description: "ZZ filler", value: "f".repeat(1200), expectedVersion: 1 }, /6,?000/, "the scope's 6,000-character total is enforced");
+      const blocks = (await ok(A, "memory__blocks__list", {})).blocks as { label: string; scope: string; version: number }[];
+      assert.ok(blocks.some((b) => b.label === "zz-core" && b.scope === "ZZMA") && blocks.some((b) => b.scope === "global"), "a session lists global blocks plus its own project's");
+      assert.ok(!(await ok(B, "memory__blocks__list", {})).blocks.some((b: { scope: string }) => b.scope === "ZZMA"), "another project's session doesn't see them");
+      assert.equal((await ok(A, "memory__blocks__get", { label: "zz-core", scope: "ZZMA" })).value, "c".repeat(1200));
+      await refused(A, "memory__blocks__delete", { label: "who_i_am", scope: "global" }, /global/i, "deleting a global block is refused");
+      assert.equal((await ok(A, "memory__blocks__delete", { label: "zz-b11", scope: "ZZMA" })).deleted.label, "zz-b11");
+      assert.ok(!(await ok(A, "memory__blocks__list", { scope: "ZZMA" })).blocks.some((b: { label: string }) => b.label === "zz-b11"), "a deleted block leaves the list");
+      assert.ok((await ok(A, "memory__blocks__put", { label: "zz-b11", scope: "ZZMA", description: "ZZ back", value: "ZZ" })).written.version > 1, "a deleted label can be created again, as a new version");
+    } finally {
+      await A.close();
+      await B.close();
     }
   });
   await check("apos CLI: comment, docs with conflicts, decisions — one line out, exit codes", async () => {

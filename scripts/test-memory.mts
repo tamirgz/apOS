@@ -117,6 +117,8 @@ async function scopeChecks() {
       rec("53/6: missing for another project", !forB.includes(projMarker));
       rec("53/6: globals unchanged beside a full project block", forA.includes(none.split("\nLong-tail memory:")[0]) && forA.length - none.length >= 1200, `${none.length} → ${forA.length}`);
       rec("53/6: project section is fenced as project memory", /PROJECT MEMORY/.test(forA) && !/PROJECT MEMORY/.test(none));
+      const fenceAt = forA.indexOf('<untrusted source="project memory">');
+      rec("53/6: project blocks sit inside an untrusted fence", fenceAt >= 0 && forA.indexOf(projMarker, fenceAt) > fenceAt && forA.indexOf("</untrusted>", fenceAt) > forA.indexOf(projMarker, fenceAt));
       // a Workbench attempt carries its task's project
       const { memoryProjectForTask } = await import("@/modules/workbench/memory-project");
       const [wb] = await db.insert(workbenchTasks).values({ title: "ZZ mem scope", prompt: "zz", taskType: "research", createdFrom: "zz-test", status: "done", projectRefs: [`projects:${pb.id}`] } as typeof workbenchTasks.$inferInsert).returning();

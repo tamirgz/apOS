@@ -575,6 +575,13 @@
       "when": 1793561122886,
       "tag": "0081_timebox_attention",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1795697223002,
+      "tag": "0082_memory_scope",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { desc, inArray, sql as dsql } from "drizzle-orm";
+import { and, desc, inArray, isNull, sql as dsql } from "drizzle-orm";
 import { db } from "@/core/db/client";
 import { memoryEntries } from "@/core/db/schema/memory";
 import { searchIndex } from "@/core/db/schema/search-index";
@@ -19,6 +19,8 @@ export async function MemoryPage() {
         createdAt: memoryEntries.createdAt,
       })
       .from(memoryEntries)
+      // Global, live entries: a project's own memory belongs to its sessions (AIOS-53).
+      .where(and(isNull(memoryEntries.scopeProjectId), isNull(memoryEntries.deletedAt)))
       .orderBy(desc(memoryEntries.createdAt))
       .limit(2000)
       .catch(() => []),

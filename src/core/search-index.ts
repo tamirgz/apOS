@@ -439,11 +439,14 @@ const INTERNAL_SOURCES: InternalSource[] = [
       select * from (
       select 'memory', id::text, left(text, 80), left(text, 200),
              text, null, md5(text), '[]'::jsonb
-        from memory_entries where true ${scope}
+        from memory_entries
+       -- Project-scoped and soft-deleted entries stay out of the shared index:
+       -- every global reader (recall, search, compaction) reads it (AIOS-53).
+       where scope_project_id is null and deleted_at is null ${scope}
       ) as x${COLS}
       where not exists (select 1 from search_index s where s.kind = x.kind and s.source_id = x.source_id and s.content_hash is not distinct from x.content_hash and s.href is not distinct from x.href)
       ${ON_CONFLICT}`,
-    orphan: dsql`delete from search_index where kind='memory' and source_id not in (select id::text from memory_entries)`,
+    orphan: dsql`delete from search_index where kind='memory' and source_id not in (select id::text from memory_entries where scope_project_id is null and deleted_at is null)`,
   },
 ];
 

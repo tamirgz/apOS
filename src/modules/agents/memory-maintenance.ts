@@ -21,6 +21,10 @@ export const memoryMaintenanceJobs: ModuleJob[] = [
     handle: async () => {
       await pruneMemoryEntries();
       await compactMemoryEntries();
+      // MCP memory history: 7 days in full, then each day's last (as docs).
+      const { thinMemoryHistory } = await import("@/core/ai/memory-tools");
+      const { db } = await import("@/core/db/client");
+      await thinMemoryHistory(db).catch(() => {});
       const stale = await checkMemoryFreshness();
       if (stale.length) {
         // System-health FYI about the memory subsystem itself — belongs in the

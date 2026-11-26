@@ -367,7 +367,7 @@ export const projectTools: AiToolDef[] = [
       // grounded in accumulated wisdom about it — not generic. Bounded, best-effort.
       let relevantMemory: { kind: string; text: string }[] = [];
       try {
-        const { recallSemantic } = await import("@/core/memory");
+        const { recallSemantic, fenceUntrusted } = await import("@/core/memory");
         const goal = (it.read as { goal?: string | null }).goal ?? "";
         // Close matches only: the nearest library item is returned at ANY
         // distance, so a project about "learning" pulled a bookmarked course
@@ -377,7 +377,8 @@ export const projectTools: AiToolDef[] = [
           limit: 3,
           maxDistance: 0.3,
         });
-        relevantMemory = hits.map((h) => ({ kind: h.kind, text: h.text }));
+        // recalled text is data, fenced as untrusted (AIOS-53 R7)
+        relevantMemory = hits.map((h) => ({ kind: h.kind, text: fenceUntrusted(`recalled ${h.kind}`, h.text) }));
       } catch {
         // best-effort — recall must never break iteration
       }

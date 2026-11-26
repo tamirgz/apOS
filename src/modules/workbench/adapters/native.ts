@@ -89,6 +89,9 @@ export const nativeAdapter: Adapter = {
     });
 
     const { renderMemoryContext } = await import("@/core/memory");
+    const { memoryProjectForAttempt } = await import("../memory-project");
+    // The task's project's blocks load with the global ones (AIOS-53 R9).
+    const memoryProjectId = await memoryProjectForAttempt(ctx.attemptId).catch(() => null);
     // Imported here, not at module scope: the tool registry pulls in every
     // module's server manifest — including this module's — so a static import
     // closes a cycle back to the engine. Lazily it resolves at call time,
@@ -111,7 +114,7 @@ export const nativeAdapter: Adapter = {
           "Prefer acting (creating the note, updating the item) over describing what could be done.",
           `Current date-time: ${new Date().toISOString()}`,
           "",
-          await renderMemoryContext(),
+          await renderMemoryContext({ projectId: memoryProjectId }),
         ].join("\n"),
         messages: [{ role: "user", content: ctx.prompt }],
         tools,

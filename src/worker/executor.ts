@@ -289,7 +289,7 @@ async function runClaimed(
       ...flowTools,
     ];
 
-    const { renderMemoryContext, recallSemantic, recallAgentLessons } =
+    const { renderMemoryContext, recallSemantic, recallAgentLessons, fenceUntrusted } =
       await import("@/core/memory");
     // Retrieval-augment the run across the WHOLE ecosystem — the agent's own
     // memory (lessons/decisions/facts) PLUS the user's knowledge base and notes,
@@ -311,7 +311,8 @@ async function runClaimed(
         recalled = [
           "",
           "RELEVANT CONTEXT (from your memory + the user's knowledge base/notes — apply lessons, reuse what's already known, don't repeat a past mistake or re-decide a settled question):",
-          ...hits.map((h) => `• [${h.kind}] ${h.text}`),
+          // recalled text is data, fenced as untrusted (AIOS-53 R7)
+          fenceUntrusted("recalled memory and notes", hits.map((h) => `• [${h.kind}] ${h.text}`).join("\n")),
         ].join("\n");
       }
     } catch {
@@ -328,7 +329,7 @@ async function runClaimed(
           ownLessons = [
             "",
             "YOUR OWN LESSONS FROM PAST RUNS (you wrote these — apply them; don't repeat a mistake you already learned from):",
-            ...lessons.map((l) => `• ${l}`),
+            fenceUntrusted("your past lessons", lessons.map((l) => `• ${l}`).join("\n")),
           ].join("\n");
         }
       }

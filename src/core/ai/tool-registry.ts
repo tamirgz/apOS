@@ -43,9 +43,10 @@ const CORE_TOOLS: AiToolDef[] = [
         .describe("What this block holds (only used when creating a new one)"),
     }),
     async execute(input, ctx) {
-      const { updateMemoryBlock, USER_OWNED_BLOCKS, CODE_BUILT_BLOCKS } = await import("@/core/memory");
-      // Same normalisation as updateMemoryBlock, so "current focus" can't slip past.
-      const slug = input.label.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+      const { updateMemoryBlock, blockSlug, USER_OWNED_BLOCKS, CODE_BUILT_BLOCKS } = await import("@/core/memory");
+      // Same normalisation as updateMemoryBlock, and "-" read as "_" for the
+      // guards, so neither "current focus" nor "current-focus" slips past.
+      const slug = blockSlug(input.label).replace(/-/g, "_");
       if (ctx?.agentName && USER_OWNED_BLOCKS.includes(slug)) {
         return { error: `Not recorded: "${input.label}" holds the user's own words and is written by the user, not by agents.` };
       }
@@ -90,8 +91,10 @@ const CORE_TOOLS: AiToolDef[] = [
       limit: z.number().int().min(1).max(20).default(6),
     }),
     async execute(input) {
-      const { recallEntries } = await import("@/core/memory");
-      return await recallEntries(input.query, input.limit);
+      const { recallEntries, fenceUntrusted } = await import("@/core/memory");
+      const hits = await recallEntries(input.query, input.limit);
+      // Recalled text is data: fenced so an entry can't pose as an instruction (AIOS-53 R7).
+      return hits.map((h) => ({ ...h, text: fenceUntrusted("memory entry", h.text) }));
     },
   },
   {
@@ -103,8 +106,9 @@ const CORE_TOOLS: AiToolDef[] = [
       limit: z.number().int().min(1).max(50).default(20),
     }),
     async execute(input) {
-      const { reviewEntries } = await import("@/core/memory");
-      return await reviewEntries(input.tier, input.limit);
+      const { reviewEntries, fenceUntrusted } = await import("@/core/memory");
+      const rows = await reviewEntries(input.tier, input.limit);
+      return rows.map((r) => ({ ...r, text: fenceUntrusted("memory entry", r.text) }));
     },
   },
   {
